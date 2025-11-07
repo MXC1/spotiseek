@@ -1,3 +1,8 @@
+import logging
+from logs_utils import setup_logging
+
+# Ensure logging is set up for both console and file per invocation
+setup_logging(log_name_prefix="slskd_downloader")
 from dotenv import load_dotenv
 import requests
 import time
@@ -15,45 +20,45 @@ TRACKS = [
 
 def create_search(search_text):
     search_id = str(uuid.uuid4())
-    print(f"[DEBUG] Creating search: id={search_id}, text='{search_text}, TOKEN={TOKEN}'")
+    logging.debug(f"Creating search: id={search_id}, text='{search_text}, TOKEN={TOKEN}'")
     try:
         resp = requests.post(
             f"{SLSKD_URL}/searches",
             json={"id": search_id, "searchText": search_text},
             headers={"X-API-Key": TOKEN}
         )
-        print(f"[DEBUG] Search POST status: {resp.status_code}")
-        print(f"[DEBUG] Search POST response: {resp.text}")
+        logging.debug(f"Search POST status: {resp.status_code}")
+        logging.debug(f"Search POST response: {resp.text}")
         resp.raise_for_status()
     except Exception as e:
-        print(f"[ERROR] Exception during search creation: {e}")
+        logging.error(f"Exception during search creation: {e}")
         raise
     return search_id
 
 def get_search_responses(search_id):
     # Poll for responses
     for i in range(100):
-        print(f"[DEBUG] Polling for search responses (attempt {i+1})...")
+        logging.debug(f"Polling for search responses (attempt {i+1})...")
         try:
             resp = requests.get(
                 f"{SLSKD_URL}/searches/{search_id}/responses",
                 headers={"X-API-Key": TOKEN}
             )
-            print(f"[DEBUG] Responses GET status: {resp.status_code}")
-            print(f"[DEBUG] Responses GET response: {resp.text}")
+            logging.debug(f"Responses GET status: {resp.status_code}")
+            logging.debug(f"Responses GET response: {resp.text}")
             resp.raise_for_status()
             data = resp.json()
             if data and isinstance(data, list) and len(data) > 0:
-                print(f"[DEBUG] Found {len(data)} responses.")
+                logging.debug(f"Found {len(data)} responses.")
                 return data
         except Exception as e:
-            print(f"[ERROR] Exception during response polling: {e}")
+            logging.error(f"Exception during response polling: {e}")
         time.sleep(2)
-    print(f"[DEBUG] No responses found after polling.")
+    logging.debug(f"No responses found after polling.")
     return []
 
 def enqueue_download(search_id, fileinfo, username):
-    print(f"[DEBUG] Enqueuing download for search_id={search_id}, username={username}, fileinfo={fileinfo}")
+    logging.debug(f"Enqueuing download for search_id={search_id}, username={username}, fileinfo={fileinfo}")
     try:
         url = f"{SLSKD_URL}/transfers/downloads/{username}"
         payload = [{**fileinfo, "username": username}]
@@ -62,23 +67,23 @@ def enqueue_download(search_id, fileinfo, username):
             json=payload,
             headers={"X-API-Key": TOKEN}
         )
-        print(f"[DEBUG] Download POST status: {resp.status_code}")
-        print(f"[DEBUG] Download POST response: {resp.text}")
+        logging.debug(f"Download POST status: {resp.status_code}")
+        logging.debug(f"Download POST response: {resp.text}")
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
-        print(f"[ERROR] Exception during download enqueue: {e}")
+        logging.error(f"Exception during download enqueue: {e}")
         raise
 
 def main():
     for artist, track in TRACKS:
         search_text = f"{artist} {track}"
-        print(f"Searching for: {search_text}")
+        logging.info(f"Searching for: {search_text}")
         try:
             search_id = create_search(search_text)
             responses = get_search_responses(search_id)
             if not responses:
-                print(f"No results for {artist} {track}")
+                logging.info(f"No results for {artist} {track}")
                 continue
             # Each response contains 'username', 'files', etc.
             # Find the first file in the first response
@@ -86,17 +91,17 @@ def main():
             files = first_response.get("files", [])
             username = first_response.get("username")
             if not files:
-                print(f"No files found for {artist} {track}")
+                logging.info(f"No files found for {artist} {track}")
                 continue
             first_file = files[0]
             filename = first_file.get("filename")
             size = first_file.get("size")
             fileinfo = {"filename": filename, "size": size}
-            print(f"Downloading: {filename} (size: {size}) from {username}")
+            logging.info(f"Downloading: {filename} (size: {size}) from {username}")
             download_resp = enqueue_download(search_id, fileinfo, username)
-            print(f"Download started: {download_resp}")
+            logging.info(f"Download started: {download_resp}")
         except Exception as e:
-            print(f"[ERROR] Exception in main loop for {artist} {track}: {e}")
+            logging.error(f"Exception in main loop for {artist} {track}: {e}")
         time.sleep(2)
 
 if __name__ == "__main__":

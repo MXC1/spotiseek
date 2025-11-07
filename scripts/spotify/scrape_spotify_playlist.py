@@ -6,14 +6,10 @@ import logging
 from dotenv import load_dotenv
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
+from logs_utils import setup_logging
 
 
-logging.basicConfig(
-	level=logging.INFO,
-	format='%(asctime)s [%(levelname)s] %(message)s',
-	datefmt='%Y-%m-%d %H:%M:%S'
-)
-
+setup_logging(log_name_prefix="scrape_spotify_playlist")
 load_dotenv()
 
 def clean_name(s):

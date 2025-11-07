@@ -1,10 +1,12 @@
+import logging
 
 import sqlite3
 from typing import Optional, List, Tuple
 import os
-import logging
+from logs_utils import setup_logging
 
-logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+# Ensure logging is set up for both console and file per invocation
+setup_logging(log_name_prefix="database_management")
 DB_PATH = os.path.join(os.path.dirname(__file__), 'tracks.db')
 
 

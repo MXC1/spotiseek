@@ -1,8 +1,10 @@
+import logging
 import os
 import sqlite3
-import logging
+from logs_utils import setup_logging
 
-logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+# Ensure logging is set up for both console and file per invocation
+setup_logging(log_name_prefix="clear_database")
 DB_PATH = os.path.join(os.path.dirname(__file__), 'tracks.db')
 
 def clear_database():
