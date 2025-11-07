@@ -3,11 +3,15 @@ import logging
 from logs_utils import setup_logging
 from spotify.scrape_spotify_playlist import get_tracks_from_playlist
 from soulseek.slskd_downloader import download_track
+from database.database_management import TrackDB
 
 setup_logging(log_name_prefix="workflow")
 
 # Path to the playlists CSV file
 PLAYLISTS_CSV = "../playlists.csv"
+
+# Initialize the database
+track_db = TrackDB()
 
 def read_playlists(csv_path):
     """Read playlist URLs from a CSV file."""
@@ -33,15 +37,20 @@ def main():
             logging.error(f"Failed to get tracks for playlist {playlist_url}: {e}")
             continue
 
-        # Download the tracks
+        # Add tracks to the database and download them
         for track in tracks:
             try:
-                artist, track_name = track.rsplit(" ", 1)
-                download_track(artist, track_name)
+                spotify_id, artist, track_name = track
+                track_db.add_track(spotify_id=spotify_id, track_name=track_name, artist=artist)
+                download_track(artist, track_name, spotify_id)
             except Exception as e:
-                logging.error(f"Failed to download track '{track}': {e}")
+                logging.error(f"Failed to download track '{track_name}': {e}")
+                track_db.update_track_status(spotify_id, "failed")
 
     logging.info("Workflow completed.")
+
+    # Close the database connection
+    track_db.close()
 
 if __name__ == "__main__":
     main()

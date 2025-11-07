@@ -5,12 +5,16 @@ import requests
 import time
 import uuid
 import os
+from database.database_management import TrackDB
 
 setup_logging(log_name_prefix="slskd_downloader")
 load_dotenv()
 
 SLSKD_URL = "http://localhost:5030/api/v0"
 TOKEN = os.getenv("TOKEN")
+
+# Initialize the database
+track_db = TrackDB()
 
 def create_search(search_text):
     """Create a search on the Soulseek server."""
@@ -71,15 +75,17 @@ def enqueue_download(search_id, fileinfo, username):
         logging.error(f"Exception during download enqueue: {e}")
         raise
 
-def download_track(artist, track):
+def download_track(artist, track, spotify_id):
     """Search for and download a specific track."""
     search_text = f"{artist} {track}"
     logging.info(f"Searching for: {search_text}")
+    track_db.update_track_status(spotify_id, "searching")
     try:
         search_id = create_search(search_text)
         responses = get_search_responses(search_id)
         if not responses:
             logging.info(f"No results for {artist} {track}")
+            track_db.update_track_status(spotify_id, "Failed")
             return
         # Each response contains 'username', 'files', etc.
         # Find the first file in the first response
@@ -88,6 +94,7 @@ def download_track(artist, track):
         username = first_response.get("username")
         if not files:
             logging.info(f"No files found for {artist} {track}")
+            track_db.update_track_status(spotify_id, "failed")
             return
         first_file = files[0]
         filename = first_file.get("filename")
@@ -96,12 +103,18 @@ def download_track(artist, track):
         logging.info(f"Downloading: {filename}")
         download_resp = enqueue_download(search_id, fileinfo, username)
         logging.debug(f"Download started: {download_resp}")
+        track_db.update_track_status(spotify_id, "downloading", file_path=filename)
     except Exception as e:
         logging.error(f"Exception while downloading track '{artist} {track}': {e}")
+        track_db.update_track_status(spotify_id, "failed")
 
 if __name__ == "__main__":
     # Example usage
-    for artist, track in [
-        ("MASTER BOOT RECORD", "Skynet")
+    for id, artist, track in [
+        ("5ms8IkagrFWObtzSOahVrx", "MASTER BOOT RECORD", "Skynet")
     ]:
-        download_track(artist, track)
+        track_id = track_db.add_track(spotify_id=id, track_name=track, artist=artist)
+        download_track(artist, track, track_id)
+
+    # Close the database connection
+    track_db.close()

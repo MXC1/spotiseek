@@ -21,8 +21,7 @@ class TrackDB:
         cursor = self.conn.cursor()
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS tracks (
-            id INTEGER PRIMARY KEY,
-            spotify_id TEXT UNIQUE,
+            spotify_id TEXT PRIMARY KEY,
             track_name TEXT,
             artist TEXT,
             download_status TEXT,
@@ -37,22 +36,21 @@ class TrackDB:
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS playlist_tracks (
             playlist_id INTEGER,
-            track_id INTEGER,
+            spotify_id TEXT,
             FOREIGN KEY (playlist_id) REFERENCES playlists(id),
-            FOREIGN KEY (track_id) REFERENCES tracks(id),
-            PRIMARY KEY (playlist_id, track_id)
+            FOREIGN KEY (spotify_id) REFERENCES tracks(spotify_id),
+            PRIMARY KEY (playlist_id, spotify_id)
         )''')
         self.conn.commit()
 
-    def add_track(self, spotify_id: str, track_name: str, artist: str, download_status: str = 'pending', file_path: Optional[str] = None) -> int:
+    def add_track(self, spotify_id: str, track_name: str, artist: str, download_status: str = 'pending', file_path: Optional[str] = None):
         logging.info(f"Adding track: spotify_id={spotify_id}, track_name={track_name}, artist={artist}, status={download_status}")
         cursor = self.conn.cursor()
         cursor.execute('''
-        INSERT INTO tracks (spotify_id, track_name, artist, download_status, file_path)
+        INSERT OR IGNORE INTO tracks (spotify_id, track_name, artist, download_status, file_path)
         VALUES (?, ?, ?, ?, ?)
         ''', (spotify_id, track_name, artist, download_status, file_path))
         self.conn.commit()
-        return cursor.lastrowid
 
     def add_playlist(self, playlist_name: str) -> int:
         logging.info(f"Adding playlist: {playlist_name}")
@@ -63,25 +61,25 @@ class TrackDB:
         self.conn.commit()
         return cursor.lastrowid
 
-    def link_track_to_playlist(self, track_id: int, playlist_id: int):
-        logging.info(f"Linking track {track_id} to playlist {playlist_id}")
+    def link_track_to_playlist(self, spotify_id: int, playlist_id: int):
+        logging.info(f"Linking track {spotify_id} to playlist {playlist_id}")
         cursor = self.conn.cursor()
         cursor.execute('''
-        INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id) VALUES (?, ?)
-        ''', (playlist_id, track_id))
+        INSERT OR IGNORE INTO playlist_tracks (playlist_id, spotify_id) VALUES (?, ?)
+        ''', (playlist_id, spotify_id))
         self.conn.commit()
 
-    def update_track_status(self, track_id: int, status: str, file_path: Optional[str] = None):
-        logging.info(f"Updating track {track_id} status to {status}, file_path={file_path}")
+    def update_track_status(self, spotify_id: str, status: str, file_path: Optional[str] = None):
+        logging.info(f"Updating track {spotify_id} status to {status}, file_path={file_path}")
         cursor = self.conn.cursor()
         if file_path:
             cursor.execute('''
-            UPDATE tracks SET download_status = ?, file_path = ? WHERE id = ?
-            ''', (status, file_path, track_id))
+            UPDATE tracks SET download_status = ?, file_path = ? WHERE spotify_id = ?
+            ''', (status, file_path, spotify_id))
         else:
             cursor.execute('''
-            UPDATE tracks SET download_status = ? WHERE id = ?
-            ''', (status, track_id))
+            UPDATE tracks SET download_status = ? WHERE spotify_id = ?
+            ''', (status, spotify_id))
         self.conn.commit()
 
     def get_tracks_by_status(self, status: str) -> List[Tuple]:

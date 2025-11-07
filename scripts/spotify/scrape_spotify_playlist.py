@@ -18,7 +18,7 @@ def clean_name(s):
     return s
 
 def get_tracks_from_playlist(playlist_url):
-    """Fetch and clean track names from a Spotify playlist URL."""
+    """Fetch and clean track names and Spotify IDs from a Spotify playlist URL."""
     client_id = os.getenv("SPOTIFY_CLIENT_ID")
     client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
 
@@ -64,9 +64,10 @@ def get_tracks_from_playlist(playlist_url):
         if not track:
             logging.warning(f"Track {idx} is missing track data. Skipping.")
             continue
+        spotify_id = track.get('id')
         artists = ' '.join([clean_name(artist['name']) for artist in track['artists']])
         name = clean_name(track['name'])
-        cleaned_tracks.append(f"{artists} {name}")
+        cleaned_tracks.append((spotify_id, artists, name))
 
     return cleaned_tracks
 
