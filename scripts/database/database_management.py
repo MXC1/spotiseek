@@ -1,4 +1,5 @@
 import logging
+import threading
 
 import sqlite3
 from typing import Optional, List, Tuple
@@ -11,7 +12,20 @@ DB_PATH = os.path.join(os.path.dirname(__file__), 'tracks.db')
 
 
 class TrackDB:
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls, *args, **kwargs):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(TrackDB, cls).__new__(cls)
+                cls._instance._initialized = False
+        return cls._instance
+
     def __init__(self, db_path: str = DB_PATH):
+        if self._initialized:
+            return
+        self._initialized = True
         logging.info(f"Connecting to database at {db_path}")
         self.conn = sqlite3.connect(db_path)
         self._create_tables()

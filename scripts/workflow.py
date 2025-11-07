@@ -1,11 +1,13 @@
+# Ensure logging is initialized before importing other modules
+from logs_utils import setup_logging
+setup_logging(log_name_prefix="workflow")
+
+# Import other modules after logging is set up
 import csv
 import logging
-from logs_utils import setup_logging
 from spotify.scrape_spotify_playlist import get_tracks_from_playlist
 from soulseek.slskd_downloader import download_track, query_download_status
 from database.database_management import TrackDB
-
-setup_logging(log_name_prefix="workflow")
 
 # Path to the playlists CSV file
 PLAYLISTS_CSV = "../playlists.csv"
