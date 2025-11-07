@@ -93,6 +93,12 @@ def enqueue_download(search_id, fileinfo, username, spotify_id):
 
 def download_track(artist, track, spotify_id):
     """Search for and download a specific track."""
+    # Check the current status of the track
+    current_status = track_db.get_track_status(spotify_id)
+    if current_status in ["completed", "queued", "downloading", "requested", "inprogress"]:
+        logging.info(f"Skipping download for {artist} - {track} as its status is '{current_status}'.")
+        return
+
     search_text = f"{artist} {track}"
     logging.info(f"Searching for: {search_text}")
     track_db.update_track_status(spotify_id, "searching")

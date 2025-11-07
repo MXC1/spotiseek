@@ -67,6 +67,9 @@ def main():
                         track_db.update_track_status(spotify_id, "failed")
                     elif state == "Queued, Remotely":
                         track_db.update_track_status(spotify_id, "queued")
+                    elif state == "inprogress":
+                        track_db.update_track_status(spotify_id, "in_progress")
+                    
                     else:
                         track_db.update_track_status(spotify_id, state.lower())
 

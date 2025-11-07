@@ -129,6 +129,17 @@ class TrackDB:
         result = cursor.fetchone()
         return result[0] if result else None
 
+    def get_track_status(self, spotify_id: str) -> Optional[str]:
+        """Retrieve the download status of a track by its Spotify ID."""
+        logging.debug(f"Querying track status for spotify_id={spotify_id}")
+        cursor = self.conn.cursor()
+        cursor.execute('''
+        SELECT download_status FROM tracks WHERE spotify_id = ?
+        ''', (spotify_id,))
+        result = cursor.fetchone()
+        logging.info(f"Track status for spotify_id={spotify_id} is {result[0] if result else 'None'}")
+        return result[0] if result else None
+
     def close(self):
         logging.info("Closing database connection.")
         self.conn.close()
