@@ -56,8 +56,8 @@ def get_search_responses(search_id):
     logging.debug(f"No responses found after polling.")
     return []
 
-def enqueue_download(search_id, fileinfo, username):
-    """Enqueue a file for download on the Soulseek server."""
+def enqueue_download(search_id, fileinfo, username, spotify_id):
+    """Enqueue a file for download on the Soulseek server and store the mapping."""
     logging.debug(f"Enqueuing download for search_id={search_id}, username={username}, fileinfo={fileinfo}")
     try:
         url = f"{SLSKD_URL}/transfers/downloads/{username}"
@@ -70,7 +70,23 @@ def enqueue_download(search_id, fileinfo, username):
         logging.debug(f"Download POST status: {resp.status_code}")
         logging.debug(f"Download POST response: {resp.text}")
         resp.raise_for_status()
-        return resp.json()
+        download_response = resp.json()
+
+        # Validate the response structure
+        enqueued = download_response.get("enqueued", [])
+        if not enqueued:
+            logging.error("No downloads were enqueued. Response: %s", download_response)
+            return download_response
+
+        # Extract the slskd UUID from the first enqueued item
+        slskd_uuid = enqueued[0].get("id")
+        if not slskd_uuid:
+            logging.error("No slskd UUID found in the enqueued response. Response: %s", enqueued[0])
+            return download_response
+
+        logging.info(f"Enqueued download with slskd_uuid={slskd_uuid} for spotify_id={spotify_id}")
+        track_db.add_slskd_mapping(slskd_uuid, spotify_id)
+        return download_response
     except Exception as e:
         logging.error(f"Exception during download enqueue: {e}")
         raise
@@ -85,7 +101,7 @@ def download_track(artist, track, spotify_id):
         responses = get_search_responses(search_id)
         if not responses:
             logging.info(f"No results for {artist} {track}")
-            track_db.update_track_status(spotify_id, "Failed")
+            track_db.update_track_status(spotify_id, "not_found")
             return
         # Each response contains 'username', 'files', etc.
         # Find the first file in the first response
@@ -101,12 +117,27 @@ def download_track(artist, track, spotify_id):
         size = first_file.get("size")
         fileinfo = {"filename": filename, "size": size}
         logging.info(f"Downloading: {filename}")
-        download_resp = enqueue_download(search_id, fileinfo, username)
+        download_resp = enqueue_download(search_id, fileinfo, username, spotify_id)
         logging.debug(f"Download started: {download_resp}")
         track_db.update_track_status(spotify_id, "downloading", file_path=filename)
     except Exception as e:
         logging.error(f"Exception while downloading track '{artist} {track}': {e}")
         track_db.update_track_status(spotify_id, "failed")
+
+def query_download_status():
+    """Query the download status for all transfers."""
+    logging.info("Querying download status for all transfers...")
+    try:
+        resp = requests.get(
+            f"{SLSKD_URL}/transfers/downloads",
+            headers={"X-API-Key": TOKEN}
+        )
+        logging.debug(f"Download status response: {resp.text}")
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        logging.error(f"Error querying download status: {e}")
+        return []
 
 if __name__ == "__main__":
     # Example usage

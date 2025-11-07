@@ -2,7 +2,7 @@ import csv
 import logging
 from logs_utils import setup_logging
 from spotify.scrape_spotify_playlist import get_tracks_from_playlist
-from soulseek.slskd_downloader import download_track
+from soulseek.slskd_downloader import download_track, query_download_status
 from database.database_management import TrackDB
 
 setup_logging(log_name_prefix="workflow")
@@ -46,6 +46,27 @@ def main():
             except Exception as e:
                 logging.error(f"Failed to download track '{track_name}': {e}")
                 track_db.update_track_status(spotify_id, "failed")
+
+        # Check download statuses after processing all tracks
+        logging.info("Checking download statuses...")
+        download_statuses = query_download_status()
+        for status in download_statuses:
+            for directory in status.get("directories", []):
+                for file in directory.get("files", []):
+                    slskd_uuid = file.get("id")
+                    spotify_id = track_db.get_spotify_id_by_slskd_uuid(slskd_uuid)
+                    if not spotify_id:
+                        logging.warning(f"No Spotify ID found for slskd_uuid={slskd_uuid}")
+                        continue
+                    state = file.get("state")
+                    if state == "Completed, Succeeded":
+                        track_db.update_track_status(spotify_id, "completed")
+                    elif state == "Completed, Errored":
+                        track_db.update_track_status(spotify_id, "failed")
+                    elif state == "Queued, Remotely":
+                        track_db.update_track_status(spotify_id, "queued")
+                    else:
+                        track_db.update_track_status(spotify_id, state.lower())
 
     logging.info("Workflow completed.")
 

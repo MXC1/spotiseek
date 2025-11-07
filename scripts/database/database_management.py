@@ -41,6 +41,12 @@ class TrackDB:
             FOREIGN KEY (spotify_id) REFERENCES tracks(spotify_id),
             PRIMARY KEY (playlist_id, spotify_id)
         )''')
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS slskd_mapping (
+            slskd_uuid TEXT PRIMARY KEY,
+            spotify_id TEXT,
+            FOREIGN KEY (spotify_id) REFERENCES tracks(spotify_id)
+        )''')
         self.conn.commit()
 
     def add_track(self, spotify_id: str, track_name: str, artist: str, download_status: str = 'pending', file_path: Optional[str] = None):
@@ -89,6 +95,25 @@ class TrackDB:
         SELECT * FROM tracks WHERE download_status = ?
         ''', (status,))
         return cursor.fetchall()
+
+    def add_slskd_mapping(self, slskd_uuid: str, spotify_id: str):
+        """Add a mapping between slskd UUID and Spotify ID."""
+        logging.info(f"Adding slskd mapping: slskd_uuid={slskd_uuid}, spotify_id={spotify_id}")
+        cursor = self.conn.cursor()
+        cursor.execute('''
+        INSERT OR IGNORE INTO slskd_mapping (slskd_uuid, spotify_id) VALUES (?, ?)
+        ''', (slskd_uuid, spotify_id))
+        self.conn.commit()
+
+    def get_spotify_id_by_slskd_uuid(self, slskd_uuid: str) -> Optional[str]:
+        """Retrieve the Spotify ID for a given slskd UUID."""
+        logging.info(f"Querying Spotify ID for slskd_uuid={slskd_uuid}")
+        cursor = self.conn.cursor()
+        cursor.execute('''
+        SELECT spotify_id FROM slskd_mapping WHERE slskd_uuid = ?
+        ''', (slskd_uuid,))
+        result = cursor.fetchone()
+        return result[0] if result else None
 
     def close(self):
         logging.info("Closing database connection.")
