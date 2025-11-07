@@ -16,6 +16,14 @@ logging.basicConfig(
 
 load_dotenv()
 
+def clean_name(s):
+    # Remove commas and dashes, and extra spaces
+    s = s.replace(',', '')
+    s = s.replace(' - ', ' ')
+    s = s.replace('&', '')
+    s = ' '.join(s.split())
+    return s
+
 def main():
 	import argparse
 
@@ -61,14 +69,6 @@ def main():
 		except Exception as e:
 			logging.warning(f"Failed to fetch next page of tracks: {e}")
 			break
-
-
-	def clean_name(s):
-		# Remove commas and dashes, and extra spaces
-		s = s.replace(',', '')
-		s = s.replace('-', '')
-		s = ' '.join(s.split())
-		return s
 
 	logging.info(f"Found {len(tracks)} tracks. Printing cleaned track list:")
 	for idx, item in enumerate(tracks, 1):
