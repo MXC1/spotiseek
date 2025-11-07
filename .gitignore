@@ -50,4 +50,5 @@ web/.env
 *.swo
 *~
 
+playlists.csv
 .cache

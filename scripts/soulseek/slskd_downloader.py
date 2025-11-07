@@ -1,26 +1,21 @@
 import logging
 from logs_utils import setup_logging
-
-# Ensure logging is set up for both console and file per invocation
-setup_logging(log_name_prefix="slskd_downloader")
 from dotenv import load_dotenv
 import requests
 import time
 import uuid
 import os
 
-SLSKD_URL = "http://localhost:5030/api/v0"
+setup_logging(log_name_prefix="slskd_downloader")
 load_dotenv()
+
+SLSKD_URL = "http://localhost:5030/api/v0"
 TOKEN = os.getenv("TOKEN")
 
-# List of (artist, track) pairs to search and download
-TRACKS = [
-    ("MASTER BOOT RECORD", "Skynet")
-]
-
 def create_search(search_text):
+    """Create a search on the Soulseek server."""
     search_id = str(uuid.uuid4())
-    logging.debug(f"Creating search: id={search_id}, text='{search_text}, TOKEN={TOKEN}'")
+    logging.debug(f"Creating search: id={search_id}, text='{search_text}', TOKEN={TOKEN}")
     try:
         resp = requests.post(
             f"{SLSKD_URL}/searches",
@@ -36,7 +31,7 @@ def create_search(search_text):
     return search_id
 
 def get_search_responses(search_id):
-    # Poll for responses
+    """Poll for search responses from the Soulseek server."""
     for i in range(100):
         logging.debug(f"Polling for search responses (attempt {i+1})...")
         try:
@@ -58,6 +53,7 @@ def get_search_responses(search_id):
     return []
 
 def enqueue_download(search_id, fileinfo, username):
+    """Enqueue a file for download on the Soulseek server."""
     logging.debug(f"Enqueuing download for search_id={search_id}, username={username}, fileinfo={fileinfo}")
     try:
         url = f"{SLSKD_URL}/transfers/downloads/{username}"
@@ -75,34 +71,37 @@ def enqueue_download(search_id, fileinfo, username):
         logging.error(f"Exception during download enqueue: {e}")
         raise
 
-def main():
-    for artist, track in TRACKS:
-        search_text = f"{artist} {track}"
-        logging.info(f"Searching for: {search_text}")
-        try:
-            search_id = create_search(search_text)
-            responses = get_search_responses(search_id)
-            if not responses:
-                logging.info(f"No results for {artist} {track}")
-                continue
-            # Each response contains 'username', 'files', etc.
-            # Find the first file in the first response
-            first_response = responses[0]
-            files = first_response.get("files", [])
-            username = first_response.get("username")
-            if not files:
-                logging.info(f"No files found for {artist} {track}")
-                continue
-            first_file = files[0]
-            filename = first_file.get("filename")
-            size = first_file.get("size")
-            fileinfo = {"filename": filename, "size": size}
-            logging.info(f"Downloading: {filename} (size: {size}) from {username}")
-            download_resp = enqueue_download(search_id, fileinfo, username)
-            logging.info(f"Download started: {download_resp}")
-        except Exception as e:
-            logging.error(f"Exception in main loop for {artist} {track}: {e}")
-        time.sleep(2)
+def download_track(artist, track):
+    """Search for and download a specific track."""
+    search_text = f"{artist} {track}"
+    logging.info(f"Searching for: {search_text}")
+    try:
+        search_id = create_search(search_text)
+        responses = get_search_responses(search_id)
+        if not responses:
+            logging.info(f"No results for {artist} {track}")
+            return
+        # Each response contains 'username', 'files', etc.
+        # Find the first file in the first response
+        first_response = responses[0]
+        files = first_response.get("files", [])
+        username = first_response.get("username")
+        if not files:
+            logging.info(f"No files found for {artist} {track}")
+            return
+        first_file = files[0]
+        filename = first_file.get("filename")
+        size = first_file.get("size")
+        fileinfo = {"filename": filename, "size": size}
+        logging.info(f"Downloading: {filename}")
+        download_resp = enqueue_download(search_id, fileinfo, username)
+        logging.debug(f"Download started: {download_resp}")
+    except Exception as e:
+        logging.error(f"Exception while downloading track '{artist} {track}': {e}")
 
 if __name__ == "__main__":
-    main()
+    # Example usage
+    for artist, track in [
+        ("MASTER BOOT RECORD", "Skynet")
+    ]:
+        download_track(artist, track)
