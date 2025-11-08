@@ -16,7 +16,7 @@ track_id = db.add_track(
 db.link_track_to_playlist(track_id, playlist_id)
 
 # Update track status
-db.update_track_status(track_id, "downloaded", file_path="C:/Music/Test Song.mp3")
+db.update_track_status(track_id, "downloaded", slskd_file_name="C:/Music/Test Song.mp3")
 
 # Query tracks by status
 downloaded_tracks = db.get_tracks_by_status("downloaded")

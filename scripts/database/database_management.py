@@ -39,7 +39,7 @@ class TrackDB:
             track_name TEXT,
             artist TEXT,
             download_status TEXT,
-            file_path TEXT,
+            slskd_file_name TEXT,
             added_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )''')
         cursor.execute('''
@@ -63,13 +63,13 @@ class TrackDB:
         )''')
         self.conn.commit()
 
-    def add_track(self, spotify_id: str, track_name: str, artist: str, download_status: str = 'pending', file_path: Optional[str] = None):
+    def add_track(self, spotify_id: str, track_name: str, artist: str, download_status: str = 'pending', slskd_file_name: Optional[str] = None):
         logging.info(f"Adding track: spotify_id={spotify_id}, track_name={track_name}, artist={artist}, status={download_status}")
         cursor = self.conn.cursor()
         cursor.execute('''
-        INSERT OR IGNORE INTO tracks (spotify_id, track_name, artist, download_status, file_path)
+        INSERT OR IGNORE INTO tracks (spotify_id, track_name, artist, download_status, slskd_file_name)
         VALUES (?, ?, ?, ?, ?)
-        ''', (spotify_id, track_name, artist, download_status, file_path))
+        ''', (spotify_id, track_name, artist, download_status, slskd_file_name))
         self.conn.commit()
 
     def add_playlist(self, playlist_name: str) -> int:
@@ -89,13 +89,13 @@ class TrackDB:
         ''', (playlist_id, spotify_id))
         self.conn.commit()
 
-    def update_track_status(self, spotify_id: str, status: str, file_path: Optional[str] = None):
-        logging.info(f"Updating track {spotify_id} status to {status}, file_path={file_path}")
+    def update_track_status(self, spotify_id: str, status: str, slskd_file_name: Optional[str] = None):
+        logging.info(f"Updating track {spotify_id} status to {status}, slskd_file_name={slskd_file_name}")
         cursor = self.conn.cursor()
-        if file_path:
+        if slskd_file_name:
             cursor.execute('''
-            UPDATE tracks SET download_status = ?, file_path = ? WHERE spotify_id = ?
-            ''', (status, file_path, spotify_id))
+            UPDATE tracks SET download_status = ?, slskd_file_name = ? WHERE spotify_id = ?
+            ''', (status, slskd_file_name, spotify_id))
         else:
             cursor.execute('''
             UPDATE tracks SET download_status = ? WHERE spotify_id = ?

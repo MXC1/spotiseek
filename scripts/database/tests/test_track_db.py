@@ -45,9 +45,9 @@ class TestTrackDB(unittest.TestCase):
         self.assertEqual(result[0], playlist_id)
         self.assertEqual(result[1], track_id)
 
-    def test_update_track_status_and_file_path(self):
+    def test_update_track_status_and_slskd_file_name(self):
         spotify_id = self.db.add_track('spotify789', 'Song3', 'Artist3')
-        self.db.update_track_status(spotify_id, 'downloaded', file_path='/tmp/song3.mp3')
+        self.db.update_track_status(spotify_id, 'downloaded', slskd_file_name='/tmp/song3.mp3')
         tracks = self.db.get_tracks_by_status('downloaded')
         self.assertEqual(len(tracks), 1)
         self.assertEqual(tracks[0][0], spotify_id)
