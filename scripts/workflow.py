@@ -1,19 +1,38 @@
 # Ensure logging is initialized before importing other modules
+
+from dotenv import load_dotenv
 from logs_utils import setup_logging
+import os
+
+# Always load .env from project root
+dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+load_dotenv(dotenv_path)
+
 setup_logging(log_name_prefix="workflow")
 
+
+# Import other modules after logging is set up
 import argparse
 from database.database_management import TrackDB
 track_db = TrackDB()
-
-# Import other modules after logging is set up
 import csv
 import logging
 from spotify.scrape_spotify_playlist import get_tracks_from_playlist
 from soulseek.slskd_downloader import download_track, query_download_status
+import os
 
 # Path to the playlists CSV file
-PLAYLISTS_CSV = "../playlists.csv"
+PLAYLISTS_CSV = f"../playlists/{os.getenv('APP_ENV')}_playlists.csv"
+
+
+# Ensure the environment variable is logged for clarity
+ENV = os.getenv("APP_ENV")
+
+# Ensure APP_ENV is set, otherwise raise an exception
+if not ENV:
+    raise EnvironmentError("APP_ENV environment variable is not set. Workflow execution is disabled.")
+
+logging.info(f"Running in {ENV} environment")
 
 def read_playlists(csv_path):
     """Read playlist URLs from a CSV file."""
@@ -59,7 +78,7 @@ def update_download_statuses():
                 state = file.get("state")
                 if state == "Completed, Succeeded":
                     track_db.update_track_status(spotify_id, "completed")
-                elif state == "Completed, Errored":
+                elif state in ("Completed, Errored", "Completed, TimedOut", "Completed, Cancelled"):
                     track_db.update_track_status(spotify_id, "failed")
                 elif state == "Queued, Remotely":
                     track_db.update_track_status(spotify_id, "queued")

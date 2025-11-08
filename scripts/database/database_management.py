@@ -1,30 +1,22 @@
 import logging
 import threading
-
+import os
 import sqlite3
 from typing import Optional, List, Tuple
-import os
+
 from logs_utils import setup_logging
 
 # Ensure logging is set up for both console and file per invocation
 setup_logging(log_name_prefix="database_management")
-DB_PATH = os.path.join(os.path.dirname(__file__), 'tracks.db')
+ENV = os.getenv("APP_ENV")
 
+# Ensure APP_ENV is set, otherwise raise an exception
+if not ENV:
+    raise EnvironmentError("APP_ENV environment variable is not set. Database interaction is disabled.")
+
+DB_PATH = os.path.join(os.path.dirname(__file__), f'database_{ENV}.db')
 
 class TrackDB:
-    def clear_database(self):
-        """Delete the database file if it exists."""
-        logging.info(f"Attempting to delete database file at {self.conn.database if hasattr(self.conn, 'database') else DB_PATH}")
-        db_path = self.conn.database if hasattr(self.conn, 'database') else DB_PATH
-        self.close()
-        if os.path.exists(db_path):
-            os.remove(db_path)
-            logging.info('Database file deleted.')
-        else:
-            logging.warning('Database file does not exist.')
-        # Reconnect to the database after clearing
-        self.conn = sqlite3.connect(db_path)
-        self._create_tables()
     _instance = None
     _lock = threading.Lock()
 
@@ -40,6 +32,31 @@ class TrackDB:
             return
         self._initialized = True
         logging.info(f"Connecting to database at {db_path}")
+        self.conn = sqlite3.connect(db_path)
+        self._create_tables()
+
+    def clear_database(self):
+        """Delete the database file if it exists. Guard against running in production. Require user confirmation."""
+        # Prompt for confirmation
+        if ENV == "prod":
+            try:
+                confirm = input(f"APP_ENV is: {ENV}. \nAre you sure you want to delete the database? This action cannot be undone. Type 'yes' to continue: ")
+            except EOFError:
+                logging.error("No input available for confirmation prompt. Aborting clear_database().")
+                raise RuntimeError("No input available for confirmation prompt. Aborting clear_database().")
+            if confirm.strip().lower() != 'yes':
+                logging.info("clear_database() aborted by user.")
+                return
+
+        logging.info(f"Attempting to delete database file at {self.conn.database if hasattr(self.conn, 'database') else DB_PATH}")
+        db_path = self.conn.database if hasattr(self.conn, 'database') else DB_PATH
+        self.close()
+        if os.path.exists(db_path):
+            os.remove(db_path)
+            logging.info('Database file deleted.')
+        else:
+            logging.warning('Database file does not exist.')
+        # Reconnect to the database after clearing
         self.conn = sqlite3.connect(db_path)
         self._create_tables()
 

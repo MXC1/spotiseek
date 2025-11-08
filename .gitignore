@@ -14,8 +14,8 @@ env.bak/
 venv.bak/
 
 # SQLite database
-database/tracks.db
-scripts/database/tracks.db
+database/database*.db
+scripts/database/database*.db
 
 # VS Code
 .vscode/
@@ -50,5 +50,5 @@ web/.env
 *.swo
 *~
 
-playlists.csv
+playlists
 .cache
