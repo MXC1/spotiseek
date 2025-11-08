@@ -233,9 +233,10 @@ def download_track(artist: str, track: str, spotify_id: str) -> None:
         download_resp = enqueue_download(search_id, fileinfo, username, spotify_id)
         logging.debug(f"Download initiated: {download_resp}")
         
-        # Store only the basename to avoid path issues
+        # Store only the basename 
         basename = os.path.basename(filename) if filename else filename
-        track_db.update_track_status(spotify_id, "downloading", slskd_file_name=basename)
+        track_db.update_track_status(spotify_id, "downloading")
+        track_db.update_slskd_file_name(spotify_id, basename)
         
     except Exception as e:
         logging.error(f"Failed to download track '{artist} - {track}': {e}")

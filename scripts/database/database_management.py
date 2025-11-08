@@ -252,33 +252,45 @@ class TrackDB:
     def update_track_status(
         self,
         spotify_id: str,
-        status: str,
-        slskd_file_name: Optional[str] = None
+        status: str
     ) -> None:
         """
-        Update the download status and optionally the filename for a track.
+        Update the download status for a track.
         
         Args:
             spotify_id: Spotify track identifier
             status: New download status (e.g., "pending", "downloading", "completed", "failed")
-            slskd_file_name: Optional Soulseek filename to update
         """
         logging.info(
-            f"Updating track {spotify_id} status to {status}, slskd_file_name={slskd_file_name}"
+            f"Updating track {spotify_id} status to {status}"
         )
         cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE tracks SET download_status = ? WHERE spotify_id = ?",
+            (status, spotify_id)
+        )
+        self.conn.commit()
+
+    def update_slskd_file_name(
+        self,
+        spotify_id: str,
+        slskd_file_name: str
+    ) -> None:
+        """
+        Update the Soulseek file name for a track.
         
-        if slskd_file_name:
-            cursor.execute(
-                "UPDATE tracks SET download_status = ?, slskd_file_name = ? WHERE spotify_id = ?",
-                (status, slskd_file_name, spotify_id)
-            )
-        else:
-            cursor.execute(
-                "UPDATE tracks SET download_status = ? WHERE spotify_id = ?",
-                (status, spotify_id)
-            )
-        
+        Args:
+            spotify_id: Spotify track identifier
+            slskd_file_name: Soulseek filename to update
+        """
+        logging.info(
+            f"Updating Soulseek file name for track {spotify_id} to {slskd_file_name}"
+        )
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE tracks SET slskd_file_name = ? WHERE spotify_id = ?",
+            (slskd_file_name, spotify_id)
+        )
         self.conn.commit()
 
     def get_tracks_by_status(self, status: str) -> List[Tuple]:
