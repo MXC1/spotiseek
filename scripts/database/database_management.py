@@ -12,6 +12,19 @@ DB_PATH = os.path.join(os.path.dirname(__file__), 'tracks.db')
 
 
 class TrackDB:
+    def clear_database(self):
+        """Delete the database file if it exists."""
+        logging.info(f"Attempting to delete database file at {self.conn.database if hasattr(self.conn, 'database') else DB_PATH}")
+        db_path = self.conn.database if hasattr(self.conn, 'database') else DB_PATH
+        self.close()
+        if os.path.exists(db_path):
+            os.remove(db_path)
+            logging.info('Database file deleted.')
+        else:
+            logging.warning('Database file does not exist.')
+        # Reconnect to the database after clearing
+        self.conn = sqlite3.connect(db_path)
+        self._create_tables()
     _instance = None
     _lock = threading.Lock()
 

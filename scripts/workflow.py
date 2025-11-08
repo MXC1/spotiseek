@@ -1,6 +1,8 @@
 # Ensure logging is initialized before importing other modules
 from logs_utils import setup_logging
 setup_logging(log_name_prefix="workflow")
+
+import argparse
 from database.database_management import TrackDB
 track_db = TrackDB()
 
@@ -66,7 +68,15 @@ def update_download_statuses():
                 else:
                     track_db.update_track_status(spotify_id, state.lower())
 
-def main():
+
+def main(reset_db=False):
+    global track_db
+    if reset_db:
+        logging.info("--reset flag detected. Clearing database before starting workflow.")
+        track_db.clear_database()
+        # Re-initialize the TrackDB instance after clearing
+        track_db = TrackDB()
+
     logging.info("Starting workflow...")
 
     # Read playlists from the CSV file
@@ -83,4 +93,7 @@ def main():
     track_db.close()
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Spotify/Soulseek Workflow")
+    parser.add_argument('--reset', action='store_true', help='Clear the database before running the workflow')
+    args = parser.parse_args()
+    main(reset_db=args.reset)
