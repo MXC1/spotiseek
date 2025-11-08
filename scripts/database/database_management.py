@@ -70,6 +70,7 @@ class TrackDB:
             artist TEXT,
             download_status TEXT,
             slskd_file_name TEXT,
+            local_file_path TEXT,
             added_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )''')
         cursor.execute('''
@@ -169,6 +170,15 @@ class TrackDB:
         result = cursor.fetchone()
         logging.info(f"Track status for spotify_id={spotify_id} is {result[0] if result else 'None'}")
         return result[0] if result else None
+    
+    def update_local_file_path(self, spotify_id: str, local_file_path: str):
+        """Update the local_file_path for a track by its Spotify ID."""
+        logging.info(f"Updating local_file_path for {spotify_id} to {local_file_path}")
+        cursor = self.conn.cursor()
+        cursor.execute('''
+        UPDATE tracks SET local_file_path = ? WHERE spotify_id = ?
+        ''', (local_file_path, spotify_id))
+        self.conn.commit()
 
     def close(self):
         logging.info("Closing database connection.")

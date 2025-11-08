@@ -67,6 +67,7 @@ def process_track(track):
 def update_download_statuses():
     logging.info("Checking download statuses...")
     download_statuses = query_download_status()
+    downloads_root = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'slskd_docker_data', 'downloads'))
     for status in download_statuses:
         for directory in status.get("directories", []):
             for file in directory.get("files", []):
@@ -77,6 +78,14 @@ def update_download_statuses():
                     continue
                 state = file.get("state")
                 if state == "Completed, Succeeded":
+                    filename_rel = file.get("filename")
+                    if filename_rel:
+                        folder, file_name = os.path.split(filename_rel)
+                        last_subfolder = os.path.basename(folder) if folder else None
+                        logging.debug(f"file: {file} last_subfolder: {last_subfolder}, file_name: {file_name}")
+                        if last_subfolder and file_name:
+                            local_file_path = os.path.join(downloads_root, last_subfolder, file_name)
+                            track_db.update_local_file_path(spotify_id, local_file_path)
                     track_db.update_track_status(spotify_id, "completed")
                 elif state in ("Completed, Errored", "Completed, TimedOut", "Completed, Cancelled"):
                     track_db.update_track_status(spotify_id, "failed")
