@@ -1,49 +1,80 @@
-# import standard libraries
+"""
+Logging utility module for centralized logging configuration.
+
+This module provides a single function to configure logging for the application,
+ensuring consistent logging behavior across all modules with both console and file output.
+"""
+
 import logging
 import os
 from datetime import datetime
+from typing import Optional
 
+# Module-level flag to ensure logging is initialized only once
 _LOGGING_INITIALIZED = False
 
-def setup_logging(logs_dir=None, log_level=logging.INFO, log_name_prefix="run"):
-	"""
-	Sets up logging to both console and a unique file per invocation.
-	Log files are stored in scripts/logs by default.
-	This function is idempotent: calling it multiple times has no effect after the first call.
-	"""
-	global _LOGGING_INITIALIZED
-	if _LOGGING_INITIALIZED:
-		return
+# Default log format templates
+CONSOLE_FORMAT = "[%(levelname)s] %(message)s"
+FILE_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
-	if logs_dir is None:
-		logs_dir = os.path.join(os.path.dirname(__file__), "_logs")
-	os.makedirs(logs_dir, exist_ok=True)
 
-	timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-	log_filename = f"{log_name_prefix}_{timestamp}.log"
-	log_path = os.path.join(logs_dir, log_filename)
-
-	# Root logger
-	logger = logging.getLogger()
-	logger.setLevel(log_level)
-
-	# Remove any existing handlers (avoid duplicate logs)
-	for handler in logger.handlers[:]:
-		logger.removeHandler(handler)
-
-	# Console handler
-	ch = logging.StreamHandler()
-	ch.setLevel(log_level)
-	ch_formatter = logging.Formatter('[%(levelname)s] %(message)s')
-	ch.setFormatter(ch_formatter)
-	logger.addHandler(ch)
-
-	# File handler
-	fh = logging.FileHandler(log_path, encoding="utf-8")
-	fh.setLevel(log_level)
-	fh_formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
-	fh.setFormatter(fh_formatter)
-	logger.addHandler(fh)
-
-	logger.info(f"Logging initialized. Log file: {log_path}")
-	_LOGGING_INITIALIZED = True
+def setup_logging(
+    logs_dir: Optional[str] = None,
+    log_level: int = logging.INFO,
+    log_name_prefix: str = "run"
+) -> None:
+    """
+    Configure logging to output to both console and a timestamped log file.
+    
+    This function is idempotent - calling it multiple times has no effect after
+    the first successful initialization. Log files are stored with a unique
+    timestamp to prevent overwriting previous logs.
+    
+    Args:
+        logs_dir: Directory path for log files. Defaults to '_logs' subdirectory
+                 relative to this module's location.
+        log_level: Logging level (e.g., logging.INFO, logging.DEBUG).
+        log_name_prefix: Prefix for log filename. Full name will be
+                        '{prefix}_{timestamp}.log'.
+    
+    Example:
+        >>> setup_logging(log_name_prefix="workflow", log_level=logging.DEBUG)
+        # Creates: _logs/workflow_20250108_143025_123456.log
+    """
+    global _LOGGING_INITIALIZED
+    
+    if _LOGGING_INITIALIZED:
+        return
+    
+    # Determine log directory
+    if logs_dir is None:
+        logs_dir = os.path.join(os.path.dirname(__file__), "_logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    
+    # Generate unique log filename with microsecond precision
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    log_filename = f"{log_name_prefix}_{timestamp}.log"
+    log_path = os.path.join(logs_dir, log_filename)
+    
+    # Configure root logger
+    logger = logging.getLogger()
+    logger.setLevel(log_level)
+    
+    # Clear any existing handlers to avoid duplicate logs
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+    
+    # Add console handler with simple formatting
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(logging.Formatter(CONSOLE_FORMAT))
+    logger.addHandler(console_handler)
+    
+    # Add file handler with detailed formatting
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setLevel(log_level)
+    file_handler.setFormatter(logging.Formatter(FILE_FORMAT))
+    logger.addHandler(file_handler)
+    
+    logger.info(f"Logging initialized. Log file: {log_path}")
+    _LOGGING_INITIALIZED = True

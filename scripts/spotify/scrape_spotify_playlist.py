@@ -1,86 +1,165 @@
-import os
+"""
+Spotify playlist scraper module.
+
+This module provides functionality to extract track information from Spotify
+playlists using the Spotify Web API. It handles authentication, pagination,
+and name normalization for downstream processing.
+"""
+
+import argparse
 import logging
-from dotenv import load_dotenv
+import os
+import re
+from typing import List, Tuple
+
 import spotipy
+from dotenv import load_dotenv
 from spotipy.oauth2 import SpotifyClientCredentials
+
 from logs_utils import setup_logging
 
-
+# Initialize logging and environment
 setup_logging(log_name_prefix="scrape_spotify_playlist")
 load_dotenv()
 
-def clean_name(s):
-    """Clean track or artist names by removing unwanted characters."""
-    s = s.replace(',', '')
-    s = s.replace(' - ', ' ')
-    s = s.replace('&', '')
-    s = ' '.join(s.split())
-    return s
 
-def get_tracks_from_playlist(playlist_url):
-    """Fetch and clean track names and Spotify IDs from a Spotify playlist URL."""
+def clean_name(name: str) -> str:
+    """
+    Normalize track and artist names for search consistency.
+    
+    Removes common punctuation and extra whitespace that may interfere
+    with Soulseek searches.
+    
+    Args:
+        name: Original track or artist name
+    
+    Returns:
+        Cleaned name with normalized spacing and removed punctuation
+    
+    Example:
+        >>> clean_name("DC Breaks, InsideInfo - Remix")
+        "DC Breaks InsideInfo Remix"
+    """
+    # Remove problematic punctuation
+    name = name.replace(",", "")
+    name = name.replace(" - ", " ")
+    name = name.replace("&", "")
+    
+    # Normalize whitespace
+    name = " ".join(name.split())
+    
+    return name
+
+def get_tracks_from_playlist(playlist_url: str) -> List[Tuple[str, str, str]]:
+    """
+    Extract track information from a Spotify playlist.
+    
+    This function authenticates with the Spotify API, extracts the playlist ID
+    from the URL, fetches all tracks (handling pagination), and returns cleaned
+    track metadata.
+    
+    Args:
+        playlist_url: Full Spotify playlist URL 
+                     (e.g., "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M")
+    
+    Returns:
+        List of tuples containing (spotify_id, artists, track_name) for each track.
+        Artist names are concatenated with spaces, and names are cleaned for consistency.
+    
+    Raises:
+        ValueError: If API credentials are missing or playlist URL is invalid
+        spotipy.SpotifyException: If API requests fail
+    
+    Example:
+        >>> tracks = get_tracks_from_playlist("https://open.spotify.com/playlist/...")
+        >>> print(tracks[0])
+        ("5ms8IkagrFWObtzSOahVrx", "MASTER BOOT RECORD", "Skynet")
+    """
+    # Validate API credentials
     client_id = os.getenv("SPOTIFY_CLIENT_ID")
     client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
 
     if not client_id or not client_secret:
         logging.error("Spotify API credentials are not set.")
-        raise ValueError("Missing Spotify API credentials.")
+        raise ValueError("Missing Spotify API credentials (SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET).")
 
+    # Authenticate with Spotify API
     logging.info("Authenticating with Spotify API...")
     try:
-        sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id=client_id, client_secret=client_secret))
+        auth_manager = SpotifyClientCredentials(
+            client_id=client_id,
+            client_secret=client_secret
+        )
+        sp = spotipy.Spotify(auth_manager=auth_manager)
     except Exception as e:
         logging.error(f"Failed to authenticate with Spotify: {e}")
         raise
 
     # Extract playlist ID from URL
-    import re
-    match = re.search(r'playlist/([a-zA-Z0-9]+)', playlist_url)
+    match = re.search(r"playlist/([a-zA-Z0-9]+)", playlist_url)
     if not match:
-        logging.error("Invalid playlist URL.")
-        raise ValueError("Invalid playlist URL.")
+        logging.error("Invalid playlist URL format.")
+        raise ValueError("Invalid playlist URL. Expected format: https://open.spotify.com/playlist/...")
+    
     playlist_id = match.group(1)
-
     logging.info(f"Fetching tracks for playlist ID: {playlist_id}")
+
+    # Fetch all tracks with pagination
     try:
         results = sp.playlist_tracks(playlist_id)
     except Exception as e:
         logging.error(f"Failed to fetch playlist tracks: {e}")
         raise
 
-    tracks = results['items']
-    while results['next']:
+    tracks = results["items"]
+    
+    # Handle pagination for large playlists
+    while results["next"]:
         try:
             results = sp.next(results)
-            tracks.extend(results['items'])
+            tracks.extend(results["items"])
         except Exception as e:
             logging.warning(f"Failed to fetch next page of tracks: {e}")
             break
 
-    logging.info(f"Found {len(tracks)} tracks.")
+    logging.info(f"Found {len(tracks)} total tracks in playlist.")
+
+    # Process and clean track data
     cleaned_tracks = []
     for idx, item in enumerate(tracks, 1):
-        track = item['track']
+        track = item.get("track")
+        
         if not track:
             logging.warning(f"Track {idx} is missing track data. Skipping.")
             continue
-        spotify_id = track.get('id')
-        artists = ' '.join([clean_name(artist['name']) for artist in track['artists']])
-        name = clean_name(track['name'])
-        cleaned_tracks.append((spotify_id, artists, name))
+        
+        spotify_id = track.get("id")
+        if not spotify_id:
+            logging.warning(f"Track {idx} is missing Spotify ID. Skipping.")
+            continue
+        
+        # Concatenate and clean artist names
+        artists = " ".join([clean_name(artist["name"]) for artist in track.get("artists", [])])
+        track_name = clean_name(track.get("name", ""))
+        
+        cleaned_tracks.append((spotify_id, artists, track_name))
 
     return cleaned_tracks
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Get tracks from a Spotify playlist URL.")
-    parser.add_argument("playlist_url", help="Spotify playlist URL")
+    parser = argparse.ArgumentParser(
+        description="Extract track information from a Spotify playlist URL."
+    )
+    parser.add_argument(
+        "playlist_url",
+        help="Spotify playlist URL (e.g., https://open.spotify.com/playlist/...)"
+    )
     args = parser.parse_args()
 
     try:
         tracks = get_tracks_from_playlist(args.playlist_url)
-        for track in tracks:
-            print(track)
+        for spotify_id, artists, track_name in tracks:
+            print(f"{spotify_id}\t{artists}\t{track_name}")
     except Exception as e:
         logging.error(f"Error: {e}")
+        exit(1)
