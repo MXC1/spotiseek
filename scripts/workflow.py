@@ -63,13 +63,16 @@ def read_playlists(csv_path: str) -> List[str]:
 def process_playlist(playlist_url: str) -> None:
     """
     Process a single playlist: fetch tracks and initiate downloads.
-    
+
     Args:
         playlist_url: Spotify playlist URL
     """
     logging.info(f"Processing playlist: {playlist_url}")
-    
+
     try:
+        # Add playlist to database and get its ID
+        playlist_id = track_db.add_playlist(playlist_url)
+
         tracks = get_tracks_from_playlist(playlist_url)
         logging.info(f"Found {len(tracks)} tracks in playlist.")
     except Exception as e:
@@ -79,6 +82,12 @@ def process_playlist(playlist_url: str) -> None:
     # Process each track individually
     for track in tracks:
         process_track(track)
+
+        # Link track to playlist in the database
+        try:
+            track_db.link_track_to_playlist(track[0], playlist_url)  # Pass the playlist URL instead of the ID
+        except Exception as e:
+            logging.error(f"Failed to link track {track[0]} to playlist {playlist_url}: {e}")
 
 
 def process_track(track: Tuple[str, str, str]) -> None:

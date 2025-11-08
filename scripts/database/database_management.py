@@ -146,19 +146,18 @@ class TrackDB:
         # Playlists table: stores playlist information
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS playlists (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                playlist_name TEXT NOT NULL
+                playlist_url TEXT PRIMARY KEY NOT NULL
             )
         """)
         
         # Junction table: many-to-many relationship between playlists and tracks
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS playlist_tracks (
-                playlist_id INTEGER,
+                playlist_url TEXT,
                 spotify_id TEXT,
-                FOREIGN KEY (playlist_id) REFERENCES playlists(id),
+                FOREIGN KEY (playlist_url) REFERENCES playlists(playlist_url),
                 FOREIGN KEY (spotify_id) REFERENCES tracks(spotify_id),
-                PRIMARY KEY (playlist_id, spotify_id)
+                PRIMARY KEY (playlist_url, spotify_id)
             )
         """)
         
@@ -210,42 +209,55 @@ class TrackDB:
         )
         self.conn.commit()
 
-    def add_playlist(self, playlist_name: str) -> int:
+    def add_playlist(self, playlist_url: str) -> int:
         """
-        Add a new playlist to the database.
+        Add a new playlist to the database if it doesn't already exist.
         
         Args:
-            playlist_name: Name of the playlist
+            playlist_url: Name of the playlist
         
         Returns:
-            The database ID of the newly created playlist
+            The database ID of the playlist (existing or newly created)
         """
-        logging.info(f"Adding playlist: {playlist_name}")
+        logging.info(f"Adding playlist: {playlist_url}")
         cursor = self.conn.cursor()
+
+        # Check if the playlist already exists
         cursor.execute(
-            "INSERT INTO playlists (playlist_name) VALUES (?)",
-            (playlist_name,)
+            "SELECT rowid FROM playlists WHERE playlist_url = ?",
+            (playlist_url,)
+        )
+        result = cursor.fetchone()
+
+        if result:
+            logging.info(f"Playlist already exists: {playlist_url}")
+            return result[0]  # Return the existing playlist ID
+
+        # Insert the new playlist
+        cursor.execute(
+            "INSERT INTO playlists (playlist_url) VALUES (?)",
+            (playlist_url,)
         )
         self.conn.commit()
         return cursor.lastrowid
 
-    def link_track_to_playlist(self, spotify_id: str, playlist_id: int) -> None:
+    def link_track_to_playlist(self, spotify_id: str, playlist_url: str) -> None:
         """
         Create an association between a track and a playlist.
         
         Args:
             spotify_id: Spotify track identifier
-            playlist_id: Database playlist ID
+            playlist_url: Database playlist URL
         
         Note:
             Uses INSERT OR IGNORE to prevent duplicate associations.
             A track can be linked to multiple playlists.
         """
-        logging.info(f"Linking track {spotify_id} to playlist {playlist_id}")
+        logging.info(f"Linking track {spotify_id} to playlist {playlist_url}")
         cursor = self.conn.cursor()
         cursor.execute(
-            "INSERT OR IGNORE INTO playlist_tracks (playlist_id, spotify_id) VALUES (?, ?)",
-            (playlist_id, spotify_id)
+            "INSERT OR IGNORE INTO playlist_tracks (playlist_url, spotify_id) VALUES (?, ?)",
+            (playlist_url, spotify_id)
         )
         self.conn.commit()
 
