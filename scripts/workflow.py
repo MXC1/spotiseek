@@ -7,7 +7,8 @@ This module coordinates the complete workflow of:
 3. Initiating downloads via Soulseek
 4. Tracking download status in the database
 """
-
+import sys
+sys.dont_write_bytecode = True # Disable .pyc file generation
 import argparse
 import csv
 import logging
