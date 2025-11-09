@@ -85,7 +85,7 @@ def setup_logging(
     
     # Configure root logger
     logger = logging.getLogger()
-    logger.setLevel(log_level)
+    logger.setLevel(logging.NOTSET)  # Allow all levels to propagate to handlers
     
     # Clear any existing handlers to avoid duplicate logs
     for handler in logger.handlers[:]:
@@ -105,7 +105,7 @@ def setup_logging(
             return msg
 
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(log_level)
+    console_handler.setLevel(log_level)  # Only show >=log_level on console
     console_handler.setFormatter(ConsoleFormatter("[%(levelname)s] %(message)s"))
     logger.addHandler(console_handler)
 
