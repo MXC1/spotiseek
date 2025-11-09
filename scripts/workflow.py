@@ -171,7 +171,7 @@ def _update_file_status(file: dict) -> None:
     spotify_id = track_db.get_spotify_id_by_slskd_uuid(slskd_uuid)
     
     if not spotify_id:
-        write_log.warn("SLSKD_UUID_MISSING", "No Spotify ID found for slskd_uuid.", {"slskd_uuid": slskd_uuid})
+        write_log.debug("SLSKD_UUID_MISSING", "No Spotify ID found for slskd_uuid.", {"slskd_uuid": slskd_uuid})
         return
     
     state = file.get("state")

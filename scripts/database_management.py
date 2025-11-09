@@ -194,13 +194,9 @@ class TrackDB:
             Uses INSERT OR IGNORE to prevent duplicate entries. If the track
             already exists, this operation has no effect.
         """
-        write_log.info(
-            "TRACK_ADD", "Adding track.", {
-                "spotify_id": spotify_id
-            }
-        )
         write_log.debug(
-            "TRACK_ADD_INFO", "Track info.", {
+            "TRACK_ADD", "Adding track.", {
+                "spotify_id": spotify_id,
                 "track_name": track_name,
                 "artist": artist,
                 "status": download_status
@@ -263,7 +259,7 @@ class TrackDB:
             playlist_url: Playlist URL
             m3u8_path: Path to the m3u8 file
         """
-        write_log.info("PLAYLIST_M3U8_UPDATE", "Updating m3u8_path for playlist.", {"playlist_url": playlist_url, "m3u8_path": m3u8_path})
+        write_log.debug("PLAYLIST_M3U8_UPDATE", "Updating m3u8_path for playlist.", {"playlist_url": playlist_url, "m3u8_path": m3u8_path})
         cursor = self.conn.cursor()
         cursor.execute(
             "UPDATE playlists SET m3u8_path = ? WHERE playlist_url = ?",
@@ -278,7 +274,7 @@ class TrackDB:
             playlist_url: Playlist URL
             playlist_name: Name of the playlist from Spotify
         """
-        write_log.info("PLAYLIST_NAME_UPDATE", "Updating playlist_name for playlist.", {"playlist_url": playlist_url, "playlist_name": playlist_name})
+        write_log.debug("PLAYLIST_NAME_UPDATE", "Updating playlist_name for playlist.", {"playlist_url": playlist_url, "playlist_name": playlist_name})
         cursor = self.conn.cursor()
         cursor.execute(
             "UPDATE playlists SET playlist_name = ? WHERE playlist_url = ?",
@@ -298,7 +294,7 @@ class TrackDB:
             Uses INSERT OR IGNORE to prevent duplicate associations.
             A track can be linked to multiple playlists.
         """
-        write_log.info("TRACK_LINK_PLAYLIST", "Linking track to playlist.", {"spotify_id": spotify_id, "playlist_url": playlist_url})
+        write_log.debug("TRACK_LINK_PLAYLIST", "Linking track to playlist.", {"spotify_id": spotify_id, "playlist_url": playlist_url})
         cursor = self.conn.cursor()
         cursor.execute(
             "INSERT OR IGNORE INTO playlist_tracks (playlist_url, spotify_id) VALUES (?, ?)",
@@ -318,7 +314,7 @@ class TrackDB:
             spotify_id: Spotify track identifier
             status: New download status (e.g., "pending", "downloading", "completed", "failed")
         """
-        write_log.info(
+        write_log.debug(
             "TRACK_STATUS_UPDATE", "Updating track status.", {
                 "spotify_id": spotify_id,
                 "status": status
@@ -430,7 +426,7 @@ class TrackDB:
         )
         result = cursor.fetchone()
         status = result[0] if result else None
-        write_log.info("TRACK_STATUS_RESULT", "Track status result.", {"spotify_id": spotify_id, "status": status})
+        write_log.debug("TRACK_STATUS_RESULT", "Track status result.", {"spotify_id": spotify_id, "status": status})
         return status
     
     def update_local_file_path(self, spotify_id: str, local_file_path: str) -> None:
@@ -441,7 +437,7 @@ class TrackDB:
             spotify_id: Spotify track identifier
             local_file_path: Absolute path to the downloaded file
         """
-        write_log.info("TRACK_LOCAL_PATH_UPDATE", "Updating local_file_path for track.", {"spotify_id": spotify_id, "local_file_path": local_file_path})
+        write_log.debug("TRACK_LOCAL_PATH_UPDATE", "Updating local_file_path for track.", {"spotify_id": spotify_id, "local_file_path": local_file_path})
         cursor = self.conn.cursor()
         cursor.execute(
             "UPDATE tracks SET local_file_path = ? WHERE spotify_id = ?",

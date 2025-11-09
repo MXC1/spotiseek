@@ -171,7 +171,7 @@ def download_track(artist: str, track: str, spotify_id: str) -> None:
     skip_statuses = {"completed", "queued", "downloading", "requested", "inprogress"}
     
     if current_status in skip_statuses:
-        write_log.info("SLSKD_SKIP", "Skipping download.", {"artist": artist, "track": track, "current_status": current_status})
+        write_log.debug("SLSKD_SKIP", "Skipping download.", {"artist": artist, "track": track, "current_status": current_status})
         return
 
     search_text = f"{artist} {track}"
