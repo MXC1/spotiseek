@@ -17,6 +17,7 @@ venv.bak/
 database/database*.db
 scripts/database/database*.db
 database/m3u8s/*
+!database/m3u8s/init
 
 # VS Code
 .vscode/
@@ -38,8 +39,8 @@ Thumbs.db
 *.pid
 *.pid.lock
 docker-compose.override.yml
-/slskd_docker_data
-!/slskd_docker_data/slskd.yml
+slskd_docker_data/*
+!slskd_docker_data/slskd.example.yml
 
 # Node.js (for web/)
 web/node_modules/
@@ -51,5 +52,6 @@ web/.env
 *.swo
 *~
 
-playlists
+playlists/*
+!playlists/init
 .cache
