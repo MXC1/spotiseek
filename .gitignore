@@ -14,8 +14,7 @@ env.bak/
 venv.bak/
 
 # SQLite database
-database/database*.db
-scripts/database/database*.db
+database/*
 database/m3u8s/*
 !database/m3u8s/init
 
@@ -55,3 +54,4 @@ web/.env
 playlists/*
 !playlists/init
 .cache
+dev

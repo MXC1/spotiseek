@@ -26,9 +26,10 @@ setup_logging(log_name_prefix="workflow")
 logging.debug(f"Environment variables loaded from {dotenv_path}")
 
 from database_management import TrackDB
-from m3u8_management import delete_all_m3u8_files, write_playlist_m3u8
 from scrape_spotify_playlist import get_tracks_from_playlist
 from slskd_downloader import download_track, query_download_status
+from m3u8_management import delete_all_m3u8_files, write_playlist_m3u8
+from xml_management import export_itunes_xml
 
 # Validate environment configuration
 ENV = os.getenv("APP_ENV")
@@ -287,6 +288,16 @@ def main(reset_db: bool = False) -> None:
     for playlist_url in playlists:
         process_playlist(playlist_url)
         update_download_statuses()
+
+
+    # Export playlists and tracks to iTunes-style XML
+    try:
+        xml_path = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "database", "spotiseek_library.xml"))
+        music_folder_url = f"file://localhost/{DOWNLOADS_ROOT.replace(os.sep, '/')}/"
+        export_itunes_xml(xml_path, music_folder_url)
+        logging.info(f"Exported playlists and tracks to XML: {xml_path}")
+    except Exception as e:
+        logging.error(f"Failed to export iTunes XML: {e}")
 
     logging.info("Workflow completed.")
     track_db.close()
