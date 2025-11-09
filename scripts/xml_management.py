@@ -1,8 +1,8 @@
 
 import os
-import logging
 import xml.etree.ElementTree as ET
 from database_management import TrackDB
+from logs_utils import write_log
 
 def export_itunes_xml(xml_path: str, music_folder_url: str = None):
 	"""
@@ -112,4 +112,4 @@ def export_itunes_xml(xml_path: str, music_folder_url: str = None):
 		f.write('<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n')
 		xml_content = xml_content.lstrip()
 		f.write(xml_content)
-	logging.info(f"Exported iTunes-style XML to {xml_path}")
+	write_log.info("XML_EXPORT_SUCCESS", "Exported iTunes-style XML successfully.", {"xml_path": xml_path})
