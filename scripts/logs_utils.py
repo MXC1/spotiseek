@@ -111,7 +111,7 @@ def setup_logging(
 
     # Add file handler with JSON formatting
     file_handler = logging.FileHandler(log_path, encoding="utf-8")
-    file_handler.setLevel(log_level)
+    file_handler.setLevel(logging.NOTSET)  # Log all levels to file
     file_handler.setFormatter(JsonLogFormatter())
     logger.addHandler(file_handler)
 
