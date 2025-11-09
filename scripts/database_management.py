@@ -5,12 +5,12 @@ This module provides a thread-safe singleton interface for managing the SQLite d
 that tracks Spotify playlists, tracks, download statuses, and mappings to Soulseek downloads.
 """
 
+# ...existing code...
 import logging
 import os
 import sqlite3
 import threading
 from typing import Optional, List, Tuple
-
 from logs_utils import setup_logging
 # Initialize logging for database operations
 setup_logging(log_name_prefix="database_management")

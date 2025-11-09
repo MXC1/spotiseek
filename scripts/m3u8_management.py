@@ -1,5 +1,6 @@
 
 import os
+import glob
 
 def write_playlist_m3u8(m3u8_path, tracks):
 	"""
@@ -39,3 +40,15 @@ def update_track_in_m3u8(m3u8_path, spotify_id, local_file_path):
 	if replaced:
 		with open(m3u8_path, 'w', encoding='utf-8') as f:
 			f.writelines(new_lines)
+
+def delete_all_m3u8_files(m3u8_dir):
+    """
+    Delete all .m3u8 files in the specified directory and its subdirectories.
+    """
+    pattern = os.path.join(m3u8_dir, '**', '*.m3u8')
+    files = glob.glob(pattern, recursive=True)
+    for file in files:
+        try:
+            os.remove(file)
+        except Exception as e:
+            print(f"Failed to delete {file}: {e}")

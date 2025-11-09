@@ -8,6 +8,7 @@ This module coordinates the complete workflow of:
 4. Tracking download status in the database
 """
 import sys
+
 sys.dont_write_bytecode = True # Disable .pyc file generation
 import argparse
 import csv
@@ -24,9 +25,10 @@ load_dotenv(dotenv_path)
 setup_logging(log_name_prefix="workflow")
 logging.debug(f"Environment variables loaded from {dotenv_path}")
 
-from database.database_management import TrackDB
-from spotify.scrape_spotify_playlist import get_tracks_from_playlist
-from soulseek.slskd_downloader import download_track, query_download_status
+from database_management import TrackDB
+from m3u8_management import delete_all_m3u8_files
+from scrape_spotify_playlist import get_tracks_from_playlist
+from slskd_downloader import download_track, query_download_status
 
 # Validate environment configuration
 ENV = os.getenv("APP_ENV")
@@ -261,6 +263,10 @@ def main(reset_db: bool = False) -> None:
     if reset_db:
         logging.info("--reset flag detected. Clearing database before starting workflow.")
         track_db.clear_database()
+        # Delete all m3u8 files in the database/m3u8s directory
+        m3u8_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'database', 'm3u8s')
+        delete_all_m3u8_files(m3u8_dir)
+        logging.info(f"All .m3u8 files in {m3u8_dir} have been deleted.")
         # Re-initialize after clearing (singleton pattern ensures clean state)
         track_db = TrackDB()
 

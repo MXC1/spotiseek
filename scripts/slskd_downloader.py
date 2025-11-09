@@ -16,7 +16,7 @@ import requests
 from dotenv import load_dotenv
 
 from logs_utils import setup_logging
-from database.database_management import TrackDB
+from database_management import TrackDB
 
 # Initialize logging and environment
 setup_logging(log_name_prefix="slskd_downloader")
