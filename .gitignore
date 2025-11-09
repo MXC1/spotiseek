@@ -16,7 +16,7 @@ venv.bak/
 # SQLite database
 database/*
 database/m3u8s/*
-!database/m3u8s/init
+!database/m3u8s/_init
 
 # VS Code
 .vscode/
@@ -52,6 +52,6 @@ web/.env
 *~
 
 playlists/*
-!playlists/init
+!playlists/_init
 .cache
 dev
