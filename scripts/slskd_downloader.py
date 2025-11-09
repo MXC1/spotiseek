@@ -6,7 +6,7 @@ daemon API and managing download requests. It integrates with the database to
 track download status and maintain mappings between Soulseek and Spotify IDs.
 """
 
-import logging
+from logs_utils import write_log
 import os
 import time
 import uuid
@@ -44,7 +44,7 @@ def create_search(search_text: str) -> str:
         requests.HTTPError: If the API request fails
     """
     search_id = str(uuid.uuid4())
-    logging.debug(f"Creating search: id={search_id}, text='{search_text}'")
+    write_log.debug("SLSKD_SEARCH_CREATE", "Creating search.", {"search_id": search_id, "search_text": search_text})
     
     try:
         resp = requests.post(
@@ -52,11 +52,10 @@ def create_search(search_text: str) -> str:
             json={"id": search_id, "searchText": search_text},
             headers={"X-API-Key": TOKEN}
         )
-        logging.debug(f"Search POST status: {resp.status_code}")
-        logging.debug(f"Search POST response: {resp.text}")
+        write_log.debug("SLSKD_SEARCH_POST", "Search POST.", {"status_code": resp.status_code, "response": resp.text})
         resp.raise_for_status()
     except Exception as e:
-        logging.error(f"Failed to create search: {e}")
+        write_log.error("SLSKD_SEARCH_CREATE_FAIL", "Failed to create search.", {"error": str(e)})
         raise
     
     return search_id
@@ -77,28 +76,22 @@ def get_search_responses(search_id: str) -> List[Dict[str, Any]]:
         Returns empty list if no results are found after polling.
     """
     for attempt in range(1, MAX_SEARCH_ATTEMPTS + 1):
-        logging.debug(f"Polling for search responses (attempt {attempt}/{MAX_SEARCH_ATTEMPTS})...")
-        
+        write_log.debug("SLSKD_SEARCH_POLL", "Polling for search responses.", {"attempt": attempt, "max_attempts": MAX_SEARCH_ATTEMPTS, "search_id": search_id})
         try:
             resp = requests.get(
                 f"{SLSKD_URL}/searches/{search_id}/responses",
                 headers={"X-API-Key": TOKEN}
             )
-            logging.debug(f"Responses GET status: {resp.status_code}")
-            logging.debug(f"Responses GET response: {resp.text}")
+            write_log.debug("SLSKD_RESPONSES_GET", "Responses GET.", {"status_code": resp.status_code, "response": resp.text})
             resp.raise_for_status()
-            
             data = resp.json()
             if data and isinstance(data, list) and len(data) > 0:
-                logging.debug(f"Found {len(data)} search responses.")
+                write_log.debug("SLSKD_RESPONSES_FOUND", "Found search responses.", {"count": len(data)})
                 return data
-                
         except Exception as e:
-            logging.error(f"Error during response polling: {e}")
-        
+            write_log.error("SLSKD_SEARCH_POLL_FAIL", "Error during response polling.", {"error": str(e)})
         time.sleep(SEARCH_POLL_INTERVAL)
-    
-    logging.debug("No search responses found after maximum polling attempts.")
+    write_log.debug("SLSKD_SEARCH_POLL_NONE", "No search responses found after maximum polling attempts.", {"search_id": search_id})
     return []
 
 def enqueue_download(
@@ -122,45 +115,34 @@ def enqueue_download(
     Raises:
         requests.HTTPError: If the API request fails
     """
-    logging.debug(
-        f"Enqueuing download for search_id={search_id}, username={username}, "
-        f"fileinfo={fileinfo}"
-    )
+    write_log.debug("SLSKD_ENQUEUE", "Enqueuing download.", {"search_id": search_id, "username": username, "fileinfo": fileinfo})
     
     try:
         url = f"{SLSKD_URL}/transfers/downloads/{username}"
         payload = [{**fileinfo, "username": username}]
-        
         resp = requests.post(
             url,
             json=payload,
             headers={"X-API-Key": TOKEN}
         )
-        logging.debug(f"Download POST status: {resp.status_code}")
-        logging.debug(f"Download POST response: {resp.text}")
+        write_log.debug("SLSKD_DOWNLOAD_POST", "Download POST.", {"status_code": resp.status_code, "response": resp.text})
         resp.raise_for_status()
-        
         download_response = resp.json()
-
         # Validate and extract enqueued download information
         enqueued = download_response.get("enqueued", [])
         if not enqueued:
-            logging.error(f"No downloads were enqueued. Response: {download_response}")
+            write_log.error("SLSKD_ENQUEUE_NONE", "No downloads were enqueued.", {"response": download_response})
             return download_response
-
         slskd_uuid = enqueued[0].get("id")
         if not slskd_uuid:
-            logging.error(f"No slskd UUID in enqueued response. Response: {enqueued[0]}")
+            write_log.error("SLSKD_ENQUEUE_UUID_MISSING", "No slskd UUID in enqueued response.", {"response": enqueued[0]})
             return download_response
-
         # Store mapping between Soulseek UUID and Spotify ID
-        logging.info(f"Enqueued download with slskd_uuid={slskd_uuid} for spotify_id={spotify_id}")
+        write_log.info("SLSKD_ENQUEUE_SUCCESS", "Enqueued download.", {"slskd_uuid": slskd_uuid, "spotify_id": spotify_id})
         track_db.add_slskd_mapping(slskd_uuid, spotify_id)
-        
         return download_response
-        
     except Exception as e:
-        logging.error(f"Failed to enqueue download: {e}")
+        write_log.error("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download.", {"error": str(e)})
         raise
 
 def download_track(artist: str, track: str, spotify_id: str) -> None:
@@ -189,54 +171,44 @@ def download_track(artist: str, track: str, spotify_id: str) -> None:
     skip_statuses = {"completed", "queued", "downloading", "requested", "inprogress"}
     
     if current_status in skip_statuses:
-        logging.info(
-            f"Skipping download for '{artist} - {track}' "
-            f"(current status: '{current_status}')"
-        )
+        write_log.info("SLSKD_SKIP", "Skipping download.", {"artist": artist, "track": track, "current_status": current_status})
         return
 
     search_text = f"{artist} {track}"
-    logging.info(f"Searching for: {search_text}")
+    write_log.info("SLSKD_SEARCH", "Searching for track.", {"search_text": search_text})
     track_db.update_track_status(spotify_id, "searching")
     
     try:
         # Perform search on Soulseek network
         search_id = create_search(search_text)
         responses = get_search_responses(search_id)
-        
         if not responses:
-            logging.info(f"No search results found for '{artist} - {track}'")
+            write_log.info("SLSKD_NO_RESULTS", "No search results found.", {"artist": artist, "track": track})
             track_db.update_track_status(spotify_id, "not_found")
             return
-        
         # Extract first available file from first response
         first_response = responses[0]
         files = first_response.get("files", [])
         username = first_response.get("username")
-        
         if not files:
-            logging.info(f"No files in search results for '{artist} - {track}'")
+            write_log.info("SLSKD_NO_FILES", "No files in search results.", {"artist": artist, "track": track})
             track_db.update_track_status(spotify_id, "failed")
             return
-        
         # Prepare file information for download
         first_file = files[0]
         filename = first_file.get("filename")
         size = first_file.get("size")
         fileinfo = {"filename": filename, "size": size}
-        
         # Enqueue download and update database
-        logging.info(f"Downloading: {filename}")
+        write_log.info("SLSKD_DOWNLOAD", "Downloading file.", {"filename": filename})
         download_resp = enqueue_download(search_id, fileinfo, username, spotify_id)
-        logging.debug(f"Download initiated: {download_resp}")
-        
+        write_log.debug("SLSKD_DOWNLOAD_INITIATED", "Download initiated.", {"download_resp": download_resp})
         # Store only the basename 
         basename = os.path.basename(filename) if filename else filename
         track_db.update_track_status(spotify_id, "downloading")
         track_db.update_slskd_file_name(spotify_id, basename)
-        
     except Exception as e:
-        logging.error(f"Failed to download track '{artist} - {track}': {e}")
+        write_log.error("SLSKD_DOWNLOAD_FAIL", f"Failed to download track.", {"artist": artist, "track": track, "error": str(e)})
         track_db.update_track_status(spotify_id, "failed")
 
 
@@ -248,19 +220,18 @@ def query_download_status() -> List[Dict[str, Any]]:
         List of download status objects containing directories, files, and states.
         Returns empty list if the query fails.
     """
-    logging.info("Querying download status for all transfers...")
+    write_log.info("SLSKD_QUERY_STATUS", "Querying download status for all transfers...")
     
     try:
         resp = requests.get(
             f"{SLSKD_URL}/transfers/downloads",
             headers={"X-API-Key": TOKEN}
         )
-        logging.debug(f"Download status response: {resp.text}")
+        write_log.debug("SLSKD_QUERY_STATUS_RESP", "Download status response.", {"response": resp.text})
         resp.raise_for_status()
         return resp.json()
-        
     except Exception as e:
-        logging.error(f"Failed to query download status: {e}")
+        write_log.error("SLSKD_QUERY_STATUS_FAIL", "Failed to query download status.", {"error": str(e)})
         return []
 
 if __name__ == "__main__":
