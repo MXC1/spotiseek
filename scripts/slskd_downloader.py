@@ -15,11 +15,8 @@ from typing import List, Dict, Any, Optional
 import requests
 from dotenv import load_dotenv
 
-from logs_utils import setup_logging
 from database_management import TrackDB
 
-# Initialize logging and environment
-setup_logging(log_name_prefix="slskd_downloader")
 load_dotenv()
 
 # slskd API configuration

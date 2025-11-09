@@ -17,10 +17,6 @@ import spotipy
 from dotenv import load_dotenv
 from spotipy.oauth2 import SpotifyClientCredentials
 
-from logs_utils import setup_logging
-
-# Initialize logging and environment
-setup_logging(log_name_prefix="scrape_spotify_playlist")
 load_dotenv()
 
 

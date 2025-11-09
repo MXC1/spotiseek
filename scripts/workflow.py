@@ -17,11 +17,12 @@ import re
 from typing import List, Tuple
 
 from dotenv import load_dotenv
-from logs_utils import setup_logging, write_log
 # Load environment configuration and initialize logging
 dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(dotenv_path)
-setup_logging(log_name_prefix="workflow")
+
+from logs_utils import setup_logging, write_log
+setup_logging(log_name_prefix="workflow", logs_dir=os.path.join(os.path.dirname(__file__), "..", "observability", "logs"))
 write_log.debug("ENV_LOAD", "Environment variables loaded.", {"dotenv_path": dotenv_path})
 
 from database_management import TrackDB
