@@ -48,7 +48,7 @@ def setup_logging(
     
     # Determine log directory
     if logs_dir is None:
-        logs_dir = os.path.join(os.path.dirname(__file__), "_logs")
+        logs_dir = os.path.join(os.path.dirname(__file__), "..", "logs")
 
     # Generate timestamped directory structure
     now = datetime.now()
