@@ -7,15 +7,39 @@ ensuring consistent logging behavior across all modules with both console and fi
 
 import logging
 import os
+import json
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any, Dict
 
 # Module-level flag to ensure logging is initialized only once
 _LOGGING_INITIALIZED = False
 
-# Default log format templates
-CONSOLE_FORMAT = "[%(levelname)s] %(message)s"
-FILE_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+# JSON log format keys
+JSON_LOG_KEYS = ["timestamp", "level", "message", "event_id", "context"]
+
+
+class JsonLogFormatter(logging.Formatter):
+    """
+    Custom logging formatter to output logs in structured JSON format.
+    """
+    def format(self, record: logging.LogRecord) -> str:
+        log_record: Dict[str, Any] = {}
+        # Timestamp in the required format
+        now = datetime.fromtimestamp(record.created)
+        log_record["timestamp"] = now.strftime("%Y%m%d_%H%M%S_%f")
+        log_record["level"] = record.levelname
+        log_record["message"] = record.getMessage()
+        # Optional: event_id and context can be passed via extra
+        log_record["event_id"] = getattr(record, "event_id", None)
+        context = getattr(record, "context", None)
+        if context is not None and isinstance(context, dict):
+            log_record["context"] = context
+        else:
+            log_record["context"] = context
+        # Only include keys in JSON_LOG_KEYS
+        filtered = {k: log_record[k] for k in JSON_LOG_KEYS}
+        return json.dumps(filtered, ensure_ascii=False)
 
 
 def setup_logging(
@@ -71,17 +95,47 @@ def setup_logging(
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
     
-    # Add console handler with simple formatting
+    # Add console handler with context formatting
+    class ConsoleFormatter(logging.Formatter):
+        def format(self, record):
+            msg = super().format(record)
+            context = getattr(record, "context", None)
+            if context:
+                if isinstance(context, dict):
+                    context_str = json.dumps(context, ensure_ascii=False)
+                else:
+                    context_str = str(context)
+                return f"{msg}\n{context_str}"
+            return msg
+
     console_handler = logging.StreamHandler()
     console_handler.setLevel(log_level)
-    console_handler.setFormatter(logging.Formatter(CONSOLE_FORMAT))
+    console_handler.setFormatter(ConsoleFormatter("[%(levelname)s] %(message)s"))
     logger.addHandler(console_handler)
-    
-    # Add file handler with detailed formatting
+
+    # Add file handler with JSON formatting
     file_handler = logging.FileHandler(log_path, encoding="utf-8")
     file_handler.setLevel(log_level)
-    file_handler.setFormatter(logging.Formatter(FILE_FORMAT))
+    file_handler.setFormatter(JsonLogFormatter())
     logger.addHandler(file_handler)
-    
-    logger.info(f"Logging initialized. Log file: {log_path}")
+
+    write_log.info("LOG_INIT", "Logging initialized.", {"log_file": log_path})
     _LOGGING_INITIALIZED = True
+
+# -- Public API --
+class write_log:
+    @staticmethod
+    def info(event_id: str, msg: str, context: dict = None):
+        logging.getLogger().info(msg, extra={"event_id": event_id, "context": context or {}})
+
+    @staticmethod
+    def error(event_id: str, msg: str, context: dict = None):
+        logging.getLogger().error(msg, extra={"event_id": event_id, "context": context or {}})
+
+    @staticmethod
+    def warn(event_id: str, msg: str, context: dict = None):
+        logging.getLogger().warning(msg, extra={"event_id": event_id, "context": context or {}})
+
+    @staticmethod
+    def debug(event_id: str, msg: str, context: dict = None):
+        logging.getLogger().debug(msg, extra={"event_id": event_id, "context": context or {}})
