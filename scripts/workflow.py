@@ -13,6 +13,7 @@ import argparse
 import csv
 import logging
 import os
+import re
 from typing import List, Tuple
 
 from dotenv import load_dotenv
@@ -26,7 +27,6 @@ logging.debug(f"Environment variables loaded from {dotenv_path}")
 from database.database_management import TrackDB
 from spotify.scrape_spotify_playlist import get_tracks_from_playlist
 from soulseek.slskd_downloader import download_track, query_download_status
-
 
 # Validate environment configuration
 ENV = os.getenv("APP_ENV")
@@ -42,6 +42,10 @@ PLAYLISTS_CSV = f"../playlists/{ENV}_playlists.csv"
 DOWNLOADS_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(os.path.dirname(__file__)), "slskd_docker_data", "downloads")
 )
+M3U8S_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "database", "m3u8s")
+)
+os.makedirs(M3U8S_DIR, exist_ok=True)
 
 # Initialize database connection
 track_db = TrackDB()
@@ -71,14 +75,32 @@ def process_playlist(playlist_url: str) -> None:
     logging.info(f"Processing playlist: {playlist_url}")
 
     try:
-        # Add playlist to database and get its ID
-        playlist_id = track_db.add_playlist(playlist_url)
+        # Generate m3u8 file path for this playlist, sanitize for Windows
+        safe_name = re.sub(r'[<>:"/\\|?*]', '_', playlist_url.replace('https://', ''))
+        m3u8_path = os.path.join(M3U8S_DIR, f"{safe_name}.m3u8")
+
+        # Add playlist to database and get its ID, saving m3u8 path
+        playlist_id = track_db.add_playlist(playlist_url, m3u8_path)
+
+        # Also update m3u8_path in case playlist existed before
+        track_db.update_playlist_m3u8_path(playlist_url, m3u8_path)
 
         tracks = get_tracks_from_playlist(playlist_url)
         logging.info(f"Found {len(tracks)} tracks in playlist.")
     except Exception as e:
         logging.error(f"Failed to get tracks for playlist {playlist_url}: {e}")
         return
+
+    # Write commented rows for each track to the m3u8 file
+    try:
+        with open(m3u8_path, 'w', encoding='utf-8') as m3u8_file:
+            m3u8_file.write('#EXTM3U\n')
+            for track in tracks:
+                spotify_id, artist, track_name = track
+                comment = f"# {spotify_id} - {artist} - {track_name}\n"
+                m3u8_file.write(comment)
+    except Exception as e:
+        logging.error(f"Failed to write m3u8 file for playlist {playlist_url}: {e}")
 
     # Process each track individually
     for track in tracks:
@@ -179,18 +201,44 @@ def _handle_completed_download(file: dict, spotify_id: str) -> None:
     """
     filename_rel = file.get("filename")
     
+
     if filename_rel:
         folder, file_name = os.path.split(filename_rel)
         last_subfolder = os.path.basename(folder) if folder else None
-        
+
         logging.debug(
             f"Completed file: {file_name}, subfolder: {last_subfolder}"
         )
-        
+
         if last_subfolder and file_name:
             local_file_path = os.path.join(DOWNLOADS_ROOT, last_subfolder, file_name)
             track_db.update_local_file_path(spotify_id, local_file_path)
-    
+
+            # Update the relevant m3u8 file: replace the comment line for this track with the file path
+            try:
+                playlist_urls = track_db.get_playlists_for_track(spotify_id)
+                for playlist_url in playlist_urls:
+                    m3u8_path = track_db.get_m3u8_path_for_playlist(playlist_url)
+                    if not m3u8_path or not os.path.exists(m3u8_path):
+                        continue
+                    # Read and update the m3u8 file
+                    with open(m3u8_path, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                    comment_prefix = f"# {spotify_id} - "
+                    new_lines = []
+                    replaced = False
+                    for line in lines:
+                        if line.startswith(comment_prefix) and not replaced:
+                            new_lines.append(local_file_path + '\n')
+                            replaced = True
+                        else:
+                            new_lines.append(line)
+                    if replaced:
+                        with open(m3u8_path, 'w', encoding='utf-8') as f:
+                            f.writelines(new_lines)
+            except Exception as e:
+                logging.error(f"Failed to update m3u8 file for completed track {spotify_id}: {e}")
+
     track_db.update_track_status(spotify_id, "completed")
 
 

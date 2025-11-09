@@ -145,10 +145,11 @@ class TrackDB:
             )
         """)
         
-        # Playlists table: stores playlist information
+        # Playlists table: stores playlist information and m3u8 path
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS playlists (
-                playlist_url TEXT PRIMARY KEY NOT NULL
+                playlist_url TEXT PRIMARY KEY NOT NULL,
+                m3u8_path TEXT
             )
         """)
         
@@ -211,12 +212,13 @@ class TrackDB:
         )
         self.conn.commit()
 
-    def add_playlist(self, playlist_url: str) -> int:
+    def add_playlist(self, playlist_url: str, m3u8_path: str = None) -> int:
         """
         Add a new playlist to the database if it doesn't already exist.
         
         Args:
             playlist_url: Name of the playlist
+            m3u8_path: Path to the m3u8 file for this playlist
         
         Returns:
             The database ID of the playlist (existing or newly created)
@@ -233,15 +235,37 @@ class TrackDB:
 
         if result:
             logging.info(f"Playlist already exists: {playlist_url}")
+            # Optionally update m3u8_path if not set
+            if m3u8_path:
+                cursor.execute(
+                    "UPDATE playlists SET m3u8_path = ? WHERE playlist_url = ?",
+                    (m3u8_path, playlist_url)
+                )
+                self.conn.commit()
             return result[0]  # Return the existing playlist ID
 
         # Insert the new playlist
         cursor.execute(
-            "INSERT INTO playlists (playlist_url) VALUES (?)",
-            (playlist_url,)
+            "INSERT INTO playlists (playlist_url, m3u8_path) VALUES (?, ?)",
+            (playlist_url, m3u8_path)
         )
         self.conn.commit()
         return cursor.lastrowid
+
+    def update_playlist_m3u8_path(self, playlist_url: str, m3u8_path: str) -> None:
+        """
+        Update the m3u8_path for a playlist.
+        Args:
+            playlist_url: Playlist URL
+            m3u8_path: Path to the m3u8 file
+        """
+        logging.info(f"Updating m3u8_path for playlist {playlist_url} to {m3u8_path}")
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE playlists SET m3u8_path = ? WHERE playlist_url = ?",
+            (m3u8_path, playlist_url)
+        )
+        self.conn.commit()
 
     def link_track_to_playlist(self, spotify_id: str, playlist_url: str) -> None:
         """
@@ -399,6 +423,23 @@ class TrackDB:
             (local_file_path, spotify_id)
         )
         self.conn.commit()
+
+    def get_playlists_for_track(self, spotify_id: str) -> list:
+        """
+        Return a list of playlist URLs for a given spotify_id.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT playlist_url FROM playlist_tracks WHERE spotify_id = ?", (spotify_id,))
+        return [row[0] for row in cursor.fetchall()]
+
+    def get_m3u8_path_for_playlist(self, playlist_url: str) -> str:
+        """
+        Return the m3u8_path for a given playlist_url, or None if not found.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT m3u8_path FROM playlists WHERE playlist_url = ?", (playlist_url,))
+        result = cursor.fetchone()
+        return result[0] if result else None
 
     def close(self) -> None:
         """Close the database connection."""
