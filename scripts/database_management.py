@@ -11,7 +11,7 @@ import os
 import sqlite3
 import threading
 from typing import Optional, List, Tuple
-from logs_utils import setup_logging
+from logs_utils import setup_logging, write_log
 # Initialize logging for database operations
 setup_logging(log_name_prefix="database_management")
 
@@ -67,7 +67,7 @@ class TrackDB:
             return
         
         self._initialized = True
-        logging.info(f"Connecting to database at {db_path}")
+        write_log.info("DB_CONNECT", "Connecting to database.", {"db_path": db_path})
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self._create_tables()
 
@@ -94,26 +94,26 @@ class TrackDB:
                     "This action cannot be undone. Type 'yes' to continue: "
                 )
             except EOFError:
-                logging.error("No input available for confirmation prompt. Aborting clear_database().")
+                write_log.error("DB_CLEAR_CONFIRM_FAIL", "No input available for confirmation prompt. Aborting clear_database().", {"ENV": ENV})
                 raise RuntimeError(
                     "No input available for confirmation prompt. Aborting clear_database()."
                 )
             
             if confirm.strip().lower() != "yes":
-                logging.info("clear_database() aborted by user.")
+                write_log.info("DB_CLEAR_ABORTED", "clear_database() aborted by user.", {"ENV": ENV})
                 return
 
         # Get database path and close connection
         db_path = getattr(self.conn, "database", DB_PATH)
-        logging.info(f"Attempting to delete database file at {db_path}")
+        write_log.info("DB_DELETE_ATTEMPT", "Attempting to delete database file.", {"db_path": db_path})
         self.close()
         
         # Delete database file if it exists
         if os.path.exists(db_path):
             os.remove(db_path)
-            logging.info("Database file deleted.")
+            write_log.info("DB_DELETED", "Database file deleted.", {"db_path": db_path})
         else:
-            logging.warning("Database file does not exist.")
+            write_log.warn("DB_DELETE_MISSING", "Database file does not exist.", {"db_path": db_path})
         
         # Reconnect and recreate tables
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -129,7 +129,7 @@ class TrackDB:
         - playlist_tracks: Many-to-many relationship between playlists and tracks
         - slskd_mapping: Links Soulseek download UUIDs to Spotify track IDs
         """
-        logging.info("Creating database tables if they don't exist.")
+        write_log.info("DB_CREATE_TABLES", "Creating database tables if they don't exist.")
         cursor = self.conn.cursor()
         
         # Tracks table: stores track metadata and download state
@@ -198,9 +198,17 @@ class TrackDB:
             Uses INSERT OR IGNORE to prevent duplicate entries. If the track
             already exists, this operation has no effect.
         """
-        logging.info(
-            f"Adding track: spotify_id={spotify_id}, track_name={track_name}, "
-            f"artist={artist}, status={download_status}"
+        write_log.info(
+            "TRACK_ADD", "Adding track.", {
+                "spotify_id": spotify_id
+            }
+        )
+        write_log.debug(
+            "TRACK_ADD_INFO", "Track info.", {
+                "track_name": track_name,
+                "artist": artist,
+                "status": download_status
+            }
         )
         cursor = self.conn.cursor()
         cursor.execute(
@@ -225,7 +233,7 @@ class TrackDB:
         Returns:
             The database ID of the playlist (existing or newly created)
         """
-        logging.info(f"Adding playlist: {playlist_url}")
+        write_log.info("PLAYLIST_ADD", "Adding playlist.", {"playlist_url": playlist_url})
         cursor = self.conn.cursor()
 
         # Check if the playlist already exists
@@ -236,7 +244,7 @@ class TrackDB:
         result = cursor.fetchone()
 
         if result:
-            logging.info(f"Playlist already exists: {playlist_url}")
+            write_log.info("PLAYLIST_EXISTS", "Playlist already exists.", {"playlist_url": playlist_url})
             cursor.execute(
                 "UPDATE playlists SET m3u8_path = ?, playlist_name = ? WHERE playlist_url = ?",
                 (m3u8_path, playlist_name, playlist_url)
@@ -259,7 +267,7 @@ class TrackDB:
             playlist_url: Playlist URL
             m3u8_path: Path to the m3u8 file
         """
-        logging.info(f"Updating m3u8_path for playlist {playlist_url} to {m3u8_path}")
+        write_log.info("PLAYLIST_M3U8_UPDATE", "Updating m3u8_path for playlist.", {"playlist_url": playlist_url, "m3u8_path": m3u8_path})
         cursor = self.conn.cursor()
         cursor.execute(
             "UPDATE playlists SET m3u8_path = ? WHERE playlist_url = ?",
@@ -274,7 +282,7 @@ class TrackDB:
             playlist_url: Playlist URL
             playlist_name: Name of the playlist from Spotify
         """
-        logging.info(f"Updating playlist_name for playlist {playlist_url} to {playlist_name}")
+        write_log.info("PLAYLIST_NAME_UPDATE", "Updating playlist_name for playlist.", {"playlist_url": playlist_url, "playlist_name": playlist_name})
         cursor = self.conn.cursor()
         cursor.execute(
             "UPDATE playlists SET playlist_name = ? WHERE playlist_url = ?",
@@ -294,7 +302,7 @@ class TrackDB:
             Uses INSERT OR IGNORE to prevent duplicate associations.
             A track can be linked to multiple playlists.
         """
-        logging.info(f"Linking track {spotify_id} to playlist {playlist_url}")
+        write_log.info("TRACK_LINK_PLAYLIST", "Linking track to playlist.", {"spotify_id": spotify_id, "playlist_url": playlist_url})
         cursor = self.conn.cursor()
         cursor.execute(
             "INSERT OR IGNORE INTO playlist_tracks (playlist_url, spotify_id) VALUES (?, ?)",
@@ -314,8 +322,11 @@ class TrackDB:
             spotify_id: Spotify track identifier
             status: New download status (e.g., "pending", "downloading", "completed", "failed")
         """
-        logging.info(
-            f"Updating track {spotify_id} status to {status}"
+        write_log.info(
+            "TRACK_STATUS_UPDATE", "Updating track status.", {
+                "spotify_id": spotify_id,
+                "status": status
+            }
         )
         cursor = self.conn.cursor()
         cursor.execute(
@@ -336,8 +347,11 @@ class TrackDB:
             spotify_id: Spotify track identifier
             slskd_file_name: Soulseek filename to update
         """
-        logging.info(
-            f"Updating Soulseek file name for track {spotify_id} to {slskd_file_name}"
+        write_log.info(
+            "TRACK_SLSKD_FILENAME_UPDATE", "Updating Soulseek file name for track.", {
+                "spotify_id": spotify_id,
+                "slskd_file_name": slskd_file_name
+            }
         )
         cursor = self.conn.cursor()
         cursor.execute(
@@ -356,7 +370,7 @@ class TrackDB:
         Returns:
             List of tuples containing all track fields for matching tracks
         """
-        logging.info(f"Querying tracks by status: {status}")
+        write_log.info("TRACKS_QUERY_STATUS", "Querying tracks by status.", {"status": status})
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT * FROM tracks WHERE download_status = ?",
@@ -375,7 +389,7 @@ class TrackDB:
         Note:
             Uses INSERT OR IGNORE to prevent duplicate mappings.
         """
-        logging.info(f"Adding slskd mapping: slskd_uuid={slskd_uuid}, spotify_id={spotify_id}")
+        write_log.debug("SLSKD_MAPPING_ADD", "Adding slskd mapping.", {"slskd_uuid": slskd_uuid, "spotify_id": spotify_id})
         cursor = self.conn.cursor()
         cursor.execute(
             "INSERT OR IGNORE INTO slskd_mapping (slskd_uuid, spotify_id) VALUES (?, ?)",
@@ -393,7 +407,7 @@ class TrackDB:
         Returns:
             Spotify track ID if found, None otherwise
         """
-        logging.info(f"Querying Spotify ID for slskd_uuid={slskd_uuid}")
+        write_log.debug("SLSKD_QUERY_SPOTIFY_ID", "Querying Spotify ID for slskd_uuid.", {"slskd_uuid": slskd_uuid})
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT spotify_id FROM slskd_mapping WHERE slskd_uuid = ?",
@@ -412,7 +426,7 @@ class TrackDB:
         Returns:
             Download status string if track exists, None otherwise
         """
-        logging.debug(f"Querying track status for spotify_id={spotify_id}")
+        write_log.debug("TRACK_STATUS_QUERY", "Querying track status.", {"spotify_id": spotify_id})
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT download_status FROM tracks WHERE spotify_id = ?",
@@ -420,7 +434,7 @@ class TrackDB:
         )
         result = cursor.fetchone()
         status = result[0] if result else None
-        logging.info(f"Track status for spotify_id={spotify_id} is {status}")
+        write_log.info("TRACK_STATUS_RESULT", "Track status result.", {"spotify_id": spotify_id, "status": status})
         return status
     
     def update_local_file_path(self, spotify_id: str, local_file_path: str) -> None:
@@ -431,7 +445,7 @@ class TrackDB:
             spotify_id: Spotify track identifier
             local_file_path: Absolute path to the downloaded file
         """
-        logging.info(f"Updating local_file_path for {spotify_id} to {local_file_path}")
+        write_log.info("TRACK_LOCAL_PATH_UPDATE", "Updating local_file_path for track.", {"spotify_id": spotify_id, "local_file_path": local_file_path})
         cursor = self.conn.cursor()
         cursor.execute(
             "UPDATE tracks SET local_file_path = ? WHERE spotify_id = ?",
@@ -458,5 +472,5 @@ class TrackDB:
 
     def close(self) -> None:
         """Close the database connection."""
-        logging.info("Closing database connection.")
+        write_log.info("DB_CLOSE", "Closing database connection.")
         self.conn.close()

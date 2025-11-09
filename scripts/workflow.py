@@ -22,7 +22,10 @@ dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(dotenv_path)
 
 from logs_utils import setup_logging, write_log
-setup_logging(log_name_prefix="workflow", logs_dir=os.path.join(os.path.dirname(__file__), "..", "observability", "logs"))
+setup_logging(
+    log_name_prefix="workflow",
+    logs_dir=os.path.join(os.path.dirname(__file__), "..", "observability", "logs")
+)
 write_log.debug("ENV_LOAD", "Environment variables loaded.", {"dotenv_path": dotenv_path})
 
 from database_management import TrackDB
