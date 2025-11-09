@@ -1,4 +1,5 @@
 """
+
 Spotify playlist scraper module.
 
 This module provides functionality to extract track information from Spotify
@@ -52,18 +53,20 @@ def clean_name(name: str) -> str:
 
 def get_tracks_from_playlist(playlist_url: str) -> List[Tuple[str, str, str]]:
     """
-    Extract track information from a Spotify playlist.
+    Extract track information and playlist name from a Spotify playlist.
     
     This function authenticates with the Spotify API, extracts the playlist ID
-    from the URL, fetches all tracks (handling pagination), and returns cleaned
-    track metadata.
+    from the URL, fetches the playlist name and all tracks (handling pagination),
+    and returns the playlist name and cleaned track metadata.
     
     Args:
         playlist_url: Full Spotify playlist URL 
                      (e.g., "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M")
     
     Returns:
-        List of tuples containing (spotify_id, artists, track_name) for each track.
+        Tuple containing:
+            - playlist_name: The name of the playlist (str)
+            - tracks: List of tuples (spotify_id, artists, track_name) for each track.
         Artist names are concatenated with spaces, and names are cleaned for consistency.
     
     Raises:
@@ -71,7 +74,9 @@ def get_tracks_from_playlist(playlist_url: str) -> List[Tuple[str, str, str]]:
         spotipy.SpotifyException: If API requests fail
     
     Example:
-        >>> tracks = get_tracks_from_playlist("https://open.spotify.com/playlist/...")
+        >>> playlist_name, tracks = get_tracks_from_playlist("https://open.spotify.com/playlist/...")
+        >>> print(playlist_name)
+        "My Playlist Name"
         >>> print(tracks[0])
         ("5ms8IkagrFWObtzSOahVrx", "MASTER BOOT RECORD", "Skynet")
     """
@@ -102,13 +107,15 @@ def get_tracks_from_playlist(playlist_url: str) -> List[Tuple[str, str, str]]:
         raise ValueError("Invalid playlist URL. Expected format: https://open.spotify.com/playlist/...")
     
     playlist_id = match.group(1)
-    logging.info(f"Fetching tracks for playlist ID: {playlist_id}")
+    logging.info(f"Fetching playlist metadata and tracks for playlist ID: {playlist_id}")
 
-    # Fetch all tracks with pagination
+    # Fetch playlist metadata (name) and all tracks with pagination
     try:
-        results = sp.playlist_tracks(playlist_id)
+        playlist_obj = sp.playlist(playlist_id)
+        playlist_name = playlist_obj.get("name", "")
+        results = playlist_obj["tracks"]
     except Exception as e:
-        logging.error(f"Failed to fetch playlist tracks: {e}")
+        logging.error(f"Failed to fetch playlist metadata or tracks: {e}")
         raise
 
     tracks = results["items"]
@@ -122,7 +129,7 @@ def get_tracks_from_playlist(playlist_url: str) -> List[Tuple[str, str, str]]:
             logging.warning(f"Failed to fetch next page of tracks: {e}")
             break
 
-    logging.info(f"Found {len(tracks)} total tracks in playlist.")
+    logging.info(f"Found {len(tracks)} total tracks in playlist '{playlist_name}'.")
 
     # Process and clean track data
     cleaned_tracks = []
@@ -144,7 +151,7 @@ def get_tracks_from_playlist(playlist_url: str) -> List[Tuple[str, str, str]]:
         
         cleaned_tracks.append((spotify_id, artists, track_name))
 
-    return cleaned_tracks
+    return playlist_name, cleaned_tracks
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -157,7 +164,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
-        tracks = get_tracks_from_playlist(args.playlist_url)
+        playlist_name, tracks = get_tracks_from_playlist(args.playlist_url)
+        print(f"Playlist name: {playlist_name}")
         for spotify_id, artists, track_name in tracks:
             print(f"{spotify_id}\t{artists}\t{track_name}")
     except Exception as e:

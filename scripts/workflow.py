@@ -76,19 +76,23 @@ def process_playlist(playlist_url: str) -> None:
     """
     logging.info(f"Processing playlist: {playlist_url}")
 
+
     try:
         # Generate m3u8 file path for this playlist, sanitize for Windows
         safe_name = re.sub(r'[<>:"/\\|?*]', '_', playlist_url.replace('https://', ''))
         m3u8_path = os.path.join(M3U8S_DIR, f"{safe_name}.m3u8")
 
-        # Add playlist to database and get its ID, saving m3u8 path
-        playlist_id = track_db.add_playlist(playlist_url, m3u8_path)
+        # Fetch playlist name and tracks from Spotify
+        playlist_name, tracks = get_tracks_from_playlist(playlist_url)
+        logging.info(f"Found {len(tracks)} tracks in playlist '{playlist_name}'.")
 
-        # Also update m3u8_path in case playlist existed before
+        # Add playlist to database and get its ID, saving m3u8 path and playlist name
+        playlist_id = track_db.add_playlist(playlist_url, m3u8_path, playlist_name)
+
+        # Also update m3u8_path and playlist_name in case playlist existed before
         track_db.update_playlist_m3u8_path(playlist_url, m3u8_path)
+        track_db.update_playlist_name(playlist_url, playlist_name)
 
-        tracks = get_tracks_from_playlist(playlist_url)
-        logging.info(f"Found {len(tracks)} tracks in playlist.")
     except Exception as e:
         logging.error(f"Failed to get tracks for playlist {playlist_url}: {e}")
         return

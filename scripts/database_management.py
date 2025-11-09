@@ -23,7 +23,7 @@ if not ENV:
     )
 
 # Construct database path based on environment
-DB_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'database')
+DB_DIR = os.path.join(os.path.dirname(__file__), '..', 'database')
 os.makedirs(DB_DIR, exist_ok=True)
 DB_PATH = os.path.join(DB_DIR, f"database_{ENV}.db")
 
@@ -145,10 +145,11 @@ class TrackDB:
             )
         """)
         
-        # Playlists table: stores playlist information and m3u8 path
+        # Playlists table: stores playlist information, m3u8 path, and playlist name
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS playlists (
                 playlist_url TEXT PRIMARY KEY NOT NULL,
+                playlist_name TEXT,
                 m3u8_path TEXT
             )
         """)
@@ -212,13 +213,14 @@ class TrackDB:
         )
         self.conn.commit()
 
-    def add_playlist(self, playlist_url: str, m3u8_path: str = None) -> int:
+    def add_playlist(self, playlist_url: str, m3u8_path: str = None, playlist_name: str = None) -> int:
         """
         Add a new playlist to the database if it doesn't already exist.
         
         Args:
             playlist_url: Name of the playlist
             m3u8_path: Path to the m3u8 file for this playlist
+            playlist_name: Name of the playlist from Spotify
         
         Returns:
             The database ID of the playlist (existing or newly created)
@@ -235,19 +237,17 @@ class TrackDB:
 
         if result:
             logging.info(f"Playlist already exists: {playlist_url}")
-            # Optionally update m3u8_path if not set
-            if m3u8_path:
-                cursor.execute(
-                    "UPDATE playlists SET m3u8_path = ? WHERE playlist_url = ?",
-                    (m3u8_path, playlist_url)
-                )
-                self.conn.commit()
+            cursor.execute(
+                "UPDATE playlists SET m3u8_path = ?, playlist_name = ? WHERE playlist_url = ?",
+                (m3u8_path, playlist_name, playlist_url)
+            )
+            self.conn.commit()
             return result[0]  # Return the existing playlist ID
 
         # Insert the new playlist
         cursor.execute(
-            "INSERT INTO playlists (playlist_url, m3u8_path) VALUES (?, ?)",
-            (playlist_url, m3u8_path)
+            "INSERT INTO playlists (playlist_url, m3u8_path, playlist_name) VALUES (?, ?, ?)",
+            (playlist_url, m3u8_path, playlist_name)
         )
         self.conn.commit()
         return cursor.lastrowid
@@ -264,6 +264,21 @@ class TrackDB:
         cursor.execute(
             "UPDATE playlists SET m3u8_path = ? WHERE playlist_url = ?",
             (m3u8_path, playlist_url)
+        )
+        self.conn.commit()
+
+    def update_playlist_name(self, playlist_url: str, playlist_name: str) -> None:
+        """
+        Update the playlist_name for a playlist.
+        Args:
+            playlist_url: Playlist URL
+            playlist_name: Name of the playlist from Spotify
+        """
+        logging.info(f"Updating playlist_name for playlist {playlist_url} to {playlist_name}")
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE playlists SET playlist_name = ? WHERE playlist_url = ?",
+            (playlist_name, playlist_url)
         )
         self.conn.commit()
 
