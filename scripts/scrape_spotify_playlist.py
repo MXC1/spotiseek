@@ -126,8 +126,6 @@ def get_tracks_from_playlist(playlist_url: str) -> List[Tuple[str, str, str]]:
             write_log.warn("SPOTIFY_PAGINATION_FAIL", "Failed to fetch next page of tracks.", {"playlist_id": playlist_id, "error": str(e)})
             break
 
-    write_log.info("SPOTIFY_TRACKS_FOUND", "Found tracks in playlist.", {"playlist_name": playlist_name, "track_count": len(tracks)})
-
     # Process and clean track data
     cleaned_tracks = []
     for idx, item in enumerate(tracks, 1):
