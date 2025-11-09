@@ -39,7 +39,7 @@ def setup_logging(
     
     Example:
         >>> setup_logging(log_name_prefix="workflow", log_level=logging.DEBUG)
-        # Creates: _logs/workflow_20250108_143025_123456.log
+        # Creates: logs/2025/11/08/workflow_20251108_143025_123456.log
     """
     global _LOGGING_INITIALIZED
     
@@ -49,10 +49,17 @@ def setup_logging(
     # Determine log directory
     if logs_dir is None:
         logs_dir = os.path.join(os.path.dirname(__file__), "_logs")
+
+    # Generate timestamped directory structure
+    now = datetime.now()
+    year = now.strftime("%Y")
+    month = now.strftime("%m")
+    day = now.strftime("%d")
+    logs_dir = os.path.join(logs_dir, year, month, day)
     os.makedirs(logs_dir, exist_ok=True)
     
     # Generate unique log filename with microsecond precision
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    timestamp = now.strftime("%Y%m%d_%H%M%S_%f")
     log_filename = f"{log_name_prefix}_{timestamp}.log"
     log_path = os.path.join(logs_dir, log_filename)
     
