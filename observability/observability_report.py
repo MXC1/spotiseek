@@ -9,6 +9,7 @@ def scan_logs(logs_dir):
     total_errors = 0
     total_warnings = 0
     total_infos = 0
+    total_debugs = 0
     most_recent_time = None
     log_file_count = 0
     error_messages = {}
@@ -39,6 +40,8 @@ def scan_logs(logs_dir):
                             warning_messages[msg] = warning_messages.get(msg, 0) + 1
                         elif level == "INFO":
                             total_infos += 1
+                        elif level == "DEBUG":
+                            total_debugs += 1
                         # Most recent timestamp (if present)
                         ts_str = entry.get("timestamp")
                         if ts_str:
@@ -57,6 +60,7 @@ def scan_logs(logs_dir):
         "total_errors": total_errors,
         "total_warnings": total_warnings,
         "total_infos": total_infos,
+        "total_debugs": total_debugs,
         "log_file_count": log_file_count,
         "error_messages": error_messages,
         "warning_messages": warning_messages
@@ -68,6 +72,7 @@ def print_report(summary):
     print(f"Total ERRORs: {summary['total_errors']}")
     print(f"Total WARNINGs: {summary['total_warnings']}")
     print(f"Total INFOs: {summary['total_infos']}")
+    print(f"Total DEBUGs: {summary['total_debugs']}")
     if summary.get("error_messages"):
         if summary["error_messages"]:
             print("\n--- Error Summary ---")
