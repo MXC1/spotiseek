@@ -77,14 +77,15 @@ def process_playlist(playlist_url: str) -> None:
     logging.info(f"Processing playlist: {playlist_url}")
 
 
-    try:
-        # Generate m3u8 file path for this playlist, sanitize for Windows
-        safe_name = re.sub(r'[<>:"/\\|?*]', '_', playlist_url.replace('https://', ''))
-        m3u8_path = os.path.join(M3U8S_DIR, f"{safe_name}.m3u8")
 
+    try:
         # Fetch playlist name and tracks from Spotify
         playlist_name, tracks = get_tracks_from_playlist(playlist_url)
         logging.info(f"Found {len(tracks)} tracks in playlist '{playlist_name}'.")
+
+        # Generate m3u8 file path for this playlist, sanitize playlist name for Windows
+        safe_name = re.sub(r'[<>:"/\\|?*,]', '_', playlist_name.replace(' ', '_'))
+        m3u8_path = os.path.join(M3U8S_DIR, f"{safe_name}.m3u8")
 
         # Add playlist to database and get its ID, saving m3u8 path and playlist name
         playlist_id = track_db.add_playlist(playlist_url, m3u8_path, playlist_name)
@@ -263,7 +264,7 @@ def main(reset_db: bool = False) -> None:
         logging.info("--reset flag detected. Clearing database before starting workflow.")
         track_db.clear_database()
         # Delete all m3u8 files in the database/m3u8s directory
-        m3u8_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'database', 'm3u8s')
+        m3u8_dir = os.path.join(os.path.dirname(__file__), '..', 'database', 'm3u8s')
         delete_all_m3u8_files(m3u8_dir)
         logging.info(f"All .m3u8 files in {m3u8_dir} have been deleted.")
         # Re-initialize after clearing (singleton pattern ensures clean state)
