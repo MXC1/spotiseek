@@ -26,7 +26,7 @@ setup_logging(log_name_prefix="workflow")
 logging.debug(f"Environment variables loaded from {dotenv_path}")
 
 from database_management import TrackDB
-from m3u8_management import delete_all_m3u8_files
+from m3u8_management import delete_all_m3u8_files, write_playlist_m3u8
 from scrape_spotify_playlist import get_tracks_from_playlist
 from slskd_downloader import download_track, query_download_status
 
@@ -93,14 +93,9 @@ def process_playlist(playlist_url: str) -> None:
         logging.error(f"Failed to get tracks for playlist {playlist_url}: {e}")
         return
 
-    # Write commented rows for each track to the m3u8 file
+    # Write commented rows for each track to the m3u8 file using m3u8_management
     try:
-        with open(m3u8_path, 'w', encoding='utf-8') as m3u8_file:
-            m3u8_file.write('#EXTM3U\n')
-            for track in tracks:
-                spotify_id, artist, track_name = track
-                comment = f"# {spotify_id} - {artist} - {track_name}\n"
-                m3u8_file.write(comment)
+        write_playlist_m3u8(m3u8_path, tracks)
     except Exception as e:
         logging.error(f"Failed to write m3u8 file for playlist {playlist_url}: {e}")
 
