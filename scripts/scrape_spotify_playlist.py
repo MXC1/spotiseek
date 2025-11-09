@@ -7,11 +7,12 @@ playlists using the Spotify Web API. It handles authentication, pagination,
 and name normalization for downstream processing.
 """
 
+
 import argparse
-import logging
 import os
 import re
 from typing import List, Tuple
+from logs_utils import write_log
 
 import spotipy
 from dotenv import load_dotenv
@@ -81,11 +82,11 @@ def get_tracks_from_playlist(playlist_url: str) -> List[Tuple[str, str, str]]:
     client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
 
     if not client_id or not client_secret:
-        logging.error("Spotify API credentials are not set.")
+        write_log.error("SPOTIFY_CREDENTIALS_MISSING", "Spotify API credentials are not set.")
         raise ValueError("Missing Spotify API credentials (SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET).")
 
     # Authenticate with Spotify API
-    logging.info("Authenticating with Spotify API...")
+    write_log.info("SPOTIFY_AUTH", "Authenticating with Spotify API.")
     try:
         auth_manager = SpotifyClientCredentials(
             client_id=client_id,
@@ -93,17 +94,17 @@ def get_tracks_from_playlist(playlist_url: str) -> List[Tuple[str, str, str]]:
         )
         sp = spotipy.Spotify(auth_manager=auth_manager)
     except Exception as e:
-        logging.error(f"Failed to authenticate with Spotify: {e}")
+        write_log.error("SPOTIFY_AUTH_FAIL", "Failed to authenticate with Spotify.", {"error": str(e)})
         raise
 
     # Extract playlist ID from URL
     match = re.search(r"playlist/([a-zA-Z0-9]+)", playlist_url)
     if not match:
-        logging.error("Invalid playlist URL format.")
+        write_log.error("SPOTIFY_URL_INVALID", "Invalid playlist URL format.", {"playlist_url": playlist_url})
         raise ValueError("Invalid playlist URL. Expected format: https://open.spotify.com/playlist/...")
     
     playlist_id = match.group(1)
-    logging.info(f"Fetching playlist metadata and tracks for playlist ID: {playlist_id}")
+    write_log.info("SPOTIFY_FETCH", "Fetching playlist metadata and tracks.", {"playlist_id": playlist_id})
 
     # Fetch playlist metadata (name) and all tracks with pagination
     try:
@@ -111,7 +112,7 @@ def get_tracks_from_playlist(playlist_url: str) -> List[Tuple[str, str, str]]:
         playlist_name = playlist_obj.get("name", "")
         results = playlist_obj["tracks"]
     except Exception as e:
-        logging.error(f"Failed to fetch playlist metadata or tracks: {e}")
+        write_log.error("SPOTIFY_FETCH_FAIL", "Failed to fetch playlist metadata or tracks.", {"playlist_id": playlist_id, "error": str(e)})
         raise
 
     tracks = results["items"]
@@ -122,10 +123,10 @@ def get_tracks_from_playlist(playlist_url: str) -> List[Tuple[str, str, str]]:
             results = sp.next(results)
             tracks.extend(results["items"])
         except Exception as e:
-            logging.warning(f"Failed to fetch next page of tracks: {e}")
+            write_log.warn("SPOTIFY_PAGINATION_FAIL", "Failed to fetch next page of tracks.", {"playlist_id": playlist_id, "error": str(e)})
             break
 
-    logging.info(f"Found {len(tracks)} total tracks in playlist '{playlist_name}'.")
+    write_log.info("SPOTIFY_TRACKS_FOUND", "Found tracks in playlist.", {"playlist_name": playlist_name, "track_count": len(tracks)})
 
     # Process and clean track data
     cleaned_tracks = []
@@ -133,12 +134,12 @@ def get_tracks_from_playlist(playlist_url: str) -> List[Tuple[str, str, str]]:
         track = item.get("track")
         
         if not track:
-            logging.warning(f"Track {idx} is missing track data. Skipping.")
+            write_log.warn("SPOTIFY_TRACK_MISSING", "Track is missing track data. Skipping.", {"index": idx})
             continue
         
         spotify_id = track.get("id")
         if not spotify_id:
-            logging.warning(f"Track {idx} is missing Spotify ID. Skipping.")
+            write_log.warn("SPOTIFY_ID_MISSING", "Track is missing Spotify ID. Skipping.", {"index": idx})
             continue
         
         # Concatenate and clean artist names
@@ -165,5 +166,5 @@ if __name__ == "__main__":
         for spotify_id, artists, track_name in tracks:
             print(f"{spotify_id}\t{artists}\t{track_name}")
     except Exception as e:
-        logging.error(f"Error: {e}")
+        write_log.error("SPOTIFY_MAIN_ERROR", "Error in main execution.", {"error": str(e)})
         exit(1)
