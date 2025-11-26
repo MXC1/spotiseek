@@ -9,19 +9,14 @@ import os
 import sqlite3
 import threading
 from typing import Optional, List, Tuple
-from logs_utils import write_log
+from .logs_utils import write_log
 
-# Validate environment configuration
+# Get environment configuration (used by TrackDB class)
 ENV = os.getenv("APP_ENV")
-if not ENV:
-    raise EnvironmentError(
-        "APP_ENV environment variable is not set. Database interaction is disabled."
-    )
 
-# Construct database path based on environment
+# Construct database path based on environment (used by TrackDB class)
 DB_DIR = os.path.join(os.path.dirname(__file__), '..', 'database')
-os.makedirs(DB_DIR, exist_ok=True)
-DB_PATH = os.path.join(DB_DIR, f"database_{ENV}.db")
+DB_PATH = os.path.join(DB_DIR, f"database_{ENV}.db") if ENV else None
 
 
 class TrackDB:
@@ -61,6 +56,15 @@ class TrackDB:
         """
         if self._initialized:
             return
+        
+        # Validate environment configuration when TrackDB is instantiated
+        if not ENV:
+            raise EnvironmentError(
+                "APP_ENV environment variable is not set. Database interaction is disabled."
+            )
+        
+        # Ensure database directory exists
+        os.makedirs(DB_DIR, exist_ok=True)
         
         self._initialized = True
         write_log.info("DB_CONNECT", "Connecting to database.", {"db_path": db_path})
@@ -466,3 +470,41 @@ class TrackDB:
         """Close the database connection."""
         write_log.info("DB_CLOSE", "Closing database connection.")
         self.conn.close()
+
+# --- Dashboard Helper Functions ---
+from typing import Optional, Tuple
+def get_playlists(db_path: str) -> Tuple[Optional['pd.DataFrame'], Optional[str]]:
+    """
+    Retrieve all playlists from the database.
+    Args:
+        db_path: Path to the SQLite database file
+    Returns:
+        Tuple of (DataFrame with playlists, error message if any)
+    """
+    try:
+        import pandas as pd
+        conn = sqlite3.connect(db_path)
+        query = "SELECT playlist_name, playlist_url FROM playlists"
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+        return df, None
+    except Exception as e:
+        return None, str(e)
+
+def get_track_status_breakdown(db_path: str) -> Tuple[Optional['pd.DataFrame'], Optional[str]]:
+    """
+    Retrieve track download status breakdown from the database.
+    Args:
+        db_path: Path to the SQLite database file
+    Returns:
+        Tuple of (DataFrame with status breakdown, error message if any)
+    """
+    try:
+        import pandas as pd
+        conn = sqlite3.connect(db_path)
+        query = "SELECT download_status, COUNT(*) as count FROM tracks GROUP BY download_status"
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+        return df, None
+    except Exception as e:
+        return None, str(e)

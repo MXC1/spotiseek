@@ -19,6 +19,11 @@ _LOGGING_INITIALIZED = False
 JSON_LOG_KEYS = ["timestamp", "level", "message", "event_id", "context"]
 
 
+
+# --- Log File Helper Functions ---
+from typing import List
+import glob
+
 class JsonLogFormatter(logging.Formatter):
     """
     Custom logging formatter to output logs in structured JSON format.
@@ -40,6 +45,106 @@ class JsonLogFormatter(logging.Formatter):
         # Only include keys in JSON_LOG_KEYS
         filtered = {k: log_record[k] for k in JSON_LOG_KEYS}
         return json.dumps(filtered, ensure_ascii=False)
+
+def get_log_files(logs_dir: str) -> List[str]:
+    """
+    Recursively find all .log files in the logs directory.
+    Args:
+        logs_dir: Path to the logs directory
+    Returns:
+        List of log file paths
+    """
+    pattern = os.path.join(logs_dir, '**', '*.log')
+    return glob.glob(pattern, recursive=True)
+
+def parse_logs(log_files: List[str]) -> List[dict]:
+    """
+    Parse JSON log files and return list of log entries.
+    Args:
+        log_files: List of log file paths
+    Returns:
+        List of parsed log entries
+    """
+    log_entries = []
+    for file in log_files:
+        try:
+            with open(file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line.strip())
+                        log_entries.append(entry)
+                    except Exception:
+                        continue
+        except Exception:
+            continue
+    return log_entries
+
+def filter_warning_error_logs(log_entries: List[dict]) -> List[dict]:
+    """
+    Filter log entries to only include WARNING and ERROR levels.
+    Args:
+        log_entries: List of log entries
+    Returns:
+        Filtered list containing only WARNING and ERROR logs
+    """
+    return [entry for entry in log_entries if entry.get('level') in ('WARNING', 'ERROR')]
+
+def logs_to_dataframe(log_entries: List[dict]):
+    """
+    Convert log entries to a pandas DataFrame.
+    Args:
+        log_entries: List of log entries
+    Returns:
+        DataFrame with log data sorted by timestamp
+    """
+    import pandas as pd
+    rows = []
+    for entry in log_entries:
+        rows.append({
+            'timestamp': entry.get('timestamp'),
+            'level': entry.get('level'),
+            'event_id': entry.get('event_id'),
+            'message': entry.get('message'),
+        })
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        try:
+            df['timestamp'] = pd.to_datetime(
+                df['timestamp'], 
+                format='%Y%m%d_%H%M%S_%f', 
+                errors='coerce'
+            )
+            df = df.sort_values('timestamp', ascending=False)
+        except Exception:
+            pass
+    return df
+
+def prepare_log_summary(df_logs, warn_err_logs):
+    """
+    Prepare a summary of logs grouped by level and event_id with sample logs.
+    Args:
+        df_logs: DataFrame of log entries
+        warn_err_logs: Original list of warning/error log entries
+    Returns:
+        DataFrame with summary and sample logs
+    """
+    import pandas as pd
+    summary = df_logs.groupby(['level', 'event_id']).size().reset_index(name='count')
+    samples = []
+    for _, row in summary.iterrows():
+        level = row['level']
+        event_id = row['event_id']
+        sample_row = df_logs[(df_logs['level'] == level) & (df_logs['event_id'] == event_id)].iloc[0]
+        matching_indices = df_logs.index[(df_logs['level'] == level) & (df_logs['event_id'] == event_id)]
+        context_obj = warn_err_logs[matching_indices[0]].get('context', {})
+        sample_str = (
+            f"Timestamp: {sample_row['timestamp']}\n"
+            f"Message: {sample_row['message']}\n"
+            f"Context: {json.dumps(context_obj, indent=2)}"
+        )
+        samples.append(sample_str)
+    summary['sample_log'] = samples
+    return summary
 
 
 def setup_logging(
