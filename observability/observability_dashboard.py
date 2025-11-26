@@ -61,12 +61,13 @@ def render_log_summary_table(summary: pd.DataFrame):
         summary: DataFrame containing log summary with sample logs
     """
     # Render table header
-    header_cols = st.columns([2, 3, 4, 1, 2])
+    header_cols = st.columns([2, 3, 4, 1, 2, 2])
     header_cols[0].markdown("**Level**")
     header_cols[1].markdown("**Event ID**")
     header_cols[2].markdown("**Message**")
     header_cols[3].markdown("**Count**")
-    header_cols[4].markdown("**Action**")
+    header_cols[4].markdown("**Latest**")
+    header_cols[5].markdown("**Action**")
     
     # Initialize session state for selected sample
     if 'selected_sample_idx' not in st.session_state:
@@ -74,7 +75,7 @@ def render_log_summary_table(summary: pd.DataFrame):
     
     # Render each row with expandable sample
     for i, row in summary.iterrows():
-        cols = st.columns([2, 3, 4, 1, 2])
+        cols = st.columns([2, 3, 4, 1, 2, 2])
         cols[0].markdown(f"{row['level']}")
         cols[1].markdown(f"{row['event_id']}")
         # Show message (truncate if too long)
@@ -85,12 +86,11 @@ def render_log_summary_table(summary: pd.DataFrame):
             display_message = message
         cols[2].markdown(f"{display_message}")
         cols[3].markdown(f"{row['count']}")
-        
-        if cols[4].button("View Sample", key=f"view_sample_{i}"):
+        cols[4].markdown(f"{row.get('latest', '')}")
+        if cols[5].button("View Sample", key=f"view_sample_{i}"):
             st.session_state['selected_sample_idx'] = (
                 None if st.session_state['selected_sample_idx'] == i else i
             )
-        
         # Show sample log if this row is selected
         if st.session_state['selected_sample_idx'] == i:
             st.code(row['sample_log'], language='json')

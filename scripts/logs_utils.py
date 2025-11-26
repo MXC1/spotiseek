@@ -131,12 +131,14 @@ def prepare_log_summary(df_logs, warn_err_logs):
     import pandas as pd
     summary = df_logs.groupby(['level', 'event_id', 'message']).size().reset_index(name='count')
     samples = []
+    latest_times = []
     for _, row in summary.iterrows():
         level = row['level']
         event_id = row['event_id']
         message = row['message']
-        sample_row = df_logs[(df_logs['level'] == level) & (df_logs['event_id'] == event_id) & (df_logs['message'] == message)].iloc[0]
-        matching_indices = df_logs.index[(df_logs['level'] == level) & (df_logs['event_id'] == event_id) & (df_logs['message'] == message)]
+        group_df = df_logs[(df_logs['level'] == level) & (df_logs['event_id'] == event_id) & (df_logs['message'] == message)]
+        sample_row = group_df.iloc[0]
+        matching_indices = group_df.index
         context_obj = warn_err_logs[matching_indices[0]].get('context', {})
         sample_str = (
             f"Timestamp: {sample_row['timestamp']}\n"
@@ -144,7 +146,29 @@ def prepare_log_summary(df_logs, warn_err_logs):
             f"Context: {json.dumps(context_obj, indent=2)}"
         )
         samples.append(sample_str)
+        # Find latest timestamp in this group and format it
+        latest_ts = group_df['timestamp'].max()
+        if pd.isnull(latest_ts):
+            latest_times.append("")
+        else:
+            # Format: '26 November 2025 19:12'
+            latest_times.append(latest_ts.strftime('%d %B %Y %H:%M'))
     summary['sample_log'] = samples
+    summary['latest'] = latest_times
+    # Explicit column ordering for clarity and maintainability
+    desired_order = [
+        'level',
+        'event_id',
+        'message',
+        'count',
+        'latest',
+        'sample_log',
+    ]
+    # Only include columns that exist in the DataFrame (for robustness)
+    ordered_cols = [col for col in desired_order if col in summary.columns]
+    # Add any extra columns at the end
+    extra_cols = [col for col in summary.columns if col not in ordered_cols]
+    summary = summary[ordered_cols + extra_cols]
     return summary
 
 
