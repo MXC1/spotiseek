@@ -144,8 +144,8 @@ def prepare_log_summary(df_logs, warn_err_logs):
         sample_str = (
             f"Timestamp: {sample_row['timestamp']}\n"
             f"Level: {sample_row['level']}\n"
-            f"Message: {sample_row['message']}\n"
             f"Event ID: {sample_row['event_id']}\n"
+            f"Message: {sample_row['message']}\n"
             f"Context: {json.dumps(context_obj, indent=2)}"
         )
         samples.append(sample_str)
@@ -154,8 +154,8 @@ def prepare_log_summary(df_logs, warn_err_logs):
         if pd.isnull(latest_ts):
             latest_times.append("")
         else:
-            # Format: '26 November 2025 19:12'
-            latest_times.append(latest_ts.strftime('%d %B %Y %H:%M'))
+            # Format: 'Wed 26 November 2025 19:12'
+            latest_times.append(latest_ts.strftime('%a %d %B %Y %H:%M'))
     summary['sample_log'] = samples
     summary['latest'] = latest_times
     # Explicit column ordering for clarity and maintainability

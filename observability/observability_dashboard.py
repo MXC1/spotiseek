@@ -38,19 +38,18 @@ DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'database', f'database_{
 
 def render_log_breakdown_section():
     """Render the warning and error log breakdown section."""
-    with st.expander("Warning and Error Log Breakdown", expanded=True):
-        log_files = get_log_files(LOGS_DIR)
-        log_entries = parse_logs(log_files)
-        warn_err_logs = filter_warning_error_logs(log_entries)
-        df_logs = logs_to_dataframe(warn_err_logs)
-        
-        st.subheader("WARNING and ERROR Log Summary")
-        
-        if not df_logs.empty:
-            summary = prepare_log_summary(df_logs, warn_err_logs)
-            render_log_summary_table(summary)
-        else:
-            st.info("No WARNING or ERROR logs found.")
+    log_files = get_log_files(LOGS_DIR)
+    log_entries = parse_logs(log_files)
+    warn_err_logs = filter_warning_error_logs(log_entries)
+    df_logs = logs_to_dataframe(warn_err_logs)
+    
+    st.subheader("WARNING and ERROR Log Summary")
+    
+    if not df_logs.empty:
+        summary = prepare_log_summary(df_logs, warn_err_logs)
+        render_log_summary_table(summary)
+    else:
+        st.info("No WARNING or ERROR logs found.")
 
 
 def render_log_summary_table(summary: pd.DataFrame):
