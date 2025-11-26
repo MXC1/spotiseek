@@ -137,9 +137,11 @@ def prepare_log_summary(df_logs, warn_err_logs):
         event_id = row['event_id']
         message = row['message']
         group_df = df_logs[(df_logs['level'] == level) & (df_logs['event_id'] == event_id) & (df_logs['message'] == message)]
-        sample_row = group_df.iloc[0]
-        matching_indices = group_df.index
-        context_obj = warn_err_logs[matching_indices[0]].get('context', {})
+        # Get the row with the latest timestamp
+        latest_idx = group_df['timestamp'].idxmax()
+        sample_row = group_df.loc[latest_idx]
+        # Find the corresponding context in warn_err_logs
+        context_obj = warn_err_logs[latest_idx].get('context', {}) if latest_idx in warn_err_logs else {}
         sample_str = (
             f"Timestamp: {sample_row['timestamp']}\n"
             f"Message: {sample_row['message']}\n"
@@ -147,11 +149,10 @@ def prepare_log_summary(df_logs, warn_err_logs):
         )
         samples.append(sample_str)
         # Find latest timestamp in this group and format it
-        latest_ts = group_df['timestamp'].max()
+        latest_ts = sample_row['timestamp']
         if pd.isnull(latest_ts):
             latest_times.append("")
         else:
-            # Format: '26 November 2025 19:12'
             latest_times.append(latest_ts.strftime('%d %B %Y %H:%M'))
     summary['sample_log'] = samples
     summary['latest'] = latest_times
