@@ -28,3 +28,23 @@ services:
       - ./database:/app/database:ro
       - ./scripts:/app/scripts:ro
     restart: unless-stopped
+
+  workflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.workflow
+    environment:
+      - APP_ENV=${APP_ENV:-test}
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
+      - TOKEN=${TOKEN}
+      - SLSKD_BASE_URL=http://slskd:5030
+    volumes:
+      - ./database:/app/database:rw
+      - ./playlists:/app/playlists:ro
+      - ./slskd_docker_data/downloads:/app/slskd_docker_data/downloads:rw
+      - ./observability:/app/observability:rw
+      - ./scripts:/app/scripts:ro
+    depends_on:
+      - slskd
+    restart: unless-stopped

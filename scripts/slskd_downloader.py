@@ -20,7 +20,8 @@ from database_management import TrackDB
 load_dotenv()
 
 # slskd API configuration
-SLSKD_URL = "http://localhost:5030/api/v0"
+SLSKD_BASE_URL = os.getenv("SLSKD_BASE_URL", "http://localhost:5030")
+SLSKD_URL = f"{SLSKD_BASE_URL}/api/v0"
 TOKEN = os.getenv("TOKEN")
 
 # Search and download constants

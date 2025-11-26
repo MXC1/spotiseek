@@ -1,0 +1,2 @@
+# Run workflow.py every Thursday at 6pm (18:00)
+0 18 * * 4 cd /app && /usr/local/bin/python scripts/workflow.py >> /var/log/cron.log 2>&1
