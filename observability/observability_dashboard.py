@@ -93,7 +93,7 @@ def render_log_summary_table(summary: pd.DataFrame):
             )
         # Show sample log if this row is selected
         if st.session_state['selected_sample_idx'] == i:
-            st.code(row['sample_log'], language='json')
+            st.code(row['sample_log'], language='json', wrap_lines=True)
 
 
 def render_playlists_section():
