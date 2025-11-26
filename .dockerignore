@@ -1,0 +1,42 @@
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+.venv
+venv
+env
+
+# IDE
+.vscode
+.idea
+
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Dev files
+dev/
+.env
+
+# Test data
+observability/test_logs/
+
+# Downloads and data directories (large files)
+slskd_docker_data/downloads/
+slskd_docker_data/incomplete/
+slskd_docker_data/data/
+
+# MusicBee dev files
+dev/musicbee_spotiseek/

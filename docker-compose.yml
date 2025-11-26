@@ -14,3 +14,17 @@ services:
       - 50300:50300/tcp
     user: 1000:1000
     image: slskd/slskd:latest
+
+  streamlit-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8501:8501"
+    environment:
+      - APP_ENV=${APP_ENV:-test}
+    volumes:
+      - ./observability:/app/observability:ro
+      - ./database:/app/database:ro
+      - ./scripts:/app/scripts:ro
+    restart: unless-stopped

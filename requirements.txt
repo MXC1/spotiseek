@@ -2,3 +2,6 @@ spotipy
 requests
 pyyaml
 pytest
+streamlit
+plotly
+python-dotenv
