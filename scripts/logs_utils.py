@@ -159,21 +159,31 @@ def setup_logging(
     the first successful initialization. Log files are stored with a unique
     timestamp to prevent overwriting previous logs.
     
+    Logs are automatically organized by environment (APP_ENV) into separate
+    directory trees (e.g., test_logs/, prod_logs/).
+    
     Args:
-        logs_dir: Directory path for log files. Defaults to '_logs' subdirectory
-                 relative to this module's location.
+        logs_dir: Base directory path for log files. If None, defaults to 
+                 '{ENV}_logs' in the observability directory based on APP_ENV.
         log_level: Logging level (e.g., logging.INFO, logging.DEBUG).
         log_name_prefix: Prefix for log filename. Full name will be
                         '{prefix}_{timestamp}.log'.
     
     Example:
+        >>> os.environ['APP_ENV'] = 'test'
         >>> setup_logging(log_name_prefix="workflow", log_level=logging.DEBUG)
-        # Creates: logs/2025/11/08/workflow_20251108_143025_123456.log
+        # Creates: test_logs/2025/11/26/workflow_20251126_143025_123456.log
     """
     global _LOGGING_INITIALIZED
     
     if _LOGGING_INITIALIZED:
         return
+
+    # Determine environment-specific logs directory
+    if logs_dir is None:
+        env = os.getenv('APP_ENV', 'test')
+        base_dir = os.path.join(os.path.dirname(__file__), '..', 'observability')
+        logs_dir = os.path.join(base_dir, f'{env}_logs')
 
     # Generate timestamped directory structure
     now = datetime.now()

@@ -4,6 +4,10 @@ import sys
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 # Add parent directory to path to import from scripts/
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -19,14 +23,17 @@ from scripts.logs_utils import (
 from scripts.database_management import get_playlists, get_track_status_breakdown
 
 
+# Get environment from environment variable
+ENV = os.getenv("APP_ENV", "test")
+
 # Page configuration
-st.set_page_config(page_title="Spotiseek Observability", layout="wide")
-st.title("Spotiseek Observability Dashboard")
+st.set_page_config(page_title=f"Spotiseek Observability ({ENV.upper()})", layout="wide")
+st.title(f"Spotiseek Observability Dashboard - {ENV.upper()} Environment")
 
 
-# Constants
-LOGS_DIR = os.path.join(os.path.dirname(__file__), 'logs')
-DB_PATH = os.path.join(os.path.dirname(__file__), '../database/database_test.db')
+# Environment-specific constants
+LOGS_DIR = os.path.join(os.path.dirname(__file__), f'{ENV}_logs')
+DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'database', f'database_{ENV}.db')
 
 
 def render_log_breakdown_section():

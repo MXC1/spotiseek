@@ -9,7 +9,12 @@ import os
 import sqlite3
 import threading
 from typing import Optional, List, Tuple
-from .logs_utils import write_log
+
+# Handle both relative and absolute imports for flexibility
+try:
+    from .logs_utils import write_log
+except ImportError:
+    from logs_utils import write_log
 
 # Get environment configuration (used by TrackDB class)
 ENV = os.getenv("APP_ENV")
