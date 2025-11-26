@@ -172,7 +172,7 @@ def render_status_chart(status_df: pd.DataFrame):
     fig.update_xaxes(fixedrange=True)
     fig.update_yaxes(fixedrange=True)
     
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 
 def render_status_table(status_df: pd.DataFrame):
