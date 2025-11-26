@@ -129,13 +129,14 @@ def prepare_log_summary(df_logs, warn_err_logs):
         DataFrame with summary and sample logs
     """
     import pandas as pd
-    summary = df_logs.groupby(['level', 'event_id']).size().reset_index(name='count')
+    summary = df_logs.groupby(['level', 'event_id', 'message']).size().reset_index(name='count')
     samples = []
     for _, row in summary.iterrows():
         level = row['level']
         event_id = row['event_id']
-        sample_row = df_logs[(df_logs['level'] == level) & (df_logs['event_id'] == event_id)].iloc[0]
-        matching_indices = df_logs.index[(df_logs['level'] == level) & (df_logs['event_id'] == event_id)]
+        message = row['message']
+        sample_row = df_logs[(df_logs['level'] == level) & (df_logs['event_id'] == event_id) & (df_logs['message'] == message)].iloc[0]
+        matching_indices = df_logs.index[(df_logs['level'] == level) & (df_logs['event_id'] == event_id) & (df_logs['message'] == message)]
         context_obj = warn_err_logs[matching_indices[0]].get('context', {})
         sample_str = (
             f"Timestamp: {sample_row['timestamp']}\n"
