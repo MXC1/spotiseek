@@ -28,7 +28,7 @@ write_log.debug("ENV_LOAD", "Environment variables loaded.", {"dotenv_path": dot
 
 from database_management import TrackDB
 from scrape_spotify_playlist import get_tracks_from_playlist
-from slskd_downloader import download_track, query_download_status
+from slskd_downloader import download_track, query_download_status, process_redownload_queue
 from m3u8_management import delete_all_m3u8_files, write_playlist_m3u8
 from xml_management import export_itunes_xml
 
@@ -214,6 +214,12 @@ def _handle_completed_download(file: dict, spotify_id: str) -> None:
         file: File object from slskd API
         spotify_id: Spotify track identifier
     """
+    # Check current status - don't overwrite redownload_pending
+    current_status = track_db.get_track_status(spotify_id)
+    if current_status == "redownload_pending":
+        write_log.debug("DOWNLOAD_COMPLETE_SKIP", "Skipping status update for track marked for redownload.", {"spotify_id": spotify_id})
+        return
+    
     filename_rel = file.get("filename")
     file_name = None
     last_subfolder = None
@@ -316,7 +322,12 @@ def main(reset_db: bool = False) -> None:
         process_playlist(playlist_url)
         update_download_statuses()
 
+    # Process redownload queue (quality upgrades for non-WAV files)
+    write_log.info("REDOWNLOAD_QUEUE_START", "Processing quality upgrade queue...")
+    process_redownload_queue()
 
+    update_download_statuses()
+    
     # Export playlists and tracks to iTunes-style XML
     try:
         xml_path = os.path.abspath(os.path.join(DATABASE_DIR, "spotiseek_library.xml"))

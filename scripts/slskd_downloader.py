@@ -28,8 +28,108 @@ TOKEN = os.getenv("TOKEN")
 MAX_SEARCH_ATTEMPTS = 100
 SEARCH_POLL_INTERVAL = 2  # seconds
 
+
 # Database instance
 track_db = TrackDB()
+
+# --- Helper Functions ---
+def extract_ext_bitrate(file):
+    ext = (file.get("extension") or '').lower()
+    fname = file.get("filename", "")
+    if not ext and fname and "." in fname:
+        ext = fname.rsplit(".", 1)[-1].lower()
+    bitrate = file.get("bitRate") or file.get("bitrate")
+    try:
+        bitrate = int(bitrate) if bitrate is not None else None
+    except Exception:
+        bitrate = None
+    return ext, bitrate
+
+def is_better_quality(file, current_extension, current_bitrate):
+    ext, bitrate = extract_ext_bitrate(file)
+    # Prefer WAV over anything else
+    if ext == "wav" and current_extension != "wav":
+        return True
+    # Prefer FLAC over MP3
+    if ext == "flac" and current_extension != "flac":
+        return True
+    # Prefer higher bitrate MP3
+    if ext == "mp3" and current_extension == "mp3":
+        if bitrate and current_bitrate and bitrate > current_bitrate:
+            return True
+    # Prefer MP3 over lower quality (e.g., ogg, m4a, etc.)
+    if ext == "mp3" and current_extension not in ("mp3", "wav", "flac"):
+        return True
+    return False
+
+def candidate_sort_key(item):
+    file, _ = item
+    ext, bitrate = extract_ext_bitrate(file)
+    # WAV > FLAC > MP3 (by bitrate) > others
+    if ext == "wav":
+        return (3, 0)
+    if ext == "flac":
+        return (2, 0)
+    if ext == "mp3":
+        return (1, bitrate if bitrate is not None else 0)
+    return (0, 0)
+
+def select_best_file_from_responses(responses, search_text):
+    """Select the best file from responses, filtering out remixes/edits/etc unless requested."""
+    excluded_keywords = [
+        'remix', 'edit', 'bootleg', 'mashup', 'mix', 'acapella',
+        'instrumental', 'sped up', 'slowed', 'cover', 'karaoke',
+        'tribute', 'demo', 'live', 'acoustic', 'version', 'remaster',
+        'flip', 'extended', 'rework', 're-edit', 'dub', 'radio'
+    ]
+    search_text_lower = search_text.lower()
+    allow_alternatives = any(kw in search_text_lower for kw in excluded_keywords)
+    def is_original(filename):
+        fname_lower = filename.lower()
+        for keyword in excluded_keywords:
+            if keyword in fname_lower:
+                return False
+        return True
+    candidates = []
+    for response in responses:
+        username = response.get("username")
+        files = response.get("files", [])
+        for file in files:
+            candidates.append((file, username))
+    if allow_alternatives:
+        search_pool = candidates
+    else:
+        original_candidates = [(f, u) for f, u in candidates if is_original(f.get("filename", ""))]
+        search_pool = original_candidates if original_candidates else candidates
+    # 1. WAV files
+    for file, username in search_pool:
+        ext, _ = extract_ext_bitrate(file)
+        fname = file.get("filename", "").lower()
+        if ext == "wav" or fname.endswith(".wav"):
+            return file, username
+    # 2. MP3 320kbps
+    for file, username in search_pool:
+        ext, bitrate = extract_ext_bitrate(file)
+        fname = file.get("filename", "").lower()
+        if (ext == "mp3" or fname.endswith(".mp3")) and bitrate == 320:
+            return file, username
+    # 3. Fallback: first available file
+    if search_pool:
+        return search_pool[0]
+    return None, None
+
+def enqueue_and_update_db(search_id, file, username, spotify_id):
+    filename = file.get("filename")
+    size = file.get("size")
+    extension, bitrate = extract_ext_bitrate(file)
+    fileinfo = {"filename": filename, "size": size}
+    write_log.info("SLSKD_DOWNLOAD", "Downloading file.", {"filename": filename})
+    download_resp = enqueue_download(search_id, fileinfo, username, spotify_id)
+    write_log.debug("SLSKD_DOWNLOAD_INITIATED", "Download initiated.", {"download_resp": download_resp})
+    track_db.update_track_status(spotify_id, "downloading")
+    track_db.update_slskd_file_name(spotify_id, filename)
+    track_db.update_extension_bitrate(spotify_id, extension, bitrate)
+    return download_resp
 
 def create_search(search_text: str) -> str:
     """
@@ -86,13 +186,28 @@ def get_search_responses(search_id: str) -> List[Dict[str, Any]]:
             write_log.debug("SLSKD_RESPONSES_GET", "Responses GET.", {"status_code": resp.status_code, "response": resp.text})
             resp.raise_for_status()
             data = resp.json()
+            # Check if isComplete is available from the search status endpoint
+            try:
+                status_resp = requests.get(
+                    f"{SLSKD_URL}/searches/{search_id}",
+                    headers={"X-API-Key": TOKEN}
+                )
+                status_resp.raise_for_status()
+                status_data = status_resp.json()
+                is_complete = status_data.get("isComplete", False)
+            except Exception as e:
+                write_log.error("SLSKD_SEARCH_STATUS_FAIL", "Failed to get search status.", {"error": str(e)})
+                is_complete = False
             if data and isinstance(data, list) and len(data) > 0:
                 write_log.debug("SLSKD_RESPONSES_FOUND", "Found search responses.", {"count": len(data)})
                 return data
+            if is_complete:
+                write_log.debug("SLSKD_SEARCH_COMPLETE", "Search marked complete, exiting polling loop.", {"search_id": search_id})
+                break
         except Exception as e:
             write_log.error("SLSKD_SEARCH_POLL_FAIL", "Error during response polling.", {"error": str(e)})
         time.sleep(SEARCH_POLL_INTERVAL)
-    write_log.debug("SLSKD_SEARCH_POLL_NONE", "No search responses found after maximum polling attempts.", {"search_id": search_id})
+    write_log.debug("SLSKD_SEARCH_POLL_NONE", "No search responses found after polling attempts or search marked complete.", {"search_id": search_id})
     return []
 
 def enqueue_download(
@@ -166,12 +281,26 @@ def download_track(artist: str, track: str, spotify_id: str) -> None:
     Note:
         Skips download if track status is already in a terminal or active state
         (completed, queued, downloading, requested, inprogress).
+        However, if the track extension is not "wav", it will mark the track
+        for redownload (status: "redownload_pending") to upgrade quality.
     """
     # Skip if already downloaded or in progress
     current_status = track_db.get_track_status(spotify_id)
     skip_statuses = {"completed", "queued", "downloading", "requested", "inprogress"}
     
     if current_status in skip_statuses:
+        # Check if track needs quality upgrade (non-wav files)
+        current_extension = track_db.get_track_extension(spotify_id)
+        if current_extension and current_extension.lower() != "wav":
+            # Mark for redownload but don't process now (will be processed later)
+            track_db.update_track_status(spotify_id, "redownload_pending")
+            write_log.info("SLSKD_REDOWNLOAD_PENDING", "Marking track for quality upgrade.", {
+                "artist": artist, 
+                "track": track, 
+                "current_extension": current_extension,
+                "current_status": current_status
+            })
+            return
         write_log.debug("SLSKD_SKIP", "Skipping download.", {"artist": artist, "track": track, "current_status": current_status})
         return
 
@@ -180,57 +309,6 @@ def download_track(artist: str, track: str, spotify_id: str) -> None:
     track_db.update_track_status(spotify_id, "searching")
     
 
-    def select_best_file(responses, search_text):
-        """Select the best file from responses, filtering out remixes/edits/etc unless requested."""
-        excluded_keywords = [
-            'remix', 'edit', 'bootleg', 'mashup', 'mix', 'acapella',
-            'instrumental', 'sped up', 'slowed', 'cover', 'karaoke',
-            'tribute', 'demo', 'live', 'acoustic', 'version', 'remaster',
-            'flip'
-        ]
-
-        search_text_lower = search_text.lower()
-        # If user is searching for an alternative version, do not filter
-        allow_alternatives = any(kw in search_text_lower for kw in excluded_keywords)
-
-        def is_original(filename):
-            fname_lower = filename.lower()
-            for keyword in excluded_keywords:
-                if keyword in fname_lower:
-                    return False
-            return True
-
-        candidates = []
-        for response in responses:
-            username = response.get("username")
-            files = response.get("files", [])
-            for file in files:
-                candidates.append((file, username))
-
-        if allow_alternatives:
-            search_pool = candidates
-        else:
-            original_candidates = [(f, u) for f, u in candidates if is_original(f.get("filename", ""))]
-            search_pool = original_candidates if original_candidates else candidates
-
-        # 1. WAV files
-        for file, username in search_pool:
-            ext = (file.get("extension") or "").lower()
-            fname = file.get("filename", "").lower()
-            if ext == "wav" or fname.endswith(".wav"):
-                return file, username
-
-        # 2. MP3 320kbps
-        for file, username in search_pool:
-            ext = (file.get("extension") or "").lower()
-            fname = file.get("filename", "").lower()
-            if (ext == "mp3" or fname.endswith(".mp3")) and file.get("bitRate") == 320:
-                return file, username
-
-        # 3. Fallback: first available file
-        if search_pool:
-            return search_pool[0]
-        return None, None
 
     try:
         # Perform search on Soulseek network
@@ -241,31 +319,12 @@ def download_track(artist: str, track: str, spotify_id: str) -> None:
             track_db.update_track_status(spotify_id, "not_found")
             return
         # Select best file according to rules
-        best_file, username = select_best_file(responses, search_text)
+        best_file, username = select_best_file_from_responses(responses, search_text)
         if not best_file:
             write_log.info("SLSKD_NO_FILES", "No files in search results.", {"artist": artist, "track": track})
             track_db.update_track_status(spotify_id, "failed")
             return
-        filename = best_file.get("filename")
-        size = best_file.get("size")
-        extension = best_file.get("extension")
-        bitrate = best_file.get("bitRate") or best_file.get("bitrate")
-        # If extension is empty, extract from filename
-        if not extension and filename:
-            if "." in filename:
-                extension = filename.rsplit(".", 1)[-1].lower()
-            else:
-                extension = None
-        fileinfo = {"filename": filename, "size": size}
-        # Enqueue download and update database
-        write_log.info("SLSKD_DOWNLOAD", "Downloading file.", {"filename": filename})
-        download_resp = enqueue_download(search_id, fileinfo, username, spotify_id)
-        write_log.debug("SLSKD_DOWNLOAD_INITIATED", "Download initiated.", {"download_resp": download_resp})
-        # Pass the full filename (may include subdirectories) so TrackDB can trim as needed
-        track_db.update_track_status(spotify_id, "downloading")
-        track_db.update_slskd_file_name(spotify_id, filename)
-        # Update extension and bitrate in DB if available
-        track_db.update_extension_bitrate(spotify_id, extension, bitrate)
+        enqueue_and_update_db(search_id, best_file, username, spotify_id)
     except Exception as e:
         write_log.error("SLSKD_DOWNLOAD_FAIL", f"Failed to download track.", {"artist": artist, "track": track, "error": str(e)})
         track_db.update_track_status(spotify_id, "failed")
@@ -292,6 +351,104 @@ def query_download_status() -> List[Dict[str, Any]]:
     except Exception as e:
         write_log.error("SLSKD_QUERY_STATUS_FAIL", "Failed to query download status.", {"error": str(e)})
         return []
+
+
+def process_redownload_queue() -> None:
+    """
+    Process tracks marked for redownload (quality upgrade).
+    
+    This function should be called after all new tracks have been processed
+    to upgrade existing tracks that don't have WAV quality.
+    """
+    write_log.info("SLSKD_REDOWNLOAD_QUEUE", "Processing redownload queue for quality upgrades...")
+    
+    # Get all tracks marked for redownload
+    redownload_tracks = track_db.get_tracks_by_status("redownload_pending")
+    
+    if not redownload_tracks:
+        write_log.info("SLSKD_REDOWNLOAD_EMPTY", "No tracks in redownload queue.")
+        return
+    
+    write_log.info("SLSKD_REDOWNLOAD_COUNT", f"Found {len(redownload_tracks)} tracks for quality upgrade.")
+    
+    for track_row in redownload_tracks:
+        # Track row structure: (spotify_id, track_name, artist, download_status, slskd_file_name, local_file_path, extension, bitrate, added_at)
+        spotify_id = track_row[0]
+        track_name = track_row[1]
+        artist = track_row[2]
+        current_extension = (track_row[6] or '').lower() if len(track_row) > 6 else None
+        current_bitrate = int(track_row[7]) if len(track_row) > 7 and track_row[7] is not None else None
+
+        write_log.info("SLSKD_REDOWNLOAD_TRACK", "Processing quality upgrade.", {
+            "spotify_id": spotify_id,
+            "track_name": track_name,
+            "artist": artist,
+            "current_extension": current_extension,
+            "current_bitrate": current_bitrate
+        })
+
+        search_text = f"{artist} {track_name}"
+        try:
+            search_id = create_search(search_text)
+            responses = get_search_responses(search_id)
+            if not responses:
+                write_log.info("SLSKD_REDOWNLOAD_NO_RESULTS", "No search results found for quality upgrade.", {
+                    "artist": artist, "track": track_name
+                })
+                continue
+            # Gather all candidate files
+            candidates = []
+            for response in responses:
+                username = response.get("username")
+                files = response.get("files", [])
+                for file in files:
+                    candidates.append((file, username))
+
+            # Gather all candidate files
+            candidates = []
+            for response in responses:
+                username = response.get("username")
+                files = response.get("files", [])
+                for file in files:
+                    candidates.append((file, username))
+
+            better_candidates = [(f, u) for f, u in candidates if is_better_quality(f, current_extension, current_bitrate)]
+
+            if not better_candidates:
+                write_log.info("SLSKD_REDOWNLOAD_SKIP", "No better quality found, skipping redownload.", {
+                    "artist": artist,
+                    "track": track_name,
+                    "current_extension": current_extension,
+                    "current_bitrate": current_bitrate
+                })
+                # Mark as completed so it doesn't get stuck in redownload_pending
+                track_db.update_track_status(spotify_id, "completed")
+                continue
+
+            # Pick the best (prefer WAV, then FLAC, then highest bitrate MP3)
+            best_file, username = sorted(better_candidates, key=candidate_sort_key, reverse=True)[0]
+
+            new_ext, new_bitrate = extract_ext_bitrate(best_file)
+            write_log.info("SLSKD_REDOWNLOAD_BETTER", "Better quality found, proceeding with download.", {
+                "artist": artist,
+                "track": track_name,
+                "current_extension": current_extension,
+                "current_bitrate": current_bitrate,
+                "new_extension": new_ext,
+                "new_bitrate": new_bitrate
+            })
+            # Reset status to pending and attempt download of the exact better file
+            track_db.update_track_status(spotify_id, "pending")
+            # Enqueue the selected better file directly
+            search_id = create_search(search_text)  # Need a search_id for enqueue_download
+            enqueue_and_update_db(search_id, best_file, username, spotify_id)
+        except Exception as e:
+            write_log.error("SLSKD_REDOWNLOAD_FAIL", "Failed to process quality upgrade.", {
+                "artist": artist,
+                "track": track_name,
+                "error": str(e)
+            })
+            continue
 
 if __name__ == "__main__":
     # Example usage for testing
