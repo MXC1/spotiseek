@@ -430,17 +430,64 @@ def _handle_completed_download(file: dict, spotify_id: str) -> None:
     relative_path = relative_path.replace("/", "\\")
     local_file_path = os.path.join(config.downloads_root, relative_path)
     
-    # Update database with local file path
-    track_db.update_local_file_path(spotify_id, local_file_path)
-    write_log.info("DOWNLOAD_COMPLETE", "Download completed successfully.", 
-                  {"spotify_id": spotify_id, "local_file_path": local_file_path})
-    
-    # Update M3U8 files that contain this track
-    _update_m3u8_files_for_track(spotify_id, local_file_path)
-    
-    # Mark as completed
-    track_db.update_track_status(spotify_id, "completed")
+    # If FLAC, remux and use new path; otherwise, use as is
+    extension = None
+    if file.get("extension"):
+        extension = file["extension"].lower()
+    elif "." in local_file_path:
+        extension = local_file_path.rsplit(".", 1)[-1].lower()
 
+    final_path = local_file_path
+    if extension == "flac":
+        final_path = _remux_flac_to_mp3(local_file_path, spotify_id, file) or local_file_path
+
+    track_db.update_local_file_path(spotify_id, final_path)
+    write_log.info("DOWNLOAD_COMPLETE", "Download completed successfully.", 
+                  {"spotify_id": spotify_id, "local_file_path": final_path})
+    _update_m3u8_files_for_track(spotify_id, final_path)
+    track_db.update_track_status(spotify_id, "completed")
+    
+def _remux_flac_to_mp3(local_file_path: str, spotify_id: str, file: dict) -> str:
+    """
+    Remux a FLAC file to 320kbps MP3. Update extension/bitrate in DB if successful.
+    Returns the new MP3 path if successful, else None.
+    """
+    mp3_path = os.path.splitext(local_file_path)[0] + ".mp3"
+    try:
+        import subprocess
+        from datetime import datetime
+        ffmpeg_input = local_file_path.replace("\\", "/")
+        ffmpeg_output = mp3_path.replace("\\", "/")
+        ffmpeg_cmd = [
+            "ffmpeg", "-y", "-i", ffmpeg_input,
+            "-codec:a", "libmp3lame", "-b:a", "320k", ffmpeg_output
+        ]
+        # Compose ffmpeg log file path in the same logs dir as workflow logs
+        env = os.getenv('APP_ENV', 'default')
+        base_dir = os.path.dirname(os.path.dirname(__file__))
+        logs_dir = os.path.join(base_dir, 'observability', f'{env}_logs')
+        now = datetime.now()
+        dated_logs_dir = os.path.join(
+            logs_dir,
+            now.strftime("%Y"),
+            now.strftime("%m"),
+            now.strftime("%d")
+        )
+        os.makedirs(dated_logs_dir, exist_ok=True)
+        ffmpeg_log_file = os.path.join(
+            dated_logs_dir,
+            f"ffmpeg_remux_{now.strftime('%Y%m%d_%H%M%S_%f')}.log"
+        )
+        write_log.info("FFMPEG_REMUX", "Remuxing FLAC to MP3 320kbps.", {"input": ffmpeg_input, "output": ffmpeg_output, "ffmpeg_log_file": ffmpeg_log_file})
+        with open(ffmpeg_log_file, "w", encoding="utf-8") as logf:
+            subprocess.run(ffmpeg_cmd, check=True, stdout=logf, stderr=subprocess.STDOUT)
+        track_db.update_extension_bitrate(spotify_id, extension="mp3", bitrate=320)
+        write_log.info("REMUX_SUCCESS", "FLAC remuxed to MP3 320kbps.", {"spotify_id": spotify_id, "mp3_path": ffmpeg_output, "ffmpeg_log_file": ffmpeg_log_file})
+        return ffmpeg_output
+    except Exception as e:
+        write_log.error("REMUX_FAIL", "Failed to remux FLAC to MP3.", {"spotify_id": spotify_id, "error": str(e)})
+        track_db.update_extension_bitrate(spotify_id, extension="flac")
+        return local_file_path
 
 def _update_m3u8_files_for_track(spotify_id: str, local_file_path: str) -> None:
     """

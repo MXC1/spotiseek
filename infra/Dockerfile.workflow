@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y cron && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 # Copy requirements and install dependencies
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt requirements-dev.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
