@@ -8,7 +8,7 @@ touch /var/log/cron.log
 printenv | grep -v "no_proxy" >> /etc/environment
 
 # Load crontab
-crontab /app/workflow.cron
+crontab /app/infra/workflow.cron
 
 # Log cron startup
 echo "$(date) - Cron service starting" >> /var/log/cron.log

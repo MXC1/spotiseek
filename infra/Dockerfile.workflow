@@ -14,14 +14,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Copy cron file and entrypoint
-COPY workflow.cron /app/workflow.cron
-COPY entrypoint-workflow.sh /app/entrypoint-workflow.sh
+
+# Copy cron file and entrypoint from infra
+COPY infra/workflow.cron /app/infra/workflow.cron
+COPY infra/entrypoint-workflow.sh /app/infra/entrypoint-workflow.sh
 
 # Convert Windows line endings to Unix and make entrypoint executable
-RUN sed -i 's/\r$//' /app/workflow.cron && \
-    sed -i 's/\r$//' /app/entrypoint-workflow.sh && \
-    chmod +x /app/entrypoint-workflow.sh
+RUN sed -i 's/\r$//' /app/infra/workflow.cron && \
+	sed -i 's/\r$//' /app/infra/entrypoint-workflow.sh && \
+	chmod +x /app/infra/entrypoint-workflow.sh
 
 # Run entrypoint script
-CMD ["/app/entrypoint-workflow.sh"]
+CMD ["/app/infra/entrypoint-workflow.sh"]

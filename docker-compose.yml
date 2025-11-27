@@ -18,7 +18,7 @@ services:
   streamlit-dashboard:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: infra/Dockerfile
     ports:
       - "8501:8501"
     environment:
@@ -32,7 +32,7 @@ services:
   workflow:
     build:
       context: .
-      dockerfile: Dockerfile.workflow
+      dockerfile: infra/Dockerfile.workflow
     environment:
       - APP_ENV=${APP_ENV:-test}
       - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}

@@ -1,3 +1,0 @@
-# Run workflow.py every minute for testing
-2 11 * * * cd /app && /usr/local/bin/python scripts/workflow.py >> /var/log/cron.log 2>&1
-
