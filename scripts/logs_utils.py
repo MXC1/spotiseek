@@ -209,7 +209,7 @@ def setup_logging(
 
     # Determine environment-specific logs directory
     if logs_dir is None:
-        env = os.getenv('APP_ENV', 'test')
+        env = os.getenv('APP_ENV')
         base_dir = os.path.join(os.path.dirname(__file__), '..', 'observability')
         logs_dir = os.path.join(base_dir, f'{env}_logs')
 

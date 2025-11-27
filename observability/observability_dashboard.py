@@ -24,7 +24,7 @@ from scripts.database_management import get_playlists, get_track_status_breakdow
 
 
 # Get environment from environment variable
-ENV = os.getenv("APP_ENV", "test")
+ENV = os.getenv("APP_ENV")
 
 # Page configuration
 st.set_page_config(page_title=f"Spotiseek Observability ({ENV.upper()})", layout="wide")
