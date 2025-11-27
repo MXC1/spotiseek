@@ -31,7 +31,7 @@ dev/
 .env
 
 # Test data
-observability/test_logs/
+observability/*_logs/
 
 # Downloads and data directories (large files)
 slskd_docker_data/downloads/

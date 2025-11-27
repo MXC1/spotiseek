@@ -4,8 +4,15 @@
 # Create log file
 touch /var/log/cron.log
 
+# Export environment variables for cron jobs
+printenv | grep -v "no_proxy" >> /etc/environment
+
 # Load crontab
 crontab /app/workflow.cron
 
-# Start cron in foreground and tail the log
-cron && tail -f /var/log/cron.log
+# Log cron startup
+echo "$(date) - Cron service starting" >> /var/log/cron.log
+crontab -l >> /var/log/cron.log
+
+# Start cron in foreground (blocks, keeping container alive)
+cron -f
