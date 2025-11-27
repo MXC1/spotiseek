@@ -33,7 +33,7 @@ st.title(f"Spotiseek Observability Dashboard - {ENV.upper()} Environment")
 
 # Environment-specific constants
 LOGS_DIR = os.path.join(os.path.dirname(__file__), f'{ENV}_logs')
-DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'database', f'database_{ENV}.db')
+DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'database', ENV, f'database_{ENV}.db')
 
 
 def render_log_breakdown_section():

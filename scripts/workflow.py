@@ -41,20 +41,29 @@ if not ENV:
 
 write_log.info("ENV", "Running in environment.", {"ENV": ENV})
 
-# Configuration
-PLAYLISTS_CSV = os.path.abspath(
-    os.path.join(os.path.dirname(os.path.dirname(__file__)), "playlists", f"{ENV}_playlists.csv")
-)
-DOWNLOADS_ROOT = os.path.abspath(
-    os.path.join(os.path.dirname(os.path.dirname(__file__)), "slskd_docker_data", "downloads")
-)
-M3U8S_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(os.path.dirname(__file__)), "database", "m3u8s")
-)
+
+# Configuration: Namespace by environment
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+
+PLAYLISTS_DIR = os.path.abspath(os.path.join(BASE_DIR, "playlists", ENV))
+PLAYLISTS_CSV = os.path.join(PLAYLISTS_DIR, f"playlists_{ENV}.csv")
+os.makedirs(PLAYLISTS_DIR, exist_ok=True)
+
+DATABASE_DIR = os.path.abspath(os.path.join(BASE_DIR, "database", ENV))
+os.makedirs(DATABASE_DIR, exist_ok=True)
+
+DB_PATH = os.path.join(DATABASE_DIR, f"database_{ENV}.db")
+
+M3U8S_DIR = os.path.abspath(os.path.join(BASE_DIR, "database", "m3u8s", ENV))
 os.makedirs(M3U8S_DIR, exist_ok=True)
 
-# Initialize database connection
-track_db = TrackDB()
+DOWNLOADS_ROOT = os.path.abspath(os.path.join(BASE_DIR, "slskd_docker_data", "downloads"))
+
+LOGS_DIR = os.path.abspath(os.path.join(BASE_DIR, "observability", f"{ENV}_logs"))
+os.makedirs(LOGS_DIR, exist_ok=True)
+
+# Initialize database connection (pass DB_PATH if TrackDB supports it)
+track_db = TrackDB(db_path=DB_PATH)
 
 def read_playlists(csv_path: str) -> List[str]:
     """
@@ -206,17 +215,16 @@ def _handle_completed_download(file: dict, spotify_id: str) -> None:
         spotify_id: Spotify track identifier
     """
     filename_rel = file.get("filename")
-    
-
+    file_name = None
+    last_subfolder = None
     if filename_rel:
-        folder, file_name = os.path.split(filename_rel)
-        last_subfolder = os.path.basename(folder) if folder else None
-
-    write_log.debug("DOWNLOAD_COMPLETE", "Completed file download.", {"file_name": file_name, "subfolder": last_subfolder})
-
-    if last_subfolder and file_name:
-        local_file_path = os.path.join(DOWNLOADS_ROOT, last_subfolder, file_name)
+        # Use the full relative path for local_file_path
+        local_file_path = os.path.join(DOWNLOADS_ROOT, filename_rel)
+        file_name = os.path.basename(filename_rel)
+        last_subfolder = os.path.basename(os.path.dirname(filename_rel)) if os.path.dirname(filename_rel) else None
         track_db.update_local_file_path(spotify_id, local_file_path)
+
+        write_log.debug("DOWNLOAD_COMPLETE", "Completed file download.", {"file_name": file_name, "subfolder": last_subfolder, "local_file_path": local_file_path})
 
         # Update the relevant m3u8 file: replace the comment line for this track with the file path
         try:
@@ -265,12 +273,11 @@ def main(reset_db: bool = False) -> None:
     if reset_db:
         write_log.info("RESET", "--reset flag detected. Clearing database before starting workflow.")
         track_db.clear_database()
-        # Delete all m3u8 files in the database/m3u8s directory
-        m3u8_dir = os.path.join(os.path.dirname(__file__), '..', 'database', 'm3u8s')
-        delete_all_m3u8_files(m3u8_dir)
-        write_log.info("M3U8_DELETE", "All .m3u8 files deleted.", {"m3u8_dir": m3u8_dir})
+        # Delete all m3u8 files in the environment-specific m3u8s directory
+        delete_all_m3u8_files(M3U8S_DIR)
+        write_log.info("M3U8_DELETE", "All .m3u8 files deleted.", {"m3u8_dir": M3U8S_DIR})
         # Re-initialize after clearing (singleton pattern ensures clean state)
-        track_db = TrackDB()
+        track_db = TrackDB(db_path=DB_PATH)
 
     write_log.info("WORKFLOW_START", "Starting workflow.")
 
@@ -293,7 +300,7 @@ def main(reset_db: bool = False) -> None:
 
     # Export playlists and tracks to iTunes-style XML
     try:
-        xml_path = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "database", "spotiseek_library.xml"))
+        xml_path = os.path.abspath(os.path.join(DATABASE_DIR, "spotiseek_library.xml"))
         music_folder_url = f"file://localhost/{DOWNLOADS_ROOT.replace(os.sep, '/')}/"
         export_itunes_xml(xml_path, music_folder_url)
         write_log.info("XML_EXPORT", "Exported playlists and tracks to XML.", {"xml_path": xml_path})

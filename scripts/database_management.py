@@ -20,7 +20,7 @@ except ImportError:
 ENV = os.getenv("APP_ENV")
 
 # Construct database path based on environment (used by TrackDB class)
-DB_DIR = os.path.join(os.path.dirname(__file__), '..', 'database')
+DB_DIR = os.path.join(os.path.dirname(__file__), '..', 'database', ENV)
 DB_PATH = os.path.join(DB_DIR, f"database_{ENV}.db") if ENV else None
 
 
