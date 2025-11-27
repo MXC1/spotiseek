@@ -343,21 +343,32 @@ class TrackDB:
     ) -> None:
         """
         Update the Soulseek file name for a track.
+        Only store the last subdirectory and filename (e.g., 'folder/filename.ext' or 'folder\\filename.ext').
         
         Args:
             spotify_id: Spotify track identifier
-            slskd_file_name: Soulseek filename to update
+            slskd_file_name: Soulseek filename to update (may be a full or partial path)
         """
+        # Normalize path separators
+        norm_path = slskd_file_name.replace("/", "\\")
+        parts = norm_path.split("\\")
+        # Only keep the last two components (subfolder and filename), or just filename if only one
+        if len(parts) >= 2:
+            trimmed = parts[-2] + "\\" + parts[-1]
+        elif len(parts) == 1:
+            trimmed = parts[0]
+        else:
+            trimmed = slskd_file_name
         write_log.info(
             "TRACK_SLSKD_FILENAME_UPDATE", "Updating Soulseek file name for track.", {
                 "spotify_id": spotify_id,
-                "slskd_file_name": slskd_file_name
+                "slskd_file_name": trimmed
             }
         )
         cursor = self.conn.cursor()
         cursor.execute(
             "UPDATE tracks SET slskd_file_name = ? WHERE spotify_id = ?",
-            (slskd_file_name, spotify_id)
+            (trimmed, spotify_id)
         )
         self.conn.commit()
 
