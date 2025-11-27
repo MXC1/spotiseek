@@ -218,13 +218,32 @@ def _handle_completed_download(file: dict, spotify_id: str) -> None:
     file_name = None
     last_subfolder = None
     if filename_rel:
-        # Use the full relative path for local_file_path
-        local_file_path = os.path.join(DOWNLOADS_ROOT, filename_rel)
-        file_name = os.path.basename(filename_rel)
-        last_subfolder = os.path.basename(os.path.dirname(filename_rel)) if os.path.dirname(filename_rel) else None
+        # Extract only the last subfolder and filename
+        # e.g., "FLAC Music Collection\L'Impératrice\L'Impératrice - Matahari\12 - Some Paradise.flac"
+        # becomes "L'Impératrice - Matahari\12 - Some Paradise.flac"
+        
+        # Normalize path separators to forward slashes for consistent splitting
+        normalized_path = filename_rel.replace("\\", "/")
+        path_parts = normalized_path.split("/")
+        
+        # Get the last two components: [parent_folder, filename]
+        if len(path_parts) >= 2:
+            last_subfolder = path_parts[-2]
+            file_name = path_parts[-1]
+            relative_path = f"{last_subfolder}/{file_name}"
+        elif len(path_parts) == 1:
+            # Only filename, no subfolder
+            file_name = path_parts[0]
+            relative_path = file_name
+        else:
+            relative_path = filename_rel
+        
+        # Convert back to backslashes for Windows paths
+        relative_path = relative_path.replace("/", "\\")
+        local_file_path = os.path.join(DOWNLOADS_ROOT, relative_path)
         track_db.update_local_file_path(spotify_id, local_file_path)
 
-        write_log.debug("DOWNLOAD_COMPLETE", "Completed file download.", {"file_name": file_name, "subfolder": last_subfolder, "local_file_path": local_file_path})
+        write_log.debug("DOWNLOAD_COMPLETE", "Completed file download.", {"file_name": file_name, "subfolder": last_subfolder, "relative_path": relative_path, "local_file_path": local_file_path})
 
         # Update the relevant m3u8 file: replace the comment line for this track with the file path
         try:
@@ -301,7 +320,12 @@ def main(reset_db: bool = False) -> None:
     # Export playlists and tracks to iTunes-style XML
     try:
         xml_path = os.path.abspath(os.path.join(DATABASE_DIR, "spotiseek_library.xml"))
-        music_folder_url = f"file://localhost/{DOWNLOADS_ROOT.replace(os.sep, '/')}/"
+        # Convert to Windows host path if running in Docker
+        host_base_path = os.getenv("HOST_BASE_PATH")
+        downloads_path = DOWNLOADS_ROOT
+        if host_base_path and downloads_path.startswith("/app/"):
+            downloads_path = downloads_path.replace("/app/", f"{host_base_path}/", 1)
+        music_folder_url = f"file://localhost/{downloads_path.replace(os.sep, '/')}/"
         export_itunes_xml(xml_path, music_folder_url)
         write_log.info("XML_EXPORT", "Exported playlists and tracks to XML.", {"xml_path": xml_path})
     except Exception as e:

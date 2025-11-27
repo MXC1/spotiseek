@@ -39,6 +39,7 @@ services:
       - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
       - TOKEN=${TOKEN}
       - SLSKD_BASE_URL=http://slskd:5030
+      - HOST_BASE_PATH=${HOST_BASE_PATH}
     volumes:
       - ./database:/app/database:rw
       - ./playlists:/app/playlists:ro
