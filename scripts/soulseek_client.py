@@ -98,24 +98,33 @@ def is_better_quality(file: Dict[str, Any], current_extension: str, current_bitr
         True if the new file is higher quality
     """
     ext, bitrate = extract_file_quality(file)
-    
-    # WAV is always preferred
+
+    # WAV is always preferred over anything else
     if ext == "wav" and current_extension != "wav":
         return True
-    
-    # FLAC is preferred over non-lossless formats
-    if ext == "flac" and current_extension not in ("flac", "wav"):
-        return True
-    
+
+    # FLAC is NOT considered an upgrade over MP3 320, since we remux to MP3 320
+    # Only upgrade to FLAC if current is lower than MP3 (not 320), and not if current is MP3 320 or better
+    if ext == "flac":
+        if current_extension in ("wav", "flac"):
+            return False
+        if current_extension == "mp3":
+            # Only upgrade if current MP3 is less than 320kbps
+            if current_bitrate is not None and current_bitrate < 320:
+                return True
+            return False
+        # If current is lower quality (e.g., ogg, m4a, etc.), allow upgrade
+        return current_extension not in ("wav", "flac", "mp3")
+
     # Among MP3 files, prefer higher bitrate
     if ext == "mp3" and current_extension == "mp3":
         if bitrate and current_bitrate and bitrate > current_bitrate:
             return True
-    
+
     # MP3 is preferred over lower quality formats
     if ext == "mp3" and current_extension not in ("mp3", "wav", "flac"):
         return True
-    
+
     return False
 
 
@@ -515,12 +524,43 @@ def process_redownload_queue() -> None:
     
     for track_row in redownload_tracks:
         spotify_id, track_name, artist = track_row[0], track_row[1], track_row[2]
-        write_log.info("SLSKD_REDOWNLOAD_PROCESS", "Processing quality upgrade.", 
-                      {"spotify_id": spotify_id, "track": track_name, "artist": artist})
-        
-        # Reset status and attempt download
-        track_db.update_track_status(spotify_id, "pending")
-        download_track(artist, track_name, spotify_id)
+        current_extension = track_db.get_track_extension(spotify_id)
+        current_bitrate = get_track_bitrate(spotify_id)
+
+        # Search for new candidates
+        search_text = f"{artist} {track_name}"
+        search_id = create_search(search_text)
+        responses = get_search_responses(search_id)
+        best_file, username = select_best_file(responses, search_text)
+
+        if not best_file:
+            write_log.warn("SLSKD_NO_SUITABLE_FILE", "No suitable file found for upgrade.", {"spotify_id": spotify_id})
+            continue
+
+        # Only proceed if the new file is truly better
+        if is_better_quality(best_file, current_extension, current_bitrate):
+            write_log.info("SLSKD_REDOWNLOAD_PROCESS", "Processing quality upgrade.", 
+                          {"spotify_id": spotify_id, "track": track_name, "artist": artist, "upgrade": True})
+            track_db.update_track_status(spotify_id, "pending")
+            enqueue_download(search_id, best_file, username, spotify_id)
+        else:
+            write_log.info("SLSKD_REDOWNLOAD_SKIP", "No better quality file found for upgrade.", 
+                          {"spotify_id": spotify_id, "track": track_name, "artist": artist, "upgrade": False})
+
+
+def get_track_bitrate(spotify_id: str) -> Optional[int]:
+    """
+    Helper to get the bitrate for a track using TrackDB, not inline SQL.
+    """
+    try:
+        cursor = track_db.conn.cursor()
+        cursor.execute("SELECT bitrate FROM tracks WHERE spotify_id = ?", (spotify_id,))
+        result = cursor.fetchone()
+        if result and result[0] is not None:
+            return int(result[0])
+    except Exception:
+        pass
+    return None
 
 
 if __name__ == "__main__":
