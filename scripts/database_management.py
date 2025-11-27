@@ -136,7 +136,7 @@ class TrackDB:
         """
         write_log.info("DB_CREATE_TABLES", "Creating database tables if they don't exist.")
         cursor = self.conn.cursor()
-        
+
         # Tracks table: stores track metadata and download state
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS tracks (
@@ -146,10 +146,21 @@ class TrackDB:
                 download_status TEXT NOT NULL,
                 slskd_file_name TEXT,
                 local_file_path TEXT,
+                extension TEXT,
+                bitrate INTEGER,
                 added_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
         
+        # Add extension and bitrate columns if they do not exist (migration for existing DBs)
+        cursor.execute("PRAGMA table_info(tracks)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "extension" not in columns:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN extension TEXT")
+        if "bitrate" not in columns:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN bitrate INTEGER")
+
+
         # Playlists table: stores playlist information, m3u8 path, and playlist name
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS playlists (
@@ -158,7 +169,7 @@ class TrackDB:
                 m3u8_path TEXT
             )
         """)
-        
+
         # Junction table: many-to-many relationship between playlists and tracks
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS playlist_tracks (
@@ -169,7 +180,7 @@ class TrackDB:
                 PRIMARY KEY (playlist_url, spotify_id)
             )
         """)
-        
+
         # Mapping table: links Soulseek download UUIDs to Spotify IDs
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS slskd_mapping (
@@ -178,7 +189,7 @@ class TrackDB:
                 FOREIGN KEY (spotify_id) REFERENCES tracks(spotify_id)
             )
         """)
-        
+
         self.conn.commit()
 
     def add_track(
@@ -187,18 +198,20 @@ class TrackDB:
         track_name: str,
         artist: str,
         download_status: str = "pending",
-        slskd_file_name: Optional[str] = None
+        slskd_file_name: Optional[str] = None,
+        extension: Optional[str] = None,
+        bitrate: Optional[int] = None
     ) -> None:
         """
         Add a track to the database if it doesn't already exist.
-        
         Args:
             spotify_id: Unique Spotify track identifier
             track_name: Name of the track
             artist: Artist name(s)
             download_status: Initial download status (default: "pending")
             slskd_file_name: Optional filename from Soulseek download
-        
+            extension: File extension (e.g., 'mp3', 'wav')
+            bitrate: Bitrate in kbps (e.g., 320)
         Note:
             Uses INSERT OR IGNORE to prevent duplicate entries. If the track
             already exists, this operation has no effect.
@@ -208,17 +221,19 @@ class TrackDB:
                 "spotify_id": spotify_id,
                 "track_name": track_name,
                 "artist": artist,
-                "status": download_status
+                "status": download_status,
+                "extension": extension,
+                "bitrate": bitrate
             }
         )
         cursor = self.conn.cursor()
         cursor.execute(
             """
             INSERT OR IGNORE INTO tracks 
-            (spotify_id, track_name, artist, download_status, slskd_file_name)
-            VALUES (?, ?, ?, ?, ?)
+            (spotify_id, track_name, artist, download_status, slskd_file_name, extension, bitrate)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (spotify_id, track_name, artist, download_status, slskd_file_name)
+            (spotify_id, track_name, artist, download_status, slskd_file_name, extension, bitrate)
         )
         self.conn.commit()
 
@@ -369,6 +384,22 @@ class TrackDB:
         cursor.execute(
             "UPDATE tracks SET slskd_file_name = ? WHERE spotify_id = ?",
             (trimmed, spotify_id)
+        )
+        self.conn.commit()
+        
+    def update_extension_bitrate(self, spotify_id: str, extension: str = None, bitrate: int = None) -> None:
+        """
+        Update the extension and bitrate for a track.
+        Args:
+            spotify_id: Spotify track identifier
+            extension: File extension (e.g., 'mp3', 'wav')
+            bitrate: Bitrate in kbps (e.g., 320)
+        """
+        write_log.debug("TRACK_UPDATE_EXT_BITRATE", "Updating extension and bitrate for track.", {"spotify_id": spotify_id, "extension": extension, "bitrate": bitrate})
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE tracks SET extension = ?, bitrate = ? WHERE spotify_id = ?",
+            (extension, bitrate, spotify_id)
         )
         self.conn.commit()
 

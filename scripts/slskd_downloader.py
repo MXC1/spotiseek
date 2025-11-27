@@ -248,6 +248,14 @@ def download_track(artist: str, track: str, spotify_id: str) -> None:
             return
         filename = best_file.get("filename")
         size = best_file.get("size")
+        extension = best_file.get("extension")
+        bitrate = best_file.get("bitRate") or best_file.get("bitrate")
+        # If extension is empty, extract from filename
+        if not extension and filename:
+            if "." in filename:
+                extension = filename.rsplit(".", 1)[-1].lower()
+            else:
+                extension = None
         fileinfo = {"filename": filename, "size": size}
         # Enqueue download and update database
         write_log.info("SLSKD_DOWNLOAD", "Downloading file.", {"filename": filename})
@@ -256,6 +264,8 @@ def download_track(artist: str, track: str, spotify_id: str) -> None:
         # Pass the full filename (may include subdirectories) so TrackDB can trim as needed
         track_db.update_track_status(spotify_id, "downloading")
         track_db.update_slskd_file_name(spotify_id, filename)
+        # Update extension and bitrate in DB if available
+        track_db.update_extension_bitrate(spotify_id, extension, bitrate)
     except Exception as e:
         write_log.error("SLSKD_DOWNLOAD_FAIL", f"Failed to download track.", {"artist": artist, "track": track, "error": str(e)})
         track_db.update_track_status(spotify_id, "failed")
