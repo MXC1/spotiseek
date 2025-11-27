@@ -1,3 +1,20 @@
+def get_extension_bitrate_breakdown(db_path):
+    """
+    Returns two DataFrames: extension breakdown and bitrate breakdown from the tracks table.
+    """
+    import sqlite3
+    import pandas as pd
+    try:
+        conn = sqlite3.connect(db_path)
+        ext_df = pd.read_sql_query(
+            "SELECT extension, COUNT(*) as count FROM tracks GROUP BY extension ORDER BY count DESC", conn)
+        br_df = pd.read_sql_query(
+            "SELECT bitrate, COUNT(*) as count FROM tracks GROUP BY bitrate ORDER BY count DESC", conn)
+        conn.close()
+        return ext_df, br_df, None
+    except Exception as e:
+        return None, None, str(e)
+
 """Spotiseek Observability Dashboard - Main application file."""
 import os
 import sys
@@ -187,19 +204,46 @@ def render_status_table(status_df: pd.DataFrame):
     st.dataframe(status_df_with_total)
 
 
+def render_extension_bitrate_section():
+    """Render the extension and bitrate breakdown section."""
+    st.subheader("Track Extension and Bitrate Breakdown")
+    if not os.path.exists(DB_PATH):
+        st.info("Database file not found.")
+        return
+    ext_df, br_df, error = get_extension_bitrate_breakdown(DB_PATH)
+    if error:
+        st.error(f"Error querying extension/bitrate breakdown: {error}")
+        return
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**File Extension Breakdown**")
+        if ext_df is not None and not ext_df.empty:
+            st.dataframe(ext_df)
+        else:
+            st.info("No extension data found.")
+    with col2:
+        st.markdown("**Bitrate Breakdown**")
+        if br_df is not None and not br_df.empty:
+            st.dataframe(br_df)
+        else:
+            st.info("No bitrate data found.")
+
+
 def main():
     """Main application entry point."""
     # Log breakdown section (full width)
     render_log_breakdown_section()
-    
+
     # Two-column layout for playlists and track status
     col1, col2 = st.columns(2)
-    
+
     with col1:
         render_playlists_section()
-    
+        render_extension_bitrate_section()
+
     with col2:
         render_track_status_section()
+
 
 
 if __name__ == "__main__":
