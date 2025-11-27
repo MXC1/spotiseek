@@ -179,6 +179,59 @@ def download_track(artist: str, track: str, spotify_id: str) -> None:
     write_log.info("SLSKD_SEARCH", "Searching for track.", {"search_text": search_text})
     track_db.update_track_status(spotify_id, "searching")
     
+
+    def select_best_file(responses, search_text):
+        """Select the best file from responses, filtering out remixes/edits/etc unless requested."""
+        excluded_keywords = [
+            'remix', 'edit', 'bootleg', 'mashup', 'mix', 'acapella',
+            'instrumental', 'sped up', 'slowed', 'cover', 'karaoke',
+            'tribute', 'demo', 'live', 'acoustic', 'version', 'remaster',
+            'flip'
+        ]
+
+        search_text_lower = search_text.lower()
+        # If user is searching for an alternative version, do not filter
+        allow_alternatives = any(kw in search_text_lower for kw in excluded_keywords)
+
+        def is_original(filename):
+            fname_lower = filename.lower()
+            for keyword in excluded_keywords:
+                if keyword in fname_lower:
+                    return False
+            return True
+
+        candidates = []
+        for response in responses:
+            username = response.get("username")
+            files = response.get("files", [])
+            for file in files:
+                candidates.append((file, username))
+
+        if allow_alternatives:
+            search_pool = candidates
+        else:
+            original_candidates = [(f, u) for f, u in candidates if is_original(f.get("filename", ""))]
+            search_pool = original_candidates if original_candidates else candidates
+
+        # 1. WAV files
+        for file, username in search_pool:
+            ext = (file.get("extension") or "").lower()
+            fname = file.get("filename", "").lower()
+            if ext == "wav" or fname.endswith(".wav"):
+                return file, username
+
+        # 2. MP3 320kbps
+        for file, username in search_pool:
+            ext = (file.get("extension") or "").lower()
+            fname = file.get("filename", "").lower()
+            if (ext == "mp3" or fname.endswith(".mp3")) and file.get("bitRate") == 320:
+                return file, username
+
+        # 3. Fallback: first available file
+        if search_pool:
+            return search_pool[0]
+        return None, None
+
     try:
         # Perform search on Soulseek network
         search_id = create_search(search_text)
@@ -187,18 +240,14 @@ def download_track(artist: str, track: str, spotify_id: str) -> None:
             write_log.info("SLSKD_NO_RESULTS", "No search results found.", {"artist": artist, "track": track})
             track_db.update_track_status(spotify_id, "not_found")
             return
-        # Extract first available file from first response
-        first_response = responses[0]
-        files = first_response.get("files", [])
-        username = first_response.get("username")
-        if not files:
+        # Select best file according to rules
+        best_file, username = select_best_file(responses, search_text)
+        if not best_file:
             write_log.info("SLSKD_NO_FILES", "No files in search results.", {"artist": artist, "track": track})
             track_db.update_track_status(spotify_id, "failed")
             return
-        # Prepare file information for download
-        first_file = files[0]
-        filename = first_file.get("filename")
-        size = first_file.get("size")
+        filename = best_file.get("filename")
+        size = best_file.get("size")
         fileinfo = {"filename": filename, "size": size}
         # Enqueue download and update database
         write_log.info("SLSKD_DOWNLOAD", "Downloading file.", {"filename": filename})
