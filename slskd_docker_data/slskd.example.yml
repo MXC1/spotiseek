@@ -1,6 +1,0 @@
-web:
-  authentication:
-    api_keys:
-      my_api_key:
-        key: <A_RANDOM_API_KEY>
-        role: readwrite

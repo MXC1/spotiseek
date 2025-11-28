@@ -1,0 +1,17 @@
+web:
+  authentication:
+    api_keys:
+      my_api_key:
+        key: <A_RANDOM_API_KEY>
+        role: readwrite
+
+shares:
+  directories:
+    - /app/downloads
+  filters:
+    - \.ini$
+    - Thumbs\.db$
+    - \.DS_Store$
+  cache:
+    storage_mode: memory
+    retention: 10080  # Re-scan shares weekly

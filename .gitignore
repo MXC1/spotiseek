@@ -39,7 +39,7 @@ Thumbs.db
 *.pid.lock
 docker-compose.override.yml
 slskd_docker_data/*
-!slskd_docker_data/slskd.example.yml
+!slskd_docker_data/slskd.yml.example
 
 # Node.js (for web/)
 web/node_modules/
