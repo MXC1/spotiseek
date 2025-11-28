@@ -190,7 +190,46 @@ class TrackDB:
             )
         """)
 
+        # Blacklist table: stores blacklisted slskd_uuids
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS slskd_blacklist (
+                slskd_uuid TEXT PRIMARY KEY,
+                reason TEXT,
+                added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         self.conn.commit()
+
+    def add_slskd_blacklist(self, slskd_uuid: str, reason: str = None) -> None:
+        """
+        Add a slskd_uuid to the blacklist table.
+        Args:
+            slskd_uuid: The Soulseek download UUID to blacklist
+            reason: Optional reason for blacklisting
+        """
+        write_log.info("SLSKD_BLACKLIST_ADD", "Adding slskd_uuid to blacklist.", {"slskd_uuid": slskd_uuid, "reason": reason})
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "INSERT OR IGNORE INTO slskd_blacklist (slskd_uuid, reason) VALUES (?, ?)",
+            (slskd_uuid, reason)
+        )
+        self.conn.commit()
+
+    def is_slskd_blacklisted(self, slskd_uuid: str) -> bool:
+        """
+        Check if a slskd_uuid is blacklisted.
+        Args:
+            slskd_uuid: The Soulseek download UUID to check
+        Returns:
+            True if blacklisted, False otherwise
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT 1 FROM slskd_blacklist WHERE slskd_uuid = ?",
+            (slskd_uuid,)
+        )
+        return cursor.fetchone() is not None
 
     def add_track(
         self,
@@ -455,6 +494,25 @@ class TrackDB:
         cursor.execute(
             "SELECT spotify_id FROM slskd_mapping WHERE slskd_uuid = ?",
             (slskd_uuid,)
+        )
+        result = cursor.fetchone()
+        return result[0] if result else None
+
+    def get_sldkd_uuid_by_spotify_id(self, spotify_id: str) -> Optional[str]:
+        """
+        Retrieve the Soulseek download UUID associated with a Spotify track ID.
+        
+        Args:
+            spotify_id: Spotify track identifier
+        
+        Returns:
+            Soulseek download UUID if found, None otherwise
+        """
+        write_log.debug("SLSKD_QUERY_UUID", "Querying slskd_uuid for Spotify ID.", {"spotify_id": spotify_id})
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT slskd_uuid FROM slskd_mapping WHERE spotify_id = ?",
+            (spotify_id,)
         )
         result = cursor.fetchone()
         return result[0] if result else None

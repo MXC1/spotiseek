@@ -210,12 +210,16 @@ def select_best_file(responses: List[Dict[str, Any]], search_text: str) -> Tuple
     search_text_lower = search_text.lower()
     allow_alternatives = any(keyword in search_text_lower for keyword in excluded_keywords)
     
-    # Collect all candidate files
+    # Collect all candidate files, skipping blacklisted slskd_uuids
     candidates = []
     for response in responses:
         username = response.get("username")
         files = response.get("files", [])
         for file in files:
+            slskd_uuid = file.get("id")
+            if slskd_uuid and track_db.is_slskd_blacklisted(slskd_uuid):
+                write_log.info("SLSKD_BLACKLIST_SKIP", "Skipping blacklisted slskd_uuid in file selection.", {"slskd_uuid": slskd_uuid})
+                continue
             candidates.append((file, username))
     
     if not candidates:

@@ -452,12 +452,37 @@ def _remux_flac_to_mp3(local_file_path: str, spotify_id: str, file: dict) -> str
     Remux a FLAC file to 320kbps MP3. Update extension/bitrate in DB if successful.
     Returns the new MP3 path if successful, else None.
     """
+    def _is_flac_valid(flac_path: str) -> bool:
+        """
+        Use ffmpeg to check if a FLAC file is valid and decodable.
+        Returns True if valid, False otherwise.
+        """
+        import subprocess
+        try:
+            result = subprocess.run([
+                "ffmpeg", "-v", "error", "-i", flac_path, "-f", "null", "-"
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            return result.returncode == 0
+        except Exception as e:
+            write_log.error("FLAC_CHECK_FAIL", "Failed to check FLAC integrity.", {"flac_path": flac_path, "error": str(e)})
+            return False
+
     mp3_path = os.path.splitext(local_file_path)[0] + ".mp3"
     try:
         import subprocess
         from datetime import datetime
         ffmpeg_input = local_file_path.replace("\\", "/")
         ffmpeg_output = mp3_path.replace("\\", "/")
+
+        # Check FLAC integrity before remuxing
+        if not _is_flac_valid(ffmpeg_input):
+            write_log.error("FLAC_INVALID", "FLAC file failed integrity check. Skipping remux.", {"spotify_id": spotify_id, "flac_path": ffmpeg_input})
+            track_db.update_track_status(spotify_id, "corrupt")
+            slskd_uuid_to_blacklist = track_db.get_sldkd_uuid_by_spotify_id(spotify_id)
+            if slskd_uuid_to_blacklist:
+                track_db.add_slskd_blacklist(slskd_uuid_to_blacklist, reason="corrupt_flac")
+            return local_file_path
+
         ffmpeg_cmd = [
             "ffmpeg", "-y", "-i", ffmpeg_input,
             "-codec:a", "libmp3lame", "-b:a", "320k", ffmpeg_output

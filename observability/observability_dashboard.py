@@ -15,7 +15,6 @@ def get_extension_bitrate_breakdown(db_path):
     except Exception as e:
         return None, None, str(e)
 
-"""Spotiseek Observability Dashboard - Main application file."""
 import os
 import sys
 import streamlit as st
