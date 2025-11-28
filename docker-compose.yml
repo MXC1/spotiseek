@@ -7,7 +7,8 @@ services:
       - SLSKD_SLSK_USERNAME=${SLSKD_USERNAME}
       - SLSKD_SLSK_PASSWORD=${SLSKD_PASSWORD}
     volumes:
-      - ./slskd_docker_data:/app:rw
+      - ./slskd_docker_data/${APP_ENV}:/app:rw
+      - ./slskd_docker_data/slskd.yml:/app/slskd.yml:ro
     ports:
       - 5030:5030/tcp
       - 5031:5031/tcp
@@ -22,7 +23,7 @@ services:
     ports:
       - "8501:8501"
     environment:
-      - APP_ENV=${APP_ENV:-test}
+      - APP_ENV=${APP_ENV}
     volumes:
       - ./observability:/app/observability:ro
       - ./database:/app/database:ro
@@ -34,7 +35,7 @@ services:
       context: .
       dockerfile: infra/Dockerfile.workflow
     environment:
-      - APP_ENV=${APP_ENV:-test}
+      - APP_ENV=${APP_ENV}
       - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
       - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
       - TOKEN=${TOKEN}
@@ -43,7 +44,7 @@ services:
     volumes:
       - ./database:/app/database:rw
       - ./playlists:/app/playlists:ro
-      - ./slskd_docker_data/downloads:/app/slskd_docker_data/downloads:rw
+      - ./slskd_docker_data/${APP_ENV}/downloads:/app/slskd_docker_data/downloads:rw
       - ./observability:/app/observability:rw
       - ./scripts:/app/scripts:ro
     depends_on:
