@@ -99,7 +99,7 @@ class WorkflowConfig:
         self.downloads_root = os.path.abspath(os.path.join(self.base_dir, "slskd_docker_data", "downloads"))
         
         # Logs configuration
-        self.logs_dir = os.path.abspath(os.path.join(self.base_dir, "observability", f"{env}_logs"))
+        self.logs_dir = os.path.abspath(os.path.join(self.base_dir, "observability", "logs", ENV))
         
         # Create all necessary directories
         self._ensure_directories()
@@ -469,7 +469,7 @@ def _remux_flac_to_mp3(local_file_path: str, spotify_id: str, file: dict) -> str
         # Compose ffmpeg log file path in the same logs dir as workflow logs
         env = os.getenv('APP_ENV', 'default')
         base_dir = os.path.dirname(os.path.dirname(__file__))
-        logs_dir = os.path.join(base_dir, 'observability', f'{env}_logs')
+        logs_dir = os.path.join(base_dir, 'observability', "logs", ENV)
         now = datetime.now()
         dated_logs_dir = os.path.join(
             logs_dir,

@@ -268,15 +268,16 @@ def setup_logging(
     microsecond-precision timestamps to prevent conflicts.
     
     Directory Structure:
-        {ENV}_logs/
-            YYYY/
-                MM/
-                    DD/
-                        {prefix}_YYYYMMdd_HHMMSS_ffffff.log
+        logs/
+            {ENV}/
+                YYYY/
+                    MM/
+                        DD/
+                            {prefix}_YYYYMMdd_HHMMSS_ffffff.log
     
     Args:
         logs_dir: Base directory for log files. If None, uses
-                 'observability/{ENV}_logs' where ENV comes from APP_ENV.
+                 'observability/logs/{ENV}/' where ENV comes from APP_ENV.
         log_level: Minimum severity for console output. File output captures all levels.
         log_name_prefix: Prefix for log filename (e.g., "workflow", "run").
     
@@ -295,9 +296,9 @@ def setup_logging(
 
     # Determine environment-specific logs directory
     if logs_dir is None:
-        env = os.getenv('APP_ENV', 'default')
+        ENV = os.getenv('APP_ENV', 'default')
         base_dir = os.path.join(os.path.dirname(__file__), '..', 'observability')
-        logs_dir = os.path.join(base_dir, f'{env}_logs')
+        logs_dir = os.path.join(base_dir, "logs", ENV)
 
     # Create dated directory structure
     now = datetime.now()

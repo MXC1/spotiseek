@@ -48,7 +48,7 @@ st.title(f"Spotiseek Observability Dashboard - {ENV.upper()} Environment")
 
 
 # Environment-specific constants
-LOGS_DIR = os.path.join(os.path.dirname(__file__), f'{ENV}_logs')
+LOGS_DIR = os.path.join(os.path.dirname(__file__), "logs", ENV)
 DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'database', ENV, f'database_{ENV}.db')
 
 
