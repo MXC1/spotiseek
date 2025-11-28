@@ -46,7 +46,7 @@ load_dotenv(dotenv_path)
 from logs_utils import setup_logging, write_log
 from database_management import TrackDB
 from spotify_scraper import get_tracks_from_playlist
-from soulseek_client import download_track, query_download_status, process_redownload_queue
+from soulseek_client import download_track, download_tracks_async, query_download_status, process_redownload_queue
 from m3u8_manager import delete_all_m3u8_files, write_playlist_m3u8, update_track_in_m3u8
 from xml_exporter import export_itunes_xml
 
@@ -199,20 +199,23 @@ def sanitize_playlist_name(playlist_name: str) -> str:
     return sanitized
 
 
-def process_playlist(playlist_url: str) -> None:
+def process_playlist(playlist_url: str) -> List[Tuple[str, str, str]]:
     """
-    Process a single playlist: fetch tracks and initiate downloads.
+    Process a single playlist: fetch tracks and add to database.
     
     This function:
     1. Fetches playlist name and tracks from Spotify
     2. Generates M3U8 file path
     3. Adds playlist to database
     4. Creates M3U8 file with track comments
-    5. Processes each track (add to DB, initiate download)
+    5. Adds tracks to database
     6. Links tracks to playlist in database
     
     Args:
         playlist_url: Spotify playlist URL
+        
+    Returns:
+        List of tracks to be downloaded: [(spotify_id, artist, track_name), ...]
         
     Note:
         Errors are logged but don't stop processing. Individual track
@@ -253,57 +256,33 @@ def process_playlist(playlist_url: str) -> None:
         write_log.error("M3U8_WRITE_FAIL", "Failed to write M3U8 file for playlist.", 
                        {"playlist_url": playlist_url, "m3u8_path": m3u8_path, "error": str(e)})
 
-    # Process each track individually
+    # Add tracks to database and collect for batch download
+    tracks_to_download = []
     for track in tracks:
-        process_track(track)
-        
-        # Link track to playlist in database
         try:
-            track_db.link_track_to_playlist(track[0], playlist_url)
+            spotify_id, artist, track_name = track
+            
+            # Add track to database (INSERT OR IGNORE - won't duplicate)
+            track_db.add_track(spotify_id=spotify_id, track_name=track_name, artist=artist)
+            
+            # Link track to playlist in database
+            track_db.link_track_to_playlist(spotify_id, playlist_url)
+            
+            # Collect track for batch download
+            tracks_to_download.append(track)
+            
         except Exception as e:
-            write_log.error("TRACK_LINK_FAIL", "Failed to link track to playlist.", 
-                           {"spotify_id": track[0], "playlist_url": playlist_url, "error": str(e)})
-
-
-# Track Processing Functions
-
-def process_track(track: Tuple[str, str, str]) -> None:
-    """
-    Add a track to the database and initiate download.
+            track_name = track[2] if len(track) > 2 else str(track)
+            write_log.error("TRACK_PROCESS_FAIL", "Failed to process track.", 
+                           {"track": track_name, "error": str(e)})
+            # Update database status if possible
+            if len(track) > 0:
+                try:
+                    track_db.update_track_status(track[0], "failed")
+                except Exception:
+                    pass  # If status update fails, continue anyway
     
-    This function:
-    1. Adds track to database (if not already present)
-    2. Initiates Soulseek download
-    3. Handles errors gracefully, updating track status to "failed" on error
-    
-    Args:
-        track: Tuple of (spotify_id, artist, track_name)
-        
-    Note:
-        Errors are logged and track status is updated, but processing continues.
-        This ensures one failed track doesn't stop the entire workflow.
-    """
-    try:
-        spotify_id, artist, track_name = track
-        
-        # Add track to database (INSERT OR IGNORE - won't duplicate)
-        track_db.add_track(spotify_id=spotify_id, track_name=track_name, artist=artist)
-        
-        # Initiate Soulseek download
-        download_track(artist, track_name, spotify_id)
-        
-    except Exception as e:
-        # Extract track name for error logging
-        track_name = track[2] if len(track) > 2 else str(track)
-        write_log.error("TRACK_PROCESS_FAIL", "Failed to process track.", 
-                       {"track": track_name, "error": str(e)})
-        
-        # Update database status if possible
-        if len(track) > 0:
-            try:
-                track_db.update_track_status(track[0], "failed")
-            except Exception:
-                pass  # If status update fails, continue anyway
+    return tracks_to_download
 
 
 # Download Status Management Functions
@@ -625,10 +604,19 @@ def main(reset_db: bool = False) -> None:
                        {"csv_path": config.playlists_csv, "error": str(e)})
         return
 
-    # Process each playlist
+    # Process each playlist and collect all tracks for batch download
+    all_tracks = []
     for playlist_url in playlists:
-        process_playlist(playlist_url)
-        update_download_statuses()
+        tracks = process_playlist(playlist_url)
+        all_tracks.extend(tracks)
+    
+    # Batch process all track downloads asynchronously
+    write_log.info("BATCH_DOWNLOAD_START", "Starting batch download of all tracks.", 
+                  {"total_tracks": len(all_tracks)})
+    download_tracks_async(all_tracks)
+    
+    # Update download statuses after batch processing
+    update_download_statuses()
 
     # Process redownload queue (quality upgrades for non-WAV files)
     write_log.info("REDOWNLOAD_QUEUE_START", "Processing quality upgrade queue.")

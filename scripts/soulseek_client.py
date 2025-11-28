@@ -6,6 +6,7 @@ daemon API and managing download requests. It integrates with the database to
 track download status and maintain mappings between Soulseek and Spotify IDs.
 
 Key Features:
+- Asynchronous batch searching for improved performance
 - Intelligent file quality selection (WAV > FLAC > MP3 320 > others)
 - Automatic filtering of remixes/edits unless explicitly requested
 - Quality upgrade system for existing downloads
@@ -20,9 +21,12 @@ Quality Priority:
 5. Other formats (OGG, M4A, etc.)
 
 Public API:
-- download_track(): Main entry point for track downloads
+- download_tracks_async(): Batch async downloads (recommended for multiple tracks)
+- download_track(): Single track download (legacy, uses async internally)
+- initiate_track_search(): Start search without waiting (for custom workflows)
+- process_search_results(): Complete a search initiated earlier
 - query_download_status(): Poll slskd for active download states
-- process_redownload_queue(): Handle quality upgrade requests
+- process_redownload_queue(): Handle quality upgrade requests (async)
 """
 
 import os
@@ -43,7 +47,7 @@ SLSKD_URL = f"{SLSKD_BASE_URL}/api/v0"
 TOKEN = os.getenv("TOKEN")
 
 # Search and download constants
-MAX_SEARCH_ATTEMPTS = 100
+MAX_SEARCH_ATTEMPTS = 50
 SEARCH_POLL_INTERVAL = 2  # seconds
 
 # Database instance
@@ -415,26 +419,21 @@ def enqueue_download(search_id: str, file: Dict[str, Any], username: str, spotif
 
 # Main Download Functions
 
-def download_track(artist: str, track: str, spotify_id: str) -> None:
+def initiate_track_search(artist: str, track: str, spotify_id: str) -> Optional[Tuple[str, str, str]]:
     """
-    Search for and initiate download of a track on the Soulseek network.
+    Initiate an asynchronous search for a track on the Soulseek network.
     
-    This function:
-    1. Checks if the track is already downloading or completed
-    2. Creates a search query combining artist and track name
-    3. Polls for search results
-    4. Selects the best quality file from results
-    5. Enqueues the file for download
-    6. Updates the database with download status
-    
-    Quality Upgrade Logic:
-    - If track exists but is not WAV, marks for redownload
-    - Completed tracks are skipped unless they need quality upgrades
+    This function only creates the search without waiting for results.
+    Call process_search_results() later to complete the download process.
     
     Args:
         artist: Artist name(s)
         track: Track name
         spotify_id: Spotify track identifier for database tracking
+    
+    Returns:
+        Tuple of (search_id, search_text, spotify_id) if search was initiated,
+        None if track should be skipped
     """
     # Check current status
     current_status = track_db.get_track_status(spotify_id)
@@ -447,23 +446,50 @@ def download_track(artist: str, track: str, spotify_id: str) -> None:
             write_log.info("TRACK_QUALITY_UPGRADE", "Marking track for quality upgrade.", 
                           {"spotify_id": spotify_id, "current_extension": current_extension})
             track_db.update_track_status(spotify_id, "redownload_pending")
-            return
+            return None
         
         write_log.debug("SLSKD_SKIP", "Skipping download (already in progress or completed).", 
                        {"artist": artist, "track": track, "current_status": current_status})
-        return
+        return None
 
     search_text = f"{artist} {track}"
-    write_log.info("SLSKD_SEARCH", "Searching for track on Soulseek.", {"search_text": search_text})
+    write_log.info("SLSKD_SEARCH_INITIATE", "Initiating search for track.", 
+                  {"search_text": search_text, "spotify_id": spotify_id})
     track_db.update_track_status(spotify_id, "searching")
 
     try:
-        # Perform search on Soulseek network
+        # Create search without waiting for results
         search_id = create_search(search_text)
+        return (search_id, search_text, spotify_id)
+        
+    except Exception as e:
+        write_log.error("SLSKD_SEARCH_INITIATE_FAIL", "Failed to initiate search.", 
+                       {"artist": artist, "track": track, "error": str(e)})
+        track_db.update_track_status(spotify_id, "failed")
+        return None
+
+
+def process_search_results(search_id: str, search_text: str, spotify_id: str) -> None:
+    """
+    Poll for search results and enqueue download if suitable file is found.
+    
+    This function completes the download process started by initiate_track_search().
+    
+    Args:
+        search_id: UUID of the search to retrieve results for
+        search_text: Original search query text
+        spotify_id: Spotify track identifier for database tracking
+    """
+    write_log.info("SLSKD_SEARCH_PROCESS", "Processing search results.", 
+                  {"search_id": search_id, "spotify_id": spotify_id})
+    
+    try:
+        # Poll for search results
         responses = get_search_responses(search_id)
         
         if not responses:
-            write_log.warn("SLSKD_NO_RESULTS", "No search results found.", {"search_text": search_text})
+            write_log.warn("SLSKD_NO_RESULTS", "No search results found.", 
+                          {"search_text": search_text, "spotify_id": spotify_id})
             track_db.update_track_status(spotify_id, "failed")
             return
         
@@ -472,7 +498,7 @@ def download_track(artist: str, track: str, spotify_id: str) -> None:
         
         if not best_file:
             write_log.warn("SLSKD_NO_SUITABLE_FILE", "No suitable file found in results.", 
-                          {"search_text": search_text})
+                          {"search_text": search_text, "spotify_id": spotify_id})
             track_db.update_track_status(spotify_id, "failed")
             return
         
@@ -480,9 +506,63 @@ def download_track(artist: str, track: str, spotify_id: str) -> None:
         enqueue_download(search_id, best_file, username, spotify_id)
         
     except Exception as e:
-        write_log.error("SLSKD_DOWNLOAD_FAIL", "Failed to download track.", 
-                       {"artist": artist, "track": track, "error": str(e)})
+        write_log.error("SLSKD_SEARCH_PROCESS_FAIL", "Failed to process search results.", 
+                       {"search_id": search_id, "spotify_id": spotify_id, "error": str(e)})
         track_db.update_track_status(spotify_id, "failed")
+
+
+def download_track(artist: str, track: str, spotify_id: str) -> None:
+    """
+    Search for and initiate download of a track on the Soulseek network.
+    
+    This is a legacy synchronous function maintained for backward compatibility.
+    For better performance, use initiate_track_search() + process_search_results().
+    
+    Args:
+        artist: Artist name(s)
+        track: Track name
+        spotify_id: Spotify track identifier for database tracking
+    """
+    search_info = initiate_track_search(artist, track, spotify_id)
+    if search_info:
+        search_id, search_text, spotify_id = search_info
+        process_search_results(search_id, search_text, spotify_id)
+
+
+def download_tracks_async(tracks: List[Tuple[str, str, str]]) -> None:
+    """
+    Asynchronously search for and download multiple tracks.
+    
+    This function initiates all searches concurrently, then polls for results
+    once all searches have been created. This is much faster than processing
+    tracks one-by-one.
+    
+    Args:
+        tracks: List of tuples containing (spotify_id, artist, track_name)
+    """
+    if not tracks:
+        write_log.info("ASYNC_DOWNLOAD_EMPTY", "No tracks to download.")
+        return
+    
+    write_log.info("ASYNC_DOWNLOAD_START", "Starting async download batch.", 
+                  {"track_count": len(tracks)})
+    
+    # Phase 1: Initiate all searches without waiting
+    pending_searches = []
+    for spotify_id, artist, track_name in tracks:
+        search_info = initiate_track_search(artist, track_name, spotify_id)
+        if search_info:
+            pending_searches.append(search_info)
+    
+    write_log.info("ASYNC_SEARCHES_INITIATED", "All searches initiated.", 
+                  {"initiated_count": len(pending_searches), "skipped_count": len(tracks) - len(pending_searches)})
+    
+    # Phase 2: Process all search results
+    for search_id, search_text, spotify_id in pending_searches:
+        process_search_results(search_id, search_text, spotify_id)
+    
+    write_log.info("ASYNC_DOWNLOAD_COMPLETE", "Async download batch completed.", 
+                  {"processed_count": len(pending_searches)})
 
 
 def query_download_status() -> List[Dict[str, Any]]:
@@ -510,7 +590,7 @@ def query_download_status() -> List[Dict[str, Any]]:
 
 def process_redownload_queue() -> None:
     """
-    Process tracks marked for redownload (quality upgrade).
+    Process tracks marked for redownload (quality upgrade) asynchronously.
     
     This function should be called after all new tracks have been processed
     to upgrade existing tracks that don't have WAV quality.
@@ -526,30 +606,66 @@ def process_redownload_queue() -> None:
     
     write_log.info("SLSKD_REDOWNLOAD_COUNT", f"Found {len(redownload_tracks)} tracks for quality upgrade.")
     
+    # Phase 1: Initiate all searches without waiting
+    pending_searches = []
+    track_metadata = {}  # Map search_id to track metadata
+    
     for track_row in redownload_tracks:
         spotify_id, track_name, artist = track_row[0], track_row[1], track_row[2]
         current_extension = track_db.get_track_extension(spotify_id)
         current_bitrate = get_track_bitrate(spotify_id)
-
-        # Search for new candidates
+        
+        # Create search
         search_text = f"{artist} {track_name}"
-        search_id = create_search(search_text)
-        responses = get_search_responses(search_id)
-        best_file, username = select_best_file(responses, search_text)
+        try:
+            search_id = create_search(search_text)
+            pending_searches.append(search_id)
+            track_metadata[search_id] = {
+                'spotify_id': spotify_id,
+                'track_name': track_name,
+                'artist': artist,
+                'search_text': search_text,
+                'current_extension': current_extension,
+                'current_bitrate': current_bitrate
+            }
+        except Exception as e:
+            write_log.error("SLSKD_REDOWNLOAD_SEARCH_FAIL", "Failed to create search for upgrade.", 
+                          {"spotify_id": spotify_id, "error": str(e)})
+    
+    write_log.info("SLSKD_REDOWNLOAD_SEARCHES_INITIATED", "All upgrade searches initiated.", 
+                  {"search_count": len(pending_searches)})
+    
+    # Phase 2: Process all search results
+    for search_id in pending_searches:
+        metadata = track_metadata[search_id]
+        spotify_id = metadata['spotify_id']
+        track_name = metadata['track_name']
+        artist = metadata['artist']
+        search_text = metadata['search_text']
+        current_extension = metadata['current_extension']
+        current_bitrate = metadata['current_bitrate']
+        
+        try:
+            responses = get_search_responses(search_id)
+            best_file, username = select_best_file(responses, search_text)
 
-        if not best_file:
-            write_log.warn("SLSKD_NO_SUITABLE_FILE", "No suitable file found for upgrade.", {"spotify_id": spotify_id})
-            continue
+            if not best_file:
+                write_log.warn("SLSKD_NO_SUITABLE_FILE", "No suitable file found for upgrade.", 
+                              {"spotify_id": spotify_id})
+                continue
 
-        # Only proceed if the new file is truly better
-        if is_better_quality(best_file, current_extension, current_bitrate):
-            write_log.info("SLSKD_REDOWNLOAD_PROCESS", "Processing quality upgrade.", 
-                          {"spotify_id": spotify_id, "track": track_name, "artist": artist, "upgrade": True})
-            track_db.update_track_status(spotify_id, "pending")
-            enqueue_download(search_id, best_file, username, spotify_id)
-        else:
-            write_log.info("SLSKD_REDOWNLOAD_SKIP", "No better quality file found for upgrade.", 
-                          {"spotify_id": spotify_id, "track": track_name, "artist": artist, "upgrade": False})
+            # Only proceed if the new file is truly better
+            if is_better_quality(best_file, current_extension, current_bitrate):
+                write_log.info("SLSKD_REDOWNLOAD_PROCESS", "Processing quality upgrade.", 
+                              {"spotify_id": spotify_id, "track": track_name, "artist": artist, "upgrade": True})
+                track_db.update_track_status(spotify_id, "pending")
+                enqueue_download(search_id, best_file, username, spotify_id)
+            else:
+                write_log.info("SLSKD_REDOWNLOAD_SKIP", "No better quality file found for upgrade.", 
+                              {"spotify_id": spotify_id, "track": track_name, "artist": artist, "upgrade": False})
+        except Exception as e:
+            write_log.error("SLSKD_REDOWNLOAD_PROCESS_FAIL", "Failed to process upgrade search.", 
+                          {"spotify_id": spotify_id, "error": str(e)})
 
 
 def get_track_bitrate(spotify_id: str) -> Optional[int]:
