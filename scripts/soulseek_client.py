@@ -481,7 +481,7 @@ def process_search_results(search_id: str, search_text: str, spotify_id: str) ->
         spotify_id: Spotify track identifier for database tracking
     """
     write_log.info("SLSKD_SEARCH_PROCESS", "Processing search results.", 
-                  {"search_id": search_id, "spotify_id": spotify_id})
+                  {"search_id": search_id, "spotify_id": spotify_id, "search_text": search_text})
     
     try:
         # Poll for search results

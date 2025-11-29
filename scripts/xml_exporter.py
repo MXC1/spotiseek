@@ -10,15 +10,33 @@ Key Features:
 - Path conversion for Docker/host environments
 - URL encoding for file paths
 - Playlist and track metadata export
+- Automatic metadata extraction from audio files (using mutagen)
+- Rich track information including dates, bitrate, sample rate, album, genre, etc.
+
+Extracted Metadata:
+- Date Modified: File modification timestamp
+- Date Added: File creation/add timestamp
+- Bit Rate: Audio bitrate in kbps
+- Sample Rate: Audio sample rate in Hz
+- Album: Album name from ID3/Vorbis tags
+- Genre: Genre from ID3/Vorbis tags
+- Year: Release year from tags
+- File Size: File size in bytes
+- Total Time: Duration in milliseconds
 
 Public API:
 - export_itunes_xml(): Main export function
+- extract_file_metadata(): Extract metadata from an audio file
 """
 
 import os
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
-from typing import Optional
+from typing import Optional, Dict, Any
+from datetime import datetime
+from mutagen import File as MutagenFile
+from mutagen.mp3 import MP3
+from mutagen.flac import FLAC
 
 from database_management import TrackDB
 from logs_utils import write_log
@@ -80,6 +98,130 @@ def format_file_location_url(local_file_path: str) -> str:
     encoded_path = "/".join(encoded_parts)
     
     return f'file://localhost/{encoded_path}'
+
+
+def extract_file_metadata(local_file_path: str) -> Dict[str, Any]:
+    """
+    Extract metadata from an audio file using mutagen.
+    
+    Args:
+        local_file_path: Absolute path to the audio file
+    
+    Returns:
+        Dictionary containing file metadata:
+        - file_size: File size in bytes
+        - date_modified: ISO 8601 formatted modification date
+        - date_added: ISO 8601 formatted creation/add date
+        - bitrate: Bitrate in kbps (integer)
+        - sample_rate: Sample rate in Hz (integer)
+        - duration_ms: Duration in milliseconds (integer)
+        - album: Album name (string)
+        - genre: Genre (string)
+        - year: Year (integer)
+    """
+    metadata = {
+        'file_size': None,
+        'date_modified': None,
+        'date_added': None,
+        'bitrate': None,
+        'sample_rate': None,
+        'duration_ms': None,
+        'album': None,
+        'genre': None,
+        'year': None
+    }
+    
+    try:
+        # Use the path as-is (works in both Docker and Windows environments)
+        file_path = local_file_path
+        
+        # Check if file exists
+        if not os.path.exists(file_path):
+            write_log.warn("FILE_NOT_FOUND", "File not found for metadata extraction.", 
+                          {"file_path": file_path})
+            return metadata
+        
+        # Get file system metadata
+        stat_info = os.stat(file_path)
+        metadata['file_size'] = stat_info.st_size
+        metadata['date_modified'] = datetime.fromtimestamp(stat_info.st_mtime).isoformat() + 'Z'
+        metadata['date_added'] = datetime.fromtimestamp(stat_info.st_ctime).isoformat() + 'Z'
+        
+        # Get audio metadata using mutagen
+        audio = MutagenFile(file_path, easy=False)
+        
+        if audio is None:
+            write_log.warn("MUTAGEN_PARSE_FAIL", "Failed to parse audio file.", 
+                          {"file_path": file_path})
+            return metadata
+        
+        # Extract bitrate (convert to kbps)
+        if hasattr(audio.info, 'bitrate') and audio.info.bitrate:
+            metadata['bitrate'] = int(audio.info.bitrate / 1000)
+        
+        # Extract sample rate
+        if hasattr(audio.info, 'sample_rate') and audio.info.sample_rate:
+            metadata['sample_rate'] = int(audio.info.sample_rate)
+        
+        # Extract duration (convert to milliseconds)
+        if hasattr(audio.info, 'length') and audio.info.length:
+            metadata['duration_ms'] = int(audio.info.length * 1000)
+        
+        # Extract tags based on file format
+        if isinstance(audio, MP3):
+            # MP3 ID3 tags
+            if audio.tags:
+                # Album
+                if 'TALB' in audio.tags:
+                    metadata['album'] = str(audio.tags['TALB'].text[0])
+                # Genre
+                if 'TCON' in audio.tags:
+                    metadata['genre'] = str(audio.tags['TCON'].text[0])
+                # Year
+                if 'TDRC' in audio.tags:
+                    metadata['year'] = int(str(audio.tags['TDRC'].text[0])[:4])
+                elif 'TYER' in audio.tags:
+                    metadata['year'] = int(str(audio.tags['TYER'].text[0]))
+        
+        elif isinstance(audio, FLAC):
+            # FLAC Vorbis comments
+            if audio.tags:
+                if 'album' in audio.tags:
+                    metadata['album'] = audio.tags['album'][0]
+                if 'genre' in audio.tags:
+                    metadata['genre'] = audio.tags['genre'][0]
+                if 'date' in audio.tags:
+                    date_str = audio.tags['date'][0]
+                    metadata['year'] = int(date_str[:4])
+        
+        else:
+            # Generic tag handling for other formats
+            if hasattr(audio, 'tags') and audio.tags:
+                # Try common tag keys
+                for album_key in ['album', 'ALBUM', 'Album']:
+                    if album_key in audio.tags:
+                        metadata['album'] = str(audio.tags[album_key][0]) if isinstance(audio.tags[album_key], list) else str(audio.tags[album_key])
+                        break
+                
+                for genre_key in ['genre', 'GENRE', 'Genre']:
+                    if genre_key in audio.tags:
+                        metadata['genre'] = str(audio.tags[genre_key][0]) if isinstance(audio.tags[genre_key], list) else str(audio.tags[genre_key])
+                        break
+                
+                for year_key in ['date', 'DATE', 'year', 'YEAR']:
+                    if year_key in audio.tags:
+                        year_val = str(audio.tags[year_key][0]) if isinstance(audio.tags[year_key], list) else str(audio.tags[year_key])
+                        metadata['year'] = int(year_val[:4])
+                        break
+        
+        write_log.debug("METADATA_EXTRACTED", "Successfully extracted file metadata.", 
+                       {"file_path": file_path, "metadata": metadata})
+    
+    except Exception as e:
+        write_log.error("METADATA_EXTRACT_FAIL", "Failed to extract file metadata.", 
+                       {"file_path": local_file_path, "error": str(e)})
+    
+    return metadata
 
 
 def export_itunes_xml(xml_path: str, music_folder_url: Optional[str] = None) -> None:
@@ -150,11 +292,18 @@ def export_itunes_xml(xml_path: str, music_folder_url: Optional[str] = None) -> 
     # Map spotify_id to track integer ID (only for downloaded tracks)
     spotify_id_to_track_id = {}
     downloaded_tracks = [t for t in tracks if t[5]]  # Filter by local_file_path
-    write_log.debug("XML_DOWNLOADED_TRACKS", "Filtered downloaded tracks.", {"count": len(downloaded_tracks)})
+    write_log.info("XML_DOWNLOADED_TRACKS", "Filtered downloaded tracks.", 
+                   {"total_tracks": len(tracks), "downloaded_tracks": len(downloaded_tracks)})
     
     for idx, (spotify_id, track_name, artist, _, _, local_file_path, _) in enumerate(downloaded_tracks, 1):
-        _add_track_to_xml(tracks_dict, idx, track_name, artist, spotify_id, local_file_path)
-        spotify_id_to_track_id[spotify_id] = idx
+        write_log.debug("XML_ADDING_TRACK", "Adding track to XML.", 
+                       {"track_id": idx, "spotify_id": spotify_id, "track_name": track_name, "local_file_path": local_file_path})
+        try:
+            _add_track_to_xml(tracks_dict, idx, track_name, artist, spotify_id, local_file_path)
+            spotify_id_to_track_id[spotify_id] = idx
+        except Exception as e:
+            write_log.error("XML_TRACK_ADD_FAIL", "Failed to add track to XML.", 
+                           {"track_id": idx, "spotify_id": spotify_id, "error": str(e)})
 
     # Build playlists array
     ET.SubElement(dict_root, 'key').text = 'Playlists'
@@ -199,17 +348,62 @@ def _add_xml_key_value(parent: ET.Element, key: str, value: str, value_type: str
 
 def _add_track_to_xml(tracks_dict: ET.Element, track_id: int, track_name: str, 
                       artist: str, spotify_id: str, local_file_path: str) -> None:
-    """Add a track entry to the tracks dictionary."""
+    """Add a track entry to the tracks dictionary with file metadata."""
     track_key = ET.SubElement(tracks_dict, 'key')
     track_key.text = str(track_id)
     track_dict = ET.SubElement(tracks_dict, 'dict')
     
+    # Extract metadata from the actual file
+    file_metadata = extract_file_metadata(local_file_path)
+    
+    # Basic track information
     _add_xml_key_value(track_dict, 'Track ID', str(track_id), 'integer')
     _add_xml_key_value(track_dict, 'Name', track_name or '', 'string')
     _add_xml_key_value(track_dict, 'Artist', artist or '', 'string')
+    
+    # Add album if available
+    if file_metadata.get('album'):
+        _add_xml_key_value(track_dict, 'Album', file_metadata['album'], 'string')
+    
+    # Add year if available
+    if file_metadata.get('year'):
+        _add_xml_key_value(track_dict, 'Year', str(file_metadata['year']), 'integer')
+    
+    # Add genre if available
+    if file_metadata.get('genre'):
+        _add_xml_key_value(track_dict, 'Genre', file_metadata['genre'], 'string')
+    
+    # File type and format
     _add_xml_key_value(track_dict, 'Kind', 'MPEG audio file', 'string')
-    _add_xml_key_value(track_dict, 'Track Type', 'File', 'string')
+    
+    # Add file size if available
+    if file_metadata.get('file_size'):
+        _add_xml_key_value(track_dict, 'Size', str(file_metadata['file_size']), 'integer')
+    
+    # Add duration if available
+    if file_metadata.get('duration_ms'):
+        _add_xml_key_value(track_dict, 'Total Time', str(file_metadata['duration_ms']), 'integer')
+    
+    # Add dates
+    if file_metadata.get('date_modified'):
+        ET.SubElement(track_dict, 'key').text = 'Date Modified'
+        ET.SubElement(track_dict, 'date').text = file_metadata['date_modified']
+    
+    if file_metadata.get('date_added'):
+        ET.SubElement(track_dict, 'key').text = 'Date Added'
+        ET.SubElement(track_dict, 'date').text = file_metadata['date_added']
+    
+    # Add bitrate if available
+    if file_metadata.get('bitrate'):
+        _add_xml_key_value(track_dict, 'Bit Rate', str(file_metadata['bitrate']), 'integer')
+    
+    # Add sample rate if available
+    if file_metadata.get('sample_rate'):
+        _add_xml_key_value(track_dict, 'Sample Rate', str(file_metadata['sample_rate']), 'integer')
+    
+    # Track identification
     _add_xml_key_value(track_dict, 'Persistent ID', spotify_id or '', 'string')
+    _add_xml_key_value(track_dict, 'Track Type', 'File', 'string')
     _add_xml_key_value(track_dict, 'Location', format_file_location_url(local_file_path), 'string')
 
 
