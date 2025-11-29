@@ -132,7 +132,8 @@ def extract_file_metadata(local_file_path: str) -> Dict[str, Any]:
     }
     
     try:
-        # Use the path as-is (works in both Docker and Windows environments)
+        # Use the path as-is for file access (works inside Docker container)
+        # Don't convert to Windows path here - that's only for XML URLs
         file_path = local_file_path
         
         # Check if file exists

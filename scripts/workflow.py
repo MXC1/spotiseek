@@ -404,8 +404,7 @@ def _handle_completed_download(file: dict, spotify_id: str) -> None:
     else:
         relative_path = filename_rel
     
-    # Convert back to Windows path separators
-    relative_path = relative_path.replace("/", "\\")
+    # Keep forward slashes for Linux/Docker environment
     local_file_path = os.path.join(config.downloads_root, relative_path)
     
     # If FLAC, remux and use new path; otherwise, use as is
