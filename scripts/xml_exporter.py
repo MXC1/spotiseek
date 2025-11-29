@@ -219,7 +219,7 @@ def extract_file_metadata(local_file_path: str) -> Dict[str, Any]:
                        {"file_path": file_path, "metadata": metadata})
     
     except Exception as e:
-        write_log.error("METADATA_EXTRACT_FAIL", "Failed to extract file metadata.", 
+        write_log.warn("METADATA_EXTRACT_FAIL", "Failed to extract file metadata.", 
                        {"file_path": local_file_path, "error": str(e)})
     
     return metadata

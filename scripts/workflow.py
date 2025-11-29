@@ -341,7 +341,7 @@ def _update_file_status(file: dict) -> None:
     # Handle failed downloads
     elif state in ("Completed, Errored", "Completed, TimedOut", "Completed, Cancelled"):
         track_db.update_track_status(spotify_id, "failed")
-        write_log.warn("DOWNLOAD_FAILED", "Download failed.", 
+        write_log.info("DOWNLOAD_FAILED", "Download failed.", 
                       {"spotify_id": spotify_id, "state": state})
     
     # Handle queued downloads
@@ -453,7 +453,7 @@ def _remux_flac_to_mp3(local_file_path: str, spotify_id: str, file: dict) -> str
 
         # Check FLAC integrity before remuxing
         if not _is_flac_valid(ffmpeg_input):
-            write_log.error("FLAC_INVALID", "FLAC file failed integrity check. Skipping remux.", {"spotify_id": spotify_id, "flac_path": ffmpeg_input})
+            write_log.warn("FLAC_INVALID", "FLAC file failed integrity check. Skipping remux.", {"spotify_id": spotify_id, "flac_path": ffmpeg_input})
             track_db.update_track_status(spotify_id, "corrupt")
             slskd_uuid_to_blacklist = track_db.get_sldkd_uuid_by_spotify_id(spotify_id)
             if slskd_uuid_to_blacklist:

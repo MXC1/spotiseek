@@ -308,36 +308,74 @@ def select_best_file(responses: List[Dict[str, Any]], search_text: str) -> Tuple
     search_text_lower = search_text.lower()
     allow_alternatives = any(keyword in search_text_lower for keyword in excluded_keywords)
     
+    write_log.debug("SLSKD_FILE_SELECTION_START", "Starting file selection process.", 
+                   {"response_count": len(responses), "allow_alternatives": allow_alternatives})
+    
     # Collect all candidate files, skipping blacklisted slskd_uuids
     candidates = []
+    blacklisted_count = 0
+    total_files = 0
+    
     for response in responses:
         username = response.get("username")
         files = response.get("files", [])
+        total_files += len(files)
+        
         for file in files:
             slskd_uuid = file.get("id")
+            filename = file.get("filename", "")
+            
             if slskd_uuid and track_db.is_slskd_blacklisted(slskd_uuid):
-                write_log.info("SLSKD_BLACKLIST_SKIP", "Skipping blacklisted slskd_uuid in file selection.", {"slskd_uuid": slskd_uuid})
+                blacklisted_count += 1
+                write_log.debug("SLSKD_BLACKLIST_SKIP", "Skipping blacklisted file.", 
+                               {"slskd_uuid": slskd_uuid, "filename": filename, "username": username})
                 continue
+                
             candidates.append((file, username))
     
+    write_log.debug("SLSKD_FILE_SELECTION_CANDIDATES", "Collected candidate files.", 
+                   {"total_files": total_files, "candidates": len(candidates), 
+                    "blacklisted": blacklisted_count})
+    
     if not candidates:
+        write_log.debug("SLSKD_FILE_SELECTION_NO_CANDIDATES", "No candidates after blacklist filtering.", 
+                       {"total_files": total_files, "blacklisted": blacklisted_count})
         return None, None
     
     # Filter by originality if not explicitly looking for alternatives
     if allow_alternatives:
         search_pool = candidates
+        write_log.debug("SLSKD_FILE_SELECTION_ALTERNATIVES", "Allowing all file versions.", 
+                       {"pool_size": len(search_pool)})
     else:
         original_candidates = [
             (f, u) for f, u in candidates 
             if is_original_version(f.get("filename", ""), allow_alternatives=False)
         ]
-        search_pool = original_candidates if original_candidates else candidates
+        filtered_count = len(candidates) - len(original_candidates)
+        
+        if original_candidates:
+            search_pool = original_candidates
+            write_log.debug("SLSKD_FILE_SELECTION_ORIGINALS", "Filtered to original versions only.", 
+                           {"original_count": len(original_candidates), "filtered_out": filtered_count})
+        else:
+            search_pool = candidates
+            write_log.debug("SLSKD_FILE_SELECTION_FALLBACK", "No original versions found, using all candidates.", 
+                           {"candidates": len(candidates)})
     
     # Sort by quality (best first)
     search_pool.sort(key=quality_sort_key, reverse=True)
     
-    # Return best match
-    return search_pool[0] if search_pool else (None, None)
+    if search_pool:
+        best_file, best_username = search_pool[0]
+        best_ext, best_bitrate = extract_file_quality(best_file)
+        write_log.debug("SLSKD_FILE_SELECTION_BEST", "Selected best quality file.", 
+                       {"filename": best_file.get("filename"), "username": best_username, 
+                        "extension": best_ext, "bitrate": best_bitrate, "pool_size": len(search_pool)})
+        return search_pool[0]
+    
+    write_log.debug("SLSKD_FILE_SELECTION_EMPTY_POOL", "No files in search pool after filtering.", {})
+    return None, None
 
 
 # API Communication Functions
@@ -437,26 +475,30 @@ def get_search_responses(search_id: str) -> List[Dict[str, Any]]:
         
         time.sleep(SEARCH_POLL_INTERVAL)
     
-    write_log.warn("SLSKD_SEARCH_NO_RESULTS", "No search responses found after polling attempts.", 
+    write_log.info("SLSKD_SEARCH_NO_RESULTS", "No search responses found after polling attempts.", 
                   {"search_id": search_id})
     return []
 
 
-def enqueue_download(search_id: str, file: Dict[str, Any], username: str, spotify_id: str) -> Dict[str, Any]:
+def enqueue_download(search_id: str, file: Dict[str, Any], username: str, spotify_id: str, max_retries: int = 3) -> Dict[str, Any]:
     """
     Queue a file for download from a Soulseek user and track the mapping.
+    
+    Implements retry logic with exponential backoff for handling temporary
+    slskd server issues (500 errors, timeouts).
     
     Args:
         search_id: UUID of the search that found this file
         file: File object containing 'filename' and 'size'
         username: Soulseek username to download from
         spotify_id: Spotify track ID to associate with this download
+        max_retries: Maximum number of retry attempts (default: 3)
     
     Returns:
         API response dictionary containing enqueued download information
     
     Raises:
-        requests.HTTPError: If the API request fails
+        requests.HTTPError: If the API request fails after all retries
         ValueError: If response doesn't contain expected data
     """
     filename = file.get("filename")
@@ -466,49 +508,84 @@ def enqueue_download(search_id: str, file: Dict[str, Any], username: str, spotif
     write_log.info("SLSKD_DOWNLOAD_ENQUEUE", "Enqueuing download.", 
                   {"filename": filename, "username": username, "extension": extension, "bitrate": bitrate})
     
-    try:
-        url = f"{SLSKD_URL}/transfers/downloads/{username}"
-        payload = [{"filename": filename, "size": size, "username": username}]
-        
-        resp = requests.post(
-            url,
-            json=payload,
-            headers={"X-API-Key": TOKEN},
-            timeout=10
-        )
-        write_log.debug("SLSKD_DOWNLOAD_RESPONSE", "Download POST response.", 
-                       {"status_code": resp.status_code, "response_preview": resp.text[:200]})
-        resp.raise_for_status()
-        
-        download_response = resp.json()
-        
-        # Validate and extract enqueued download information
-        enqueued = download_response.get("enqueued", [])
-        if not enqueued:
-            raise ValueError("No downloads were enqueued in response.")
-        
-        slskd_uuid = enqueued[0].get("id")
-        if not slskd_uuid:
-            raise ValueError("Enqueued download missing UUID.")
-        
-        # Store mapping between Soulseek UUID and Spotify ID
-        write_log.info("SLSKD_ENQUEUE_SUCCESS", "Successfully enqueued download.", 
-                      {"slskd_uuid": slskd_uuid, "spotify_id": spotify_id})
-        
-        track_db.add_slskd_mapping(slskd_uuid, spotify_id)
-        track_db.update_track_status(spotify_id, "downloading")
-        track_db.update_slskd_file_name(spotify_id, filename)
-        track_db.update_extension_bitrate(spotify_id, extension, bitrate)
-        
-        return download_response
-        
-    except requests.RequestException as e:
-        write_log.error("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download.", 
-                       {"error": str(e), "filename": filename})
-        raise
-    except ValueError as e:
-        write_log.error("SLSKD_ENQUEUE_INVALID", "Invalid download response.", {"error": str(e)})
-        raise
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            url = f"{SLSKD_URL}/transfers/downloads/{username}"
+            payload = [{"filename": filename, "size": size, "username": username}]
+            
+            resp = requests.post(
+                url,
+                json=payload,
+                headers={"X-API-Key": TOKEN},
+                timeout=30  # Increased from 10 to 30 seconds
+            )
+            write_log.debug("SLSKD_DOWNLOAD_RESPONSE", "Download POST response.", 
+                           {"status_code": resp.status_code, "response_preview": resp.text[:200], "attempt": attempt + 1})
+            resp.raise_for_status()
+            
+            download_response = resp.json()
+            
+            # Validate and extract enqueued download information
+            enqueued = download_response.get("enqueued", [])
+            if not enqueued:
+                raise ValueError("No downloads were enqueued in response.")
+            
+            slskd_uuid = enqueued[0].get("id")
+            if not slskd_uuid:
+                raise ValueError("Enqueued download missing UUID.")
+            
+            # Store mapping between Soulseek UUID and Spotify ID
+            write_log.info("SLSKD_ENQUEUE_SUCCESS", "Successfully enqueued download.", 
+                          {"slskd_uuid": slskd_uuid, "spotify_id": spotify_id, "attempt": attempt + 1})
+            
+            track_db.add_slskd_mapping(slskd_uuid, spotify_id)
+            track_db.update_track_status(spotify_id, "downloading")
+            track_db.update_slskd_file_name(spotify_id, filename)
+            track_db.update_extension_bitrate(spotify_id, extension, bitrate)
+            
+            return download_response
+            
+        except (requests.Timeout, requests.exceptions.ConnectionError) as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                write_log.info("SLSKD_ENQUEUE_RETRY", "Download enqueue failed, retrying.", 
+                              {"error": str(e), "attempt": attempt + 1, "max_retries": max_retries, 
+                               "wait_time": wait_time, "filename": filename})
+                time.sleep(wait_time)
+            else:
+                write_log.error("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download after all retries.", 
+                               {"error": str(e), "filename": filename, "attempts": max_retries})
+                raise
+                
+        except requests.HTTPError as e:
+            # Retry on 500 errors, but not on 4xx errors
+            last_error = e
+            if e.response.status_code >= 500 and attempt < max_retries - 1:
+                wait_time = 2 ** attempt  # Exponential backoff
+                write_log.info("SLSKD_ENQUEUE_RETRY", "Download enqueue failed with server error, retrying.", 
+                              {"error": str(e), "status_code": e.response.status_code, "attempt": attempt + 1, 
+                               "max_retries": max_retries, "wait_time": wait_time, "filename": filename})
+                time.sleep(wait_time)
+            else:
+                write_log.error("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download.", 
+                               {"error": str(e), "filename": filename, "attempts": attempt + 1})
+                raise
+                
+        except requests.RequestException as e:
+            last_error = e
+            write_log.error("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download.", 
+                           {"error": str(e), "filename": filename})
+            raise
+            
+        except ValueError as e:
+            write_log.error("SLSKD_ENQUEUE_INVALID", "Invalid download response.", {"error": str(e)})
+            raise
+    
+    # This should not be reached due to raise in the loop, but just in case
+    if last_error:
+        raise last_error
 
 
 # Main Download Functions
@@ -582,7 +659,7 @@ def process_search_results(search_id: str, search_text: str, spotify_id: str) ->
         responses = get_search_responses(search_id)
         
         if not responses:
-            write_log.warn("SLSKD_NO_RESULTS", "No search results found.", 
+            write_log.info("SLSKD_NO_RESULTS", "No search results found.", 
                           {"search_text": search_text, "spotify_id": spotify_id})
             track_db.update_track_status(spotify_id, "failed")
             return
@@ -591,7 +668,7 @@ def process_search_results(search_id: str, search_text: str, spotify_id: str) ->
         best_file, username = select_best_file(responses, search_text)
         
         if not best_file:
-            write_log.warn("SLSKD_NO_SUITABLE_FILE", "No suitable file found in results.", 
+            write_log.info("SLSKD_NO_SUITABLE_FILE", "No suitable file found in results.", 
                           {"search_text": search_text, "spotify_id": spotify_id})
             track_db.update_track_status(spotify_id, "failed")
             return
