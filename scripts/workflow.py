@@ -46,7 +46,7 @@ load_dotenv(dotenv_path)
 from logs_utils import setup_logging, write_log
 from database_management import TrackDB
 from spotify_scraper import get_tracks_from_playlist
-from soulseek_client import download_track, download_tracks_async, query_download_status, process_redownload_queue
+from soulseek_client import download_tracks_async, query_download_status, process_redownload_queue, wait_for_slskd_ready
 from m3u8_manager import delete_all_m3u8_files, write_playlist_m3u8, update_track_in_m3u8
 from xml_exporter import export_itunes_xml
 
@@ -96,7 +96,7 @@ class WorkflowConfig:
         self.m3u8_dir = os.path.abspath(os.path.join(self.base_dir, "database", "m3u8s", env))
         
         # Downloads configuration
-        self.downloads_root = os.path.abspath(os.path.join(self.base_dir, "slskd_docker_data", "downloads"))
+        self.downloads_root = os.path.abspath(os.path.join(self.base_dir, "slskd_docker_data", env, "downloads"))
         
         # Logs configuration
         self.logs_dir = os.path.abspath(os.path.join(self.base_dir, "observability", "logs", ENV))
@@ -485,8 +485,8 @@ def _remux_flac_to_mp3(local_file_path: str, spotify_id: str, file: dict) -> str
         with open(ffmpeg_log_file, "w", encoding="utf-8") as logf:
             subprocess.run(ffmpeg_cmd, check=True, stdout=logf, stderr=subprocess.STDOUT)
         track_db.update_extension_bitrate(spotify_id, extension="mp3", bitrate=320)
-        write_log.info("REMUX_SUCCESS", "FLAC remuxed to MP3 320kbps.", {"spotify_id": spotify_id, "mp3_path": ffmpeg_output, "ffmpeg_log_file": ffmpeg_log_file})
-        return ffmpeg_output
+        write_log.info("REMUX_SUCCESS", "FLAC remuxed to MP3 320kbps.", {"spotify_id": spotify_id, "mp3_path": mp3_path, "ffmpeg_log_file": ffmpeg_log_file})
+        return mp3_path
     except Exception as e:
         write_log.error("REMUX_FAIL", "Failed to remux FLAC to MP3.", {"spotify_id": spotify_id, "error": str(e)})
         track_db.update_extension_bitrate(spotify_id, extension="flac")
@@ -588,6 +588,15 @@ def main(reset_db: bool = False) -> None:
     # Reset database if requested
     if reset_db:
         reset_database()
+    
+    # Wait for slskd to be ready before proceeding
+    write_log.info("SLSKD_HEALTH_CHECK_START", "Checking slskd availability.")
+    if not wait_for_slskd_ready(max_wait_seconds=120, poll_interval=2):
+        write_log.error("SLSKD_UNAVAILABLE", 
+                       "slskd service is not available. Cannot proceed with downloads.")
+        write_log.info("WORKFLOW_ABORTED", "Workflow aborted due to slskd unavailability.")
+        track_db.close()
+        return
 
     # Load playlists from CSV, fallback to playlists/playlists.csv if not found
     try:

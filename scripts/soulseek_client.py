@@ -54,6 +54,100 @@ SEARCH_POLL_INTERVAL = 2  # seconds
 track_db = TrackDB()
 
 
+# Health Check Functions
+
+def wait_for_slskd_ready(max_wait_seconds: int = 60, poll_interval: int = 2) -> bool:
+    """
+    Wait for slskd to be connected and authenticated before proceeding.
+    
+    This function polls the slskd server connection state endpoint until it reports
+    that the server is connected and logged in. This prevents connection errors when
+    the workflow starts before slskd is fully initialized.
+    
+    Args:
+        max_wait_seconds: Maximum time to wait for slskd (default: 60 seconds)
+        poll_interval: Time between status checks in seconds (default: 2 seconds)
+        
+    Returns:
+        True if slskd is ready, False if timeout reached
+    """
+    write_log.info("SLSKD_HEALTH_CHECK", "Waiting for slskd to be ready.", 
+                  {"max_wait": max_wait_seconds, "poll_interval": poll_interval})
+    
+    start_time = time.time()
+    attempts = 0
+    
+    while time.time() - start_time < max_wait_seconds:
+        attempts += 1
+        
+        try:
+            # Check the server connection state
+            resp = requests.get(
+                f"{SLSKD_URL}/server",
+                headers={"X-API-Key": TOKEN} if TOKEN else {},
+                timeout=5
+            )
+            
+            if resp.status_code == 200:
+                try:
+                    data = resp.json()
+                    state = data.get("state", "Unknown")
+                    is_connected = data.get("isConnected", False)
+                    is_logged_in = data.get("isLoggedIn", False)
+                    
+                    write_log.debug("SLSKD_HEALTH_CHECK_STATUS", 
+                                  "Received slskd server state.", 
+                                  {"attempt": attempts, 
+                                   "state": state, 
+                                   "is_connected": is_connected,
+                                   "is_logged_in": is_logged_in})
+                    
+                    # Check if both connected and logged in using boolean flags
+                    if is_connected and is_logged_in:
+                        write_log.info("SLSKD_READY", 
+                                     "slskd is ready and authenticated.", 
+                                     {"attempts": attempts, 
+                                      "state": state,
+                                      "wait_time": round(time.time() - start_time, 2)})
+                        return True
+                    
+                    # Still connecting/authenticating
+                    write_log.debug("SLSKD_NOT_READY", 
+                                  "slskd not yet ready.", 
+                                  {"state": state, 
+                                   "is_connected": is_connected,
+                                   "is_logged_in": is_logged_in,
+                                   "attempt": attempts})
+                
+                except (ValueError, KeyError) as e:
+                    write_log.debug("SLSKD_PARSE_ERROR", 
+                                  "Could not parse server response.", 
+                                  {"error": str(e), "attempt": attempts})
+            else:
+                write_log.debug("SLSKD_UNEXPECTED_STATUS", 
+                              "Unexpected status code from slskd.", 
+                              {"status_code": resp.status_code, "attempt": attempts})
+            
+        except requests.ConnectionError:
+            write_log.debug("SLSKD_CONNECTION_RETRY", 
+                          "slskd not yet reachable, retrying.", 
+                          {"attempt": attempts})
+        
+        except requests.RequestException as e:
+            write_log.debug("SLSKD_HEALTH_CHECK_ERROR", 
+                          "Error checking slskd status.", 
+                          {"error": str(e), "attempt": attempts})
+        
+        # Wait before next attempt
+        time.sleep(poll_interval)
+    
+    # Timeout reached
+    write_log.error("SLSKD_TIMEOUT", 
+                   "Timeout waiting for slskd to be ready.", 
+                   {"max_wait": max_wait_seconds, "attempts": attempts})
+    return False
+
+
 # Quality Assessment Functions
 
 def extract_file_quality(file: Dict[str, Any]) -> Tuple[str, Optional[int]]:
