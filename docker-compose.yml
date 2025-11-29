@@ -27,7 +27,6 @@ services:
     volumes:
       - ./observability:/app/observability:ro
       - ./database:/app/database:ro
-      - ./scripts:/app/scripts:ro
     restart: unless-stopped
 
   workflow:
@@ -43,7 +42,7 @@ services:
       - HOST_BASE_PATH=${HOST_BASE_PATH}
     volumes:
       - ./database:/app/database:rw
-      - ./playlists:/app/playlists:ro
+      - ./playlists:/app/playlists:rw
       - ./slskd_docker_data/${APP_ENV}/downloads:/app/slskd_docker_data/downloads:rw
       - ./observability:/app/observability:rw
       - ./scripts:/app/scripts:ro

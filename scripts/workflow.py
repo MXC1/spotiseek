@@ -107,7 +107,6 @@ class WorkflowConfig:
     def _ensure_directories(self) -> None:
         """Create all required directories if they don't exist."""
         directories = [
-            self.playlists_dir,
             self.database_dir,
             self.m3u8_dir,
             self.logs_dir
@@ -590,18 +589,24 @@ def main(reset_db: bool = False) -> None:
     if reset_db:
         reset_database()
 
-    # Load playlists from CSV
+    # Load playlists from CSV, fallback to playlists/playlists.csv if not found
     try:
         playlists = read_playlists_from_csv(config.playlists_csv)
-        write_log.info("PLAYLISTS_LOADED", "Loaded playlists from CSV.", 
-                      {"count": len(playlists)})
+        write_log.info("PLAYLISTS_LOADED", "Loaded playlists from CSV.", {"count": len(playlists)})
     except FileNotFoundError:
-        write_log.error("PLAYLISTS_CSV_MISSING", "Playlists CSV file not found.", 
-                       {"csv_path": config.playlists_csv})
-        return
+        fallback_csv = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "playlists", "playlists.csv"))
+        write_log.warn("PLAYLISTS_CSV_MISSING", "Primary playlists CSV not found, falling back to default.", {"primary_csv": config.playlists_csv, "fallback_csv": fallback_csv})
+        try:
+            playlists = read_playlists_from_csv(fallback_csv)
+            write_log.info("PLAYLISTS_LOADED_FALLBACK", "Loaded playlists from fallback CSV.", {"count": len(playlists)})
+        except FileNotFoundError:
+            write_log.error("PLAYLISTS_CSV_MISSING_BOTH", "Neither environment nor fallback playlists CSV file found.", {"primary_csv": config.playlists_csv, "fallback_csv": fallback_csv})
+            return
+        except Exception as e:
+            write_log.error("PLAYLISTS_CSV_FAIL_FALLBACK", "Failed to read fallback playlists CSV.", {"csv_path": fallback_csv, "error": str(e)})
+            return
     except Exception as e:
-        write_log.error("PLAYLISTS_CSV_FAIL", "Failed to read playlists CSV.", 
-                       {"csv_path": config.playlists_csv, "error": str(e)})
+        write_log.error("PLAYLISTS_CSV_FAIL", "Failed to read playlists CSV.", {"csv_path": config.playlists_csv, "error": str(e)})
         return
 
     # Process each playlist and collect all tracks for batch download
