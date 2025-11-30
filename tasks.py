@@ -95,6 +95,35 @@ def lint(c):
     """Run flake8 linter on scripts/"""
     c.run(".\\.venv\\Scripts\\flake8 scripts/")
 
+@task
+def setenv(c, env):
+    """Change the APP_ENV variable in .env file. Usage: invoke setenv <environment>"""
+    env_path = Path(__file__).parent / '.env'
+    if not env_path.exists():
+        print(".env file not found!")
+        return
+    
+    # Read current .env content
+    with open(env_path, 'r') as f:
+        lines = f.readlines()
+    
+    # Update or add APP_ENV
+    found = False
+    for i, line in enumerate(lines):
+        if line.strip().startswith('APP_ENV='):
+            lines[i] = f'APP_ENV={env}\n'
+            found = True
+            break
+    
+    if not found:
+        lines.append(f'APP_ENV={env}\n')
+    
+    # Write back to .env
+    with open(env_path, 'w') as f:
+        f.writelines(lines)
+    
+    print(f"APP_ENV set to '{env}'")
+
 @task(default=True)
 def help(c):
     """Show available tasks"""
