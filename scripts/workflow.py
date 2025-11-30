@@ -95,6 +95,9 @@ class WorkflowConfig:
         # M3U8 files configuration
         self.m3u8_dir = os.path.abspath(os.path.join(self.base_dir, "database", "m3u8s", env))
         
+        # XML export configuration
+        self.xml_dir = os.path.abspath(os.path.join(self.base_dir, "database", "xml", env))
+        
         # Downloads configuration
         self.downloads_root = os.path.abspath(os.path.join(self.base_dir, "slskd_docker_data", env, "downloads"))
         
@@ -109,6 +112,7 @@ class WorkflowConfig:
         directories = [
             self.database_dir,
             self.m3u8_dir,
+            self.xml_dir,
             self.logs_dir
         ]
         
@@ -117,7 +121,7 @@ class WorkflowConfig:
     
     def get_xml_export_path(self) -> str:
         """Get the path for iTunes XML library export."""
-        return os.path.abspath(os.path.join(self.database_dir, "spotiseek_library.xml"))
+        return os.path.join(self.xml_dir, "spotiseek_library.xml")
     
     def get_music_folder_url(self) -> str:
         """
