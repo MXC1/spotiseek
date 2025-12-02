@@ -469,7 +469,7 @@ def get_search_responses(search_id: str) -> List[Dict[str, Any]]:
                                {"search_id": search_id})
                 break
             
-        except requests.RequestException as e:
+        except Exception as e:
             write_log.warn("SLSKD_SEARCH_POLL_ERROR", "Error polling for search results.", 
                           {"attempt": attempt, "error": str(e)})
         
@@ -661,7 +661,7 @@ def process_search_results(search_id: str, search_text: str, spotify_id: str) ->
         if not responses:
             write_log.info("SLSKD_NO_RESULTS", "No search results found.", 
                           {"search_text": search_text, "spotify_id": spotify_id})
-            track_db.update_track_status(spotify_id, "failed")
+            track_db.update_track_status(spotify_id, "not_found")
             return
         
         # Select best file according to quality rules
@@ -670,7 +670,7 @@ def process_search_results(search_id: str, search_text: str, spotify_id: str) ->
         if not best_file:
             write_log.info("SLSKD_NO_SUITABLE_FILE", "No suitable file found in results.", 
                           {"search_text": search_text, "spotify_id": spotify_id})
-            track_db.update_track_status(spotify_id, "failed")
+            track_db.update_track_status(spotify_id, "no_suitable_file")
             return
         
         # Enqueue download
@@ -834,6 +834,8 @@ def process_redownload_queue() -> None:
             else:
                 write_log.info("SLSKD_REDOWNLOAD_SKIP", "No better quality file found for upgrade.", 
                               {"spotify_id": spotify_id, "track": track_name, "artist": artist, "upgrade": False})
+                track_db.update_track_status(spotify_id, "completed")
+                
         except Exception as e:
             write_log.error("SLSKD_REDOWNLOAD_PROCESS_FAIL", "Failed to process upgrade search.", 
                           {"spotify_id": spotify_id, "error": str(e)})
