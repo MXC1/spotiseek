@@ -53,7 +53,11 @@ def nuke(c):
 @task
 def workflow(c):
     """Run the workflow script inside the Docker container."""
-    c.run("docker-compose exec workflow python scripts/workflow.py")
+@task
+def workflow(c, d=False):
+    """Run the workflow script inside the Docker container. Use --detached to run in detached mode."""
+    flag = "-d " if d else ""
+    c.run(f"docker-compose exec {flag}workflow python scripts/workflow.py")
 
 @task
 def build(c):
