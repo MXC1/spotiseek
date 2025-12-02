@@ -354,7 +354,7 @@ def _update_file_status(file: dict) -> None:
     
     # Handle in-progress downloads
     elif state == "InProgress":
-        track_db.update_track_status(spotify_id, "in_progress")
+        track_db.update_track_status(spotify_id, "downloading")
     
     # Handle unknown states
     else:

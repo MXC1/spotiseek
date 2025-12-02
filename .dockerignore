@@ -34,9 +34,10 @@ dev/
 observability/*_logs/
 
 # Downloads and data directories (large files)
-slskd_docker_data/downloads/
-slskd_docker_data/incomplete/
-slskd_docker_data/data/
+slskd_docker_data/
+database/
+playlists/
+observability/logs/
 
 # MusicBee dev files
 dev/musicbee_spotiseek/
