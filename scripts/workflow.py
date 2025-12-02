@@ -379,10 +379,16 @@ def _handle_completed_download(file: dict, spotify_id: str) -> None:
         file: File object from slskd API
         spotify_id: Spotify track identifier
     """
-    # Check current status - don't overwrite redownload_pending
+    # Check current status - don't overwrite redownload_pending or reprocess completed tracks
     current_status = track_db.get_track_status(spotify_id)
     if current_status == "redownload_pending":
         write_log.debug("DOWNLOAD_SKIP_REDOWNLOAD", "Skipping status update for track marked for redownload.", 
+                       {"spotify_id": spotify_id})
+        return
+    
+    # Skip if already processed to prevent redundant remuxing
+    if current_status == "completed":
+        write_log.debug("DOWNLOAD_ALREADY_PROCESSED", "Skipping already completed download.", 
                        {"spotify_id": spotify_id})
         return
     
