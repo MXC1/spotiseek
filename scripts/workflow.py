@@ -46,7 +46,7 @@ load_dotenv(dotenv_path)
 from logs_utils import setup_logging, write_log
 from database_management import TrackDB
 from spotify_scraper import get_tracks_from_playlist
-from soulseek_client import download_tracks_async, query_download_status, process_redownload_queue, wait_for_slskd_ready
+from soulseek_client import download_tracks_async, query_download_status, process_redownload_queue, wait_for_slskd_ready, process_pending_searches
 from m3u8_manager import delete_all_m3u8_files, write_playlist_m3u8, update_track_in_m3u8
 from xml_exporter import export_itunes_xml
 
@@ -271,8 +271,16 @@ def process_playlist(playlist_url: str) -> List[Tuple[str, str, str]]:
             # Link track to playlist in database
             track_db.link_track_to_playlist(spotify_id, playlist_url)
             
-            # Collect track for batch download
-            tracks_to_download.append(track)
+            # Only collect tracks that need to be searched for
+            # Skip tracks that are already being processed or completed
+            current_status = track_db.get_track_status(spotify_id)
+            skip_statuses = {"completed", "queued", "downloading", "searching", "requested", "inprogress", "redownload_pending"}
+            
+            if current_status not in skip_statuses:
+                tracks_to_download.append(track)
+            else:
+                write_log.debug("TRACK_SKIP_ALREADY_PROCESSING", "Skipping track already in progress.", 
+                               {"spotify_id": spotify_id, "track_name": track_name, "status": current_status})
             
         except Exception as e:
             track_name = track[2] if len(track) > 2 else str(track)
@@ -607,6 +615,14 @@ def main(reset_db: bool = False) -> None:
         track_db.close()
         return
 
+    # Process any pending searches from previous runs (restart-safe)
+    write_log.info("PENDING_SEARCHES_CHECK", "Checking for completed searches from previous runs.")
+    process_pending_searches()
+    
+    # Update download statuses for any completed downloads
+    write_log.info("DOWNLOAD_STATUS_CHECK", "Checking download statuses.")
+    update_download_statuses()
+
     # Load playlists from CSV, fallback to playlists/playlists.csv if not found
     try:
         playlists = read_playlists_from_csv(config.playlists_csv)
@@ -633,18 +649,23 @@ def main(reset_db: bool = False) -> None:
         tracks = process_playlist(playlist_url)
         all_tracks.extend(tracks)
     
-    # Batch process all track downloads asynchronously
-    write_log.info("BATCH_DOWNLOAD_START", "Starting batch download of all tracks.", 
+    # Initiate searches for all new tracks (fire-and-forget)
+    write_log.info("BATCH_SEARCH_START", "Initiating searches for all new tracks.", 
                   {"total_tracks": len(all_tracks)})
     download_tracks_async(all_tracks)
+    write_log.info("BATCH_SEARCH_INITIATED", "All searches initiated. They will continue in slskd.")
     
-    # Update download statuses after batch processing
-    update_download_statuses()
-
-    # Process redownload queue (quality upgrades for non-WAV files)
-    write_log.info("REDOWNLOAD_QUEUE_START", "Processing quality upgrade queue.")
+    # Initiate quality upgrade searches (fire-and-forget)
+    write_log.info("REDOWNLOAD_QUEUE_START", "Initiating quality upgrade searches.")
     process_redownload_queue()
+    write_log.info("REDOWNLOAD_QUEUE_INITIATED", "Quality upgrade searches initiated. They will continue in slskd.")
+    
+    # Check download statuses for any completed downloads
+    write_log.info("DOWNLOAD_STATUS_FINAL_CHECK", "Checking download statuses.")
     update_download_statuses()
+    
+    # Note: All searches are now running in slskd and will complete asynchronously.
+    # They will be processed on the next workflow run via process_pending_searches()
     
     # Export playlists and tracks to iTunes-style XML
     try:
