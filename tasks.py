@@ -42,7 +42,18 @@ def nuke(c):
             if target.exists():
                 print(f"Deleting {target} ...")
                 if target.is_dir():
-                    shutil.rmtree(target)
+                    # Use Windows rmdir command which handles problematic paths better
+                    try:
+                        abs_target = str(target.resolve())
+                        c.run(f'rmdir /s /q "{abs_target}"', hide=True)
+                    except Exception as e:
+                        print(f"Warning: rmdir failed, trying PowerShell...")
+                        try:
+                            # Fallback to PowerShell with force and no confirmation
+                            c.run(f'powershell -Command "Remove-Item -LiteralPath \'{abs_target}\' -Recurse -Force -Confirm:$false -ErrorAction Stop"', hide=True)
+                        except Exception as e2:
+                            print(f"Error: Could not delete {target}: {e2}")
+                            print("You may need to manually delete this directory or reboot and try again.")
                 else:
                     target.unlink()
             else:
