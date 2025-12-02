@@ -252,12 +252,16 @@ def process_playlist(playlist_url: str) -> List[Tuple[str, str, str]]:
                        {"playlist_url": playlist_url, "error": str(e)})
         return
 
-    # Create M3U8 file with track metadata as comments
-    try:
-        write_playlist_m3u8(m3u8_path, tracks)
-    except Exception as e:
-        write_log.error("M3U8_WRITE_FAIL", "Failed to write M3U8 file for playlist.", 
-                       {"playlist_url": playlist_url, "m3u8_path": m3u8_path, "error": str(e)})
+    # Create M3U8 file with track metadata as comments (only if it doesn't exist)
+    if not os.path.exists(m3u8_path):
+        try:
+            write_playlist_m3u8(m3u8_path, tracks)
+            write_log.info("M3U8_CREATE", "Created new M3U8 file.", {"m3u8_path": m3u8_path})
+        except Exception as e:
+            write_log.error("M3U8_WRITE_FAIL", "Failed to write M3U8 file for playlist.", 
+                           {"playlist_url": playlist_url, "m3u8_path": m3u8_path, "error": str(e)})
+    else:
+        write_log.debug("M3U8_EXISTS", "M3U8 file already exists, preserving it.", {"m3u8_path": m3u8_path})
 
     # Add tracks to database and collect for batch download
     tracks_to_download = []
