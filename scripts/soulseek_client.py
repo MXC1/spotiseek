@@ -640,8 +640,9 @@ def enqueue_download(search_id: str, file: Dict[str, Any], username: str, spotif
                                "wait_time": wait_time, "filename": filename})
                 time.sleep(wait_time)
             else:
-                write_log.error("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download after all retries.", 
+                write_log.warn("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download after all retries.", 
                                {"error": str(e), "filename": filename, "attempts": max_retries})
+                track_db.update_track_status(spotify_id, "failed")
                 raise
                 
         except requests.HTTPError as e:
@@ -654,18 +655,21 @@ def enqueue_download(search_id: str, file: Dict[str, Any], username: str, spotif
                                "max_retries": max_retries, "wait_time": wait_time, "filename": filename})
                 time.sleep(wait_time)
             else:
-                write_log.error("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download.", 
+                write_log.warn("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download.", 
                                {"error": str(e), "filename": filename, "attempts": attempt + 1})
+                track_db.update_track_status(spotify_id, "failed")
                 raise
                 
         except requests.RequestException as e:
             last_error = e
-            write_log.error("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download.", 
+            write_log.warn("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download.", 
                            {"error": str(e), "filename": filename})
+            track_db.update_track_status(spotify_id, "failed")
             raise
             
         except ValueError as e:
-            write_log.error("SLSKD_ENQUEUE_INVALID", "Invalid download response.", {"error": str(e)})
+            write_log.warn("SLSKD_ENQUEUE_INVALID", "Invalid download response.", {"error": str(e)})
+            track_db.update_track_status(spotify_id, "failed")
             raise
     
     # This should not be reached due to raise in the loop, but just in case
@@ -725,7 +729,7 @@ def initiate_track_search(artist: str, track: str, spotify_id: str) -> Optional[
         return (search_id, search_text, spotify_id)
         
     except Exception as e:
-        write_log.error("SLSKD_SEARCH_INITIATE_FAIL", "Failed to initiate search.", 
+        write_log.warn("SLSKD_SEARCH_INITIATE_FAIL", "Failed to initiate search.", 
                        {"artist": artist, "track": track, "error": str(e)})
         track_db.update_track_status(spotify_id, "failed")
         return None
@@ -805,7 +809,7 @@ def process_search_results(search_id: str, search_text: str, spotify_id: str, ch
         return True
         
     except Exception as e:
-        write_log.error("SLSKD_SEARCH_PROCESS_FAIL", "Failed to process search results.", 
+        write_log.warn("SLSKD_SEARCH_PROCESS_FAIL", "Failed to process search results.", 
                        {"search_id": search_id, "spotify_id": spotify_id, "error": str(e)})
         track_db.update_track_status(spotify_id, "failed")
 
@@ -920,9 +924,12 @@ def process_pending_searches() -> None:
                   {"processed": processed_count, "still_searching": still_searching_count})
 
 
-def query_download_status() -> List[Dict[str, Any]]:
+def query_download_status(max_retries: int = 3) -> List[Dict[str, Any]]:
     """
     Query the status of all active downloads from slskd API.
+    
+    Args:
+        max_retries: Maximum number of retry attempts (default: 3)
     
     Returns:
         List of download status objects containing directories, files, and states.
@@ -930,17 +937,51 @@ def query_download_status() -> List[Dict[str, Any]]:
     """
     write_log.info("SLSKD_QUERY_STATUS", "Querying download status for all transfers.")
     
-    try:
-        resp = requests.get(
-            f"{SLSKD_URL}/transfers/downloads",
-            headers={"X-API-Key": TOKEN},
-            timeout=10
-        )
-        resp.raise_for_status()
-        return resp.json()
-    except requests.RequestException as e:
-        write_log.error("SLSKD_QUERY_STATUS_FAIL", "Failed to query download status.", {"error": str(e)})
-        return []
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(
+                f"{SLSKD_URL}/transfers/downloads",
+                headers={"X-API-Key": TOKEN},
+                timeout=10
+            )
+            resp.raise_for_status()
+            return resp.json()
+            
+        except (requests.Timeout, requests.exceptions.ConnectionError) as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                backoff_time = 2 ** attempt
+                write_log.debug("SLSKD_QUERY_STATUS_RETRY", "Network error querying download status, retrying.",
+                              {"attempt": attempt + 1, "max_retries": max_retries, "backoff_seconds": backoff_time, "error": str(e)})
+                time.sleep(backoff_time)
+            else:
+                write_log.warn("SLSKD_QUERY_STATUS_FAIL", "Network error querying download status after all retries.",
+                              {"attempts": max_retries, "error": str(e)})
+                
+        except requests.HTTPError as e:
+            if e.response and e.response.status_code >= 500:
+                last_error = e
+                if attempt < max_retries - 1:
+                    backoff_time = 2 ** attempt
+                    write_log.debug("SLSKD_QUERY_STATUS_RETRY", "Server error querying download status, retrying.",
+                                  {"attempt": attempt + 1, "max_retries": max_retries, "status_code": e.response.status_code,
+                                   "backoff_seconds": backoff_time, "error": str(e)})
+                    time.sleep(backoff_time)
+                else:
+                    write_log.warn("SLSKD_QUERY_STATUS_FAIL", "Server error querying download status after all retries.",
+                                  {"attempts": max_retries, "status_code": e.response.status_code, "error": str(e)})
+            else:
+                write_log.warn("SLSKD_QUERY_STATUS_FAIL", "HTTP error querying download status.",
+                              {"status_code": e.response.status_code if e.response else None, "error": str(e)})
+                return []
+                
+        except requests.RequestException as e:
+            write_log.warn("SLSKD_QUERY_STATUS_FAIL", "Failed to query download status.", {"error": str(e)})
+            return []
+    
+    # All retries exhausted
+    return []
 
 
 def process_redownload_queue() -> None:
@@ -981,8 +1022,9 @@ def process_redownload_queue() -> None:
             write_log.debug("SLSKD_REDOWNLOAD_SEARCH_INITIATED", "Initiated upgrade search.", 
                           {"spotify_id": spotify_id, "search_id": search_id})
         except Exception as e:
-            write_log.error("SLSKD_REDOWNLOAD_SEARCH_FAIL", "Failed to create search for upgrade.", 
+            write_log.warn("SLSKD_REDOWNLOAD_SEARCH_FAIL", "Failed to create search for upgrade.", 
                           {"spotify_id": spotify_id, "error": str(e)})
+            track_db.update_track_status(spotify_id, "failed")
     
     write_log.info("SLSKD_REDOWNLOAD_SEARCHES_INITIATED", "All upgrade searches initiated.", 
                   {"initiated_count": initiated_count})
