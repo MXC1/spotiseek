@@ -351,7 +351,7 @@ def _update_file_status(file: dict) -> None:
         _handle_completed_download(file, spotify_id)
     
     # Handle failed downloads
-    elif state in ("Completed, Errored", "Completed, TimedOut", "Completed, Cancelled"):
+    elif state in ("Completed, Errored", "Completed, TimedOut", "Completed, Cancelled", "Completed, Rejected", "Completed, Aborted"):
         track_db.update_track_status(spotify_id, "failed")
         write_log.info("DOWNLOAD_FAILED", "Download failed.", 
                       {"spotify_id": spotify_id, "state": state})
