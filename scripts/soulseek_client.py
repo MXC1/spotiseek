@@ -253,6 +253,80 @@ def quality_sort_key(item: Tuple[Dict[str, Any], str]) -> Tuple[int, int]:
 
 # File Selection Functions
 
+def is_audio_file(file: Dict[str, Any]) -> bool:
+    """
+    Check if a file is a supported audio format.
+    
+    Supported formats: WAV, FLAC, MP3, OGG, M4A, AAC, ALAC, APE, WMA, OPUS
+    
+    Args:
+        file: File object from slskd API response
+        
+    Returns:
+        True if file is a supported audio format
+    """
+    ext, _ = extract_file_quality(file)
+    
+    # List of supported audio extensions
+    supported_audio_formats = {
+        'wav', 'flac', 'mp3', 'ogg', 'm4a', 'aac', 
+        'alac', 'ape', 'wma', 'opus'
+    }
+    
+    is_supported = ext in supported_audio_formats
+    
+    if not is_supported:
+        filename = file.get('filename', '')
+        write_log.debug("SLSKD_NON_AUDIO_SKIP", "Skipping non-audio file.", 
+                       {"filename": filename, "extension": ext})
+    
+    return is_supported
+
+
+def meets_bitrate_requirements(file: Dict[str, Any]) -> bool:
+    """
+    Check if a file meets minimum bitrate requirements.
+    
+    Requirements:
+    - WAV: Always accepted (lossless)
+    - FLAC: Always accepted (lossless)
+    - MP3: Minimum 320kbps
+    - Other lossy formats: Minimum 320kbps
+    
+    Args:
+        file: File object from slskd API response
+        
+    Returns:
+        True if file meets bitrate requirements
+    """
+    ext, bitrate = extract_file_quality(file)
+    
+    # Lossless formats always meet requirements
+    lossless_formats = {'wav', 'flac', 'alac', 'ape'}
+    if ext in lossless_formats:
+        return True
+    
+    # For lossy formats, require 320kbps minimum
+    minimum_bitrate = 320
+    
+    if bitrate is None:
+        # If bitrate is unknown, reject the file
+        filename = file.get('filename', '')
+        write_log.debug("SLSKD_UNKNOWN_BITRATE_SKIP", "Skipping file with unknown bitrate.", 
+                       {"filename": filename, "extension": ext})
+        return False
+    
+    meets_requirement = bitrate >= minimum_bitrate
+    
+    if not meets_requirement:
+        filename = file.get('filename', '')
+        write_log.debug("SLSKD_LOW_BITRATE_SKIP", "Skipping low-bitrate file.", 
+                       {"filename": filename, "extension": ext, "bitrate": bitrate, 
+                        "minimum_required": minimum_bitrate})
+    
+    return meets_requirement
+
+
 def is_original_version(filename: str, allow_alternatives: bool) -> bool:
     """
     Determine if a filename represents an original version (not remix/edit/etc).
@@ -287,9 +361,12 @@ def select_best_file(responses: List[Dict[str, Any]], search_text: str) -> Tuple
     Select the best quality file from search responses.
     
     Selection process:
-    1. Filter out remixes/edits unless search text includes such terms
-    2. Prioritize by quality: WAV > FLAC > MP3 320 > other MP3 > others
-    3. Return best match or None if no suitable files found
+    1. Filter out blacklisted files
+    2. Filter out non-audio files
+    3. Filter out low-bitrate files (< 320kbps for lossy formats)
+    4. Filter out remixes/edits unless search text includes such terms
+    5. Prioritize by quality: WAV > FLAC > MP3 320 > other MP3 > others
+    6. Return best match or None if no suitable files found
     
     Args:
         responses: List of search response objects from slskd
@@ -314,6 +391,8 @@ def select_best_file(responses: List[Dict[str, Any]], search_text: str) -> Tuple
     # Collect all candidate files, skipping blacklisted slskd_uuids
     candidates = []
     blacklisted_count = 0
+    non_audio_count = 0
+    low_bitrate_count = 0
     total_files = 0
     
     for response in responses:
@@ -330,12 +409,23 @@ def select_best_file(responses: List[Dict[str, Any]], search_text: str) -> Tuple
                 write_log.debug("SLSKD_BLACKLIST_SKIP", "Skipping blacklisted file.", 
                                {"slskd_uuid": slskd_uuid, "filename": filename, "username": username})
                 continue
+            
+            # Filter out non-audio files
+            if not is_audio_file(file):
+                non_audio_count += 1
+                continue
+            
+            # Filter out low-bitrate files
+            if not meets_bitrate_requirements(file):
+                low_bitrate_count += 1
+                continue
                 
             candidates.append((file, username))
     
     write_log.debug("SLSKD_FILE_SELECTION_CANDIDATES", "Collected candidate files.", 
                    {"total_files": total_files, "candidates": len(candidates), 
-                    "blacklisted": blacklisted_count})
+                    "blacklisted": blacklisted_count, "non_audio": non_audio_count, 
+                    "low_bitrate": low_bitrate_count})
     
     if not candidates:
         write_log.debug("SLSKD_FILE_SELECTION_NO_CANDIDATES", "No candidates after blacklist filtering.", 
