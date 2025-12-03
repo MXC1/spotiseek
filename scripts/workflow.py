@@ -85,7 +85,7 @@ class WorkflowConfig:
         self.base_dir = os.path.dirname(os.path.dirname(__file__))
         
         # Playlist configuration
-        self.playlists_dir = os.path.abspath(os.path.join(self.base_dir, "playlists", env))
+        self.playlists_dir = os.path.abspath(os.path.join(self.base_dir, "input_playlists"))
         self.playlists_csv = os.path.join(self.playlists_dir, f"playlists_{env}.csv")
         
         # Database configuration
