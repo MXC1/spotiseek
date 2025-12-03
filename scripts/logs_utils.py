@@ -362,6 +362,8 @@ def analyze_workflow_run(log_file: str) -> dict:
         'downloads_completed': 0,
         'downloads_failed': 0,
         'searches_initiated': 0,
+        'new_searches': 0,
+        'upgrade_searches': 0,
         'event_counts': {},
         'timeline': [],
         'workflow_status': 'unknown'
@@ -397,6 +399,14 @@ def analyze_workflow_run(log_file: str) -> dict:
             metrics['downloads_failed'] += 1
         elif event_id == 'SLSKD_SEARCH_CREATE':
             metrics['searches_initiated'] += 1
+        elif event_id == 'BATCH_SEARCH_START':
+            # Extract count of new track searches from context
+            track_count = context.get('total_tracks', 0)
+            metrics['new_searches'] = track_count
+        elif event_id == 'SLSKD_REDOWNLOAD_SEARCHES_INITIATED':
+            # Extract count of quality upgrade searches from context
+            initiated_count = context.get('initiated_count', 0)
+            metrics['upgrade_searches'] = initiated_count
         
         # Build timeline of key events
         key_events = [
