@@ -29,6 +29,23 @@ services:
       - ./database:/app/database:ro
     restart: unless-stopped
 
+  manual_import:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.manual_import
+    ports:
+      - "8502:8502"
+    environment:
+      - APP_ENV=${APP_ENV}
+      - HOST_BASE_PATH=${HOST_BASE_PATH}
+    volumes:
+      - ./database:/app/database:rw
+      - ./slskd_docker_data/${APP_ENV}/imported:/app/slskd_docker_data/${APP_ENV}/imported:rw
+      - ./slskd_docker_data/${APP_ENV}/downloads:/app/slskd_docker_data/${APP_ENV}/downloads:ro
+      - ./observability:/app/observability:rw
+      - ./scripts:/app/scripts:ro
+    restart: unless-stopped
+
   workflow:
     build:
       context: .
