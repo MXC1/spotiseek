@@ -323,6 +323,12 @@ def setup_logging(
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
     
+    # Silence noisy third-party library loggers (spotipy, urllib3, requests)
+    # These libraries log entire API responses at DEBUG level, which is excessive
+    for lib_name in ['urllib3', 'requests', 'spotipy', 'charset_normalizer']:
+        lib_logger = logging.getLogger(lib_name)
+        lib_logger.setLevel(logging.WARNING)  # Only show warnings and errors from these libs
+    
     # Console handler with human-readable formatting
     class ConsoleFormatter(logging.Formatter):
         """Format logs for console output with optional context."""
