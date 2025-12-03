@@ -274,12 +274,7 @@ def is_audio_file(file: Dict[str, Any]) -> bool:
     }
     
     is_supported = ext in supported_audio_formats
-    
-    if not is_supported:
-        filename = file.get('filename', '')
-        write_log.debug("SLSKD_NON_AUDIO_SKIP", "Skipping non-audio file.", 
-                       {"filename": filename, "extension": ext})
-    
+     
     return is_supported
 
 
@@ -311,18 +306,12 @@ def meets_bitrate_requirements(file: Dict[str, Any]) -> bool:
     
     if bitrate is None:
         # If bitrate is unknown, reject the file
-        filename = file.get('filename', '')
-        write_log.debug("SLSKD_UNKNOWN_BITRATE_SKIP", "Skipping file with unknown bitrate.", 
-                       {"filename": filename, "extension": ext})
         return False
     
     meets_requirement = bitrate >= minimum_bitrate
     
     if not meets_requirement:
         filename = file.get('filename', '')
-        write_log.debug("SLSKD_LOW_BITRATE_SKIP", "Skipping low-bitrate file.", 
-                       {"filename": filename, "extension": ext, "bitrate": bitrate, 
-                        "minimum_required": minimum_bitrate})
     
     return meets_requirement
 
@@ -700,14 +689,6 @@ def initiate_track_search(artist: str, track: str, spotify_id: str) -> Optional[
     skip_statuses = {"completed", "queued", "downloading", "requested", "inprogress"}
     
     if current_status in skip_statuses:
-        # Check if track needs quality upgrade (non-WAV files)
-        current_extension = track_db.get_track_extension(spotify_id)
-        if current_extension and current_extension.lower() != "wav":
-            write_log.info("TRACK_QUALITY_UPGRADE", "Marking track for quality upgrade.", 
-                          {"spotify_id": spotify_id, "current_extension": current_extension})
-            track_db.update_track_status(spotify_id, "redownload_pending")
-            return None
-        
         write_log.debug("SLSKD_SKIP", "Skipping download (already in progress or completed).", 
                        {"artist": artist, "track": track, "current_status": current_status})
         return None
