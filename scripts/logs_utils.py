@@ -255,6 +255,186 @@ def prepare_log_summary(df_logs, warn_err_logs):
     return summary[ordered_cols + extra_cols]
 
 
+def get_workflow_runs(logs_dir: str) -> List[dict]:
+    """
+    Extract unique workflow runs from log files in directory.
+    
+    Only includes files starting with 'workflow_' prefix.
+    
+    Args:
+        logs_dir: Root directory path containing log files
+        
+    Returns:
+        List of dictionaries with run metadata:
+            - run_id: Unique identifier (filename without extension)
+            - timestamp: Parsed datetime of run start
+            - log_file: Full path to log file
+            - display_name: Human-readable name for UI
+            
+    Example:
+        >>> runs = get_workflow_runs('observability/logs/test2')
+        >>> runs[0]
+        {'run_id': 'workflow_20251203_143025_123456', 
+         'timestamp': datetime(...),
+         'log_file': '...', 
+         'display_name': 'Tue 03 December 2025 14:30'}
+    """
+    import pandas as pd
+    
+    log_files = get_log_files(logs_dir)
+    runs = []
+    
+    for log_path in log_files:
+        filename = os.path.basename(log_path)
+        run_id = os.path.splitext(filename)[0]
+        
+        # Only include workflow runs (skip ffmpeg, etc.)
+        if not run_id.startswith('workflow_'):
+            continue
+        
+        # Extract timestamp from filename (format: prefix_YYYYMMdd_HHMMSS_ffffff)
+        parts = run_id.split('_')
+        if len(parts) >= 3:
+            try:
+                # Combine date and time parts
+                date_str = parts[-3]  # YYYYMMdd
+                time_str = parts[-2]  # HHMMSS
+                timestamp_str = f"{date_str}_{time_str}"
+                timestamp = pd.to_datetime(timestamp_str, format='%Y%m%d_%H%M%S')
+                
+                display_name = timestamp.strftime('%a %d %B %Y %H:%M')
+                
+                runs.append({
+                    'run_id': run_id,
+                    'timestamp': timestamp,
+                    'log_file': log_path,
+                    'display_name': display_name
+                })
+            except (ValueError, IndexError):
+                # Skip files with unexpected naming format
+                continue
+    
+    # Sort by timestamp descending (newest first)
+    runs.sort(key=lambda x: x['timestamp'], reverse=True)
+    
+    return runs
+
+
+def analyze_workflow_run(log_file: str) -> dict:
+    """
+    Analyze a single workflow run and extract key metrics.
+    
+    Args:
+        log_file: Path to workflow log file
+        
+    Returns:
+        Dictionary with run analysis:
+            - total_logs: Total number of log entries
+            - errors: List of error log entries
+            - warnings: List of warning log entries
+            - tracks_added: Number of tracks added
+            - tracks_upgraded: Number of tracks marked for quality upgrade
+            - playlists_added: Number of playlists processed
+            - downloads_completed: Number of downloads completed
+            - downloads_failed: Number of downloads failed
+            - searches_initiated: Number of searches initiated
+            - event_counts: Dict of event_id -> count
+            - timeline: List of key events with timestamps
+            
+    Example:
+        >>> analysis = analyze_workflow_run('logs/workflow_20251203.log')
+        >>> analysis['tracks_added']
+        42
+    """
+    import pandas as pd
+    
+    # Parse log file
+    log_entries = parse_logs([log_file])
+    
+    # Initialize metrics
+    metrics = {
+        'total_logs': len(log_entries),
+        'errors': [],
+        'warnings': [],
+        'tracks_added': 0,
+        'tracks_upgraded': 0,
+        'playlists_added': 0,
+        'downloads_completed': 0,
+        'downloads_failed': 0,
+        'searches_initiated': 0,
+        'event_counts': {},
+        'timeline': [],
+        'workflow_status': 'unknown'
+    }
+    
+    # Process each log entry
+    for entry in log_entries:
+        level = entry.get('level', '')
+        event_id = entry.get('event_id', '')
+        timestamp = entry.get('timestamp', '')
+        message = entry.get('message', '')
+        context = entry.get('context', {})
+        
+        # Count events
+        metrics['event_counts'][event_id] = metrics['event_counts'].get(event_id, 0) + 1
+        
+        # Collect errors and warnings
+        if level == 'ERROR':
+            metrics['errors'].append(entry)
+        elif level == 'WARNING':
+            metrics['warnings'].append(entry)
+        
+        # Track specific metrics
+        if event_id == 'TRACK_ADD':
+            metrics['tracks_added'] += 1
+        elif event_id == 'TRACK_QUALITY_UPGRADE':
+            metrics['tracks_upgraded'] += 1
+        elif event_id == 'PLAYLIST_ADD':
+            metrics['playlists_added'] += 1
+        elif event_id == 'DOWNLOAD_COMPLETE':
+            metrics['downloads_completed'] += 1
+        elif event_id == 'DOWNLOAD_FAILED':
+            metrics['downloads_failed'] += 1
+        elif event_id == 'SLSKD_SEARCH_CREATE':
+            metrics['searches_initiated'] += 1
+        
+        # Build timeline of key events
+        key_events = [
+            'WORKFLOW_START', 'WORKFLOW_COMPLETE', 'WORKFLOW_ABORTED', 
+            'WORKFLOW_INTERRUPTED', 'WORKFLOW_FATAL',
+            'PLAYLISTS_LOADED', 'BATCH_SEARCH_INITIATED', 
+            'REDOWNLOAD_QUEUE_INITIATED', 'XML_EXPORT_SUCCESS',
+            'SLSKD_UNAVAILABLE', 'RESET_COMPLETE'
+        ]
+        
+        if event_id in key_events:
+            try:
+                ts = pd.to_datetime(timestamp, format='%Y%m%d_%H%M%S_%f')
+                metrics['timeline'].append({
+                    'timestamp': ts,
+                    'event_id': event_id,
+                    'message': message,
+                    'display_time': ts.strftime('%H:%M:%S')
+                })
+            except Exception:
+                pass
+        
+        # Determine workflow status
+        if event_id == 'WORKFLOW_COMPLETE':
+            metrics['workflow_status'] = 'completed'
+        elif event_id in ['WORKFLOW_ABORTED', 'WORKFLOW_INTERRUPTED', 'WORKFLOW_FATAL']:
+            metrics['workflow_status'] = 'failed'
+    
+    # Sort timeline by timestamp
+    metrics['timeline'].sort(key=lambda x: x['timestamp'])
+    
+    # If no completion event found, mark as incomplete
+    if metrics['workflow_status'] == 'unknown' and metrics['total_logs'] > 0:
+        metrics['workflow_status'] = 'incomplete'
+    
+    return metrics
+
+
 def setup_logging(
     logs_dir: Optional[str] = None,
     log_level: int = logging.INFO,

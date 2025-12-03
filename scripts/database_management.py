@@ -255,17 +255,24 @@ class TrackDB:
             Uses INSERT OR IGNORE to prevent duplicate entries. If the track
             already exists, this operation has no effect.
         """
-        write_log.debug(
-            "TRACK_ADD", "Adding track.", {
-                "spotify_id": spotify_id,
-                "track_name": track_name,
-                "artist": artist,
-                "status": download_status,
-                "extension": extension,
-                "bitrate": bitrate
-            }
-        )
         cursor = self.conn.cursor()
+        
+        # Check if track already exists
+        cursor.execute("SELECT 1 FROM tracks WHERE spotify_id = ?", (spotify_id,))
+        already_exists = cursor.fetchone() is not None
+        
+        if not already_exists:
+            write_log.debug(
+                "TRACK_ADD", "Adding track.", {
+                    "spotify_id": spotify_id,
+                    "track_name": track_name,
+                    "artist": artist,
+                    "status": download_status,
+                    "extension": extension,
+                    "bitrate": bitrate
+                }
+            )
+        
         cursor.execute(
             """
             INSERT OR IGNORE INTO tracks 
@@ -288,7 +295,6 @@ class TrackDB:
         Returns:
             The database ID of the playlist (existing or newly created)
         """
-        write_log.info("PLAYLIST_ADD", "Adding playlist.", {"playlist_url": playlist_url})
         cursor = self.conn.cursor()
 
         # Check if the playlist already exists
@@ -307,7 +313,8 @@ class TrackDB:
             self.conn.commit()
             return result[0]  # Return the existing playlist ID
 
-        # Insert the new playlist
+        # Insert the new playlist - only log when actually adding
+        write_log.info("PLAYLIST_ADD", "Adding playlist.", {"playlist_url": playlist_url})
         cursor.execute(
             "INSERT INTO playlists (playlist_url, m3u8_path, playlist_name) VALUES (?, ?, ?)",
             (playlist_url, m3u8_path, playlist_name)

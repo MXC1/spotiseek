@@ -17,6 +17,7 @@ def get_extension_bitrate_breakdown(db_path):
 
 import os
 import sys
+import json
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -34,7 +35,9 @@ from scripts.logs_utils import (
     parse_logs,
     filter_warning_error_logs,
     logs_to_dataframe,
-    prepare_log_summary
+    prepare_log_summary,
+    get_workflow_runs,
+    analyze_workflow_run
 )
 from scripts.database_management import get_playlists, get_track_status_breakdown
 
@@ -228,8 +231,150 @@ def render_extension_bitrate_section():
             st.info("No bitrate data found.")
 
 
+def render_workflow_runs_section():
+    """Render workflow run selection and detailed inspection section."""
+    st.subheader("Workflow Run Inspection")
+    
+    # Get all workflow runs
+    runs = get_workflow_runs(LOGS_DIR)
+    
+    if not runs:
+        st.info("No workflow runs found.")
+        return
+    
+    # Create dropdown options
+    run_options = {run['display_name']: run for run in runs}
+    
+    # Run selection dropdown
+    selected_display = st.selectbox(
+        "Select a workflow run to inspect:",
+        options=list(run_options.keys()),
+        key="workflow_run_selector"
+    )
+    
+    if not selected_display:
+        return
+    
+    selected_run = run_options[selected_display]
+    
+    # Analyze the selected run
+    with st.spinner("Analyzing workflow run..."):
+        analysis = analyze_workflow_run(selected_run['log_file'])
+    
+    # Display run summary
+    render_run_summary(selected_run, analysis)
+
+
+def render_run_summary(run: dict, analysis: dict):
+    """
+    Render detailed summary of a workflow run.
+    
+    Args:
+        run: Run metadata dictionary
+        analysis: Analysis results from analyze_workflow_run
+    """
+    # Status badge
+    status = analysis['workflow_status']
+    status_colors = {
+        'completed': '🟢',
+        'failed': '🔴',
+        'incomplete': '🟡',
+        'unknown': '⚪'
+    }
+    status_icon = status_colors.get(status, '⚪')
+    
+    st.markdown(f"### {status_icon} Run: {run['display_name']}")
+    st.markdown(f"**Status:** {status.upper()} | **Log File:** `{run['run_id']}.log`")
+    
+    # Key metrics in columns
+    st.markdown("#### Summary Statistics")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total Logs", analysis['total_logs'])
+        st.metric("Errors", len(analysis['errors']))
+        st.metric("Searches initiated", analysis['searches_initiated'])
+    
+    with col2:
+        st.metric("Warnings", len(analysis['warnings']))
+        st.metric("Tracks Added", analysis['tracks_added'])
+    
+    with col3:
+        st.metric("Playlists Added", analysis['playlists_added'])
+        st.metric("Quality Upgrades", analysis['tracks_upgraded'])
+    
+    with col4:
+        st.metric("Downloads Completed", analysis['downloads_completed'])
+        st.metric("Downloads Failed", analysis['downloads_failed'])
+    
+    # Timeline
+    if analysis['timeline']:
+        st.markdown("#### Workflow Timeline")
+        timeline_df = pd.DataFrame([
+            {
+                'Time': item['display_time'],
+                'Event': item['event_id'],
+                'Message': item['message']
+            }
+            for item in analysis['timeline']
+        ])
+        st.dataframe(timeline_df, use_container_width=True, hide_index=True)
+    
+    # Errors section
+    if analysis['errors']:
+        with st.expander(f"❌ Errors ({len(analysis['errors'])})", expanded=False):
+            for error in analysis['errors']:
+                st.code(
+                    f"Event: {error.get('event_id', 'N/A')}\n"
+                    f"Message: {error.get('message', 'N/A')}\n"
+                    f"Context: {json.dumps(error.get('context', {}), indent=2)}",
+                    language='json'
+                )
+    
+    # Warnings section
+    if analysis['warnings']:
+        with st.expander(f"⚠️ Warnings ({len(analysis['warnings'])})", expanded=False):
+            for warning in analysis['warnings']:
+                st.code(
+                    f"Event: {warning.get('event_id', 'N/A')}\n"
+                    f"Message: {warning.get('message', 'N/A')}\n"
+                    f"Context: {json.dumps(warning.get('context', {}), indent=2)}",
+                    language='json'
+                )
+    
+    # Top events
+    st.markdown("#### Event Breakdown")
+    event_counts = analysis['event_counts']
+    if event_counts:
+        # Convert to DataFrame and sort
+        events_df = pd.DataFrame([
+            {'Event ID': k, 'Count': v}
+            for k, v in event_counts.items()
+        ]).sort_values('Count', ascending=False).head(15)
+        
+        # Show as bar chart
+        fig = px.bar(
+            events_df,
+            x='Count',
+            y='Event ID',
+            orientation='h',
+            title='Top 15 Events by Frequency'
+        )
+        fig.update_layout(
+            height=400,
+            showlegend=False,
+            yaxis={'categoryorder': 'total ascending'}
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+
 def main():
     """Main application entry point."""
+    # Workflow run inspection section (full width)
+    render_workflow_runs_section()
+    
+    st.markdown("---")
+    
     # Log breakdown section (full width)
     render_log_breakdown_section()
 
