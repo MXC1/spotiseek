@@ -677,8 +677,6 @@ def main(reset_db: bool = False) -> None:
         music_folder_url = config.get_music_folder_url()
         
         export_itunes_xml(xml_path, music_folder_url)
-        write_log.info("XML_EXPORT_SUCCESS", "Exported iTunes library XML.", 
-                      {"xml_path": xml_path})
     except Exception as e:
         write_log.error("XML_EXPORT_FAIL", "Failed to export iTunes XML.", 
                        {"xml_path": xml_path, "error": str(e)})
