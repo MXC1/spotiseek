@@ -286,12 +286,11 @@ def render_run_summary(run: dict, analysis: dict):
     
     # Key metrics in columns
     st.markdown("#### Summary Statistics")
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         st.metric("Total Logs", analysis['total_logs'])
         st.metric("Errors", len(analysis['errors']))
-        st.metric("Searches initiated", analysis['searches_initiated'])
     
     with col2:
         st.metric("Warnings", len(analysis['warnings']))
@@ -302,6 +301,10 @@ def render_run_summary(run: dict, analysis: dict):
         st.metric("Quality Upgrades", analysis['tracks_upgraded'])
     
     with col4:
+        st.metric("Searches (New)", analysis['new_searches'])
+        st.metric("Searches (Upgrade)", analysis['upgrade_searches'])
+    
+    with col5:
         st.metric("Downloads Completed", analysis['downloads_completed'])
         st.metric("Downloads Failed", analysis['downloads_failed'])
     
@@ -339,32 +342,6 @@ def render_run_summary(run: dict, analysis: dict):
                     f"Context: {json.dumps(warning.get('context', {}), indent=2)}",
                     language='json'
                 )
-    
-    # Top events
-    st.markdown("#### Event Breakdown")
-    event_counts = analysis['event_counts']
-    if event_counts:
-        # Convert to DataFrame and sort
-        events_df = pd.DataFrame([
-            {'Event ID': k, 'Count': v}
-            for k, v in event_counts.items()
-        ]).sort_values('Count', ascending=False).head(15)
-        
-        # Show as bar chart
-        fig = px.bar(
-            events_df,
-            x='Count',
-            y='Event ID',
-            orientation='h',
-            title='Top 15 Events by Frequency'
-        )
-        fig.update_layout(
-            height=400,
-            showlegend=False,
-            yaxis={'categoryorder': 'total ascending'}
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
 
 def main():
     """Main application entry point."""
