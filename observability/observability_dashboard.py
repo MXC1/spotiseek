@@ -1,20 +1,3 @@
-def get_extension_bitrate_breakdown(db_path):
-    """
-    Returns two DataFrames: extension breakdown and bitrate breakdown from the tracks table.
-    """
-    import sqlite3
-    import pandas as pd
-    try:
-        conn = sqlite3.connect(db_path)
-        ext_df = pd.read_sql_query(
-            "SELECT extension, COUNT(*) as count FROM tracks GROUP BY extension ORDER BY count DESC", conn)
-        br_df = pd.read_sql_query(
-            "SELECT bitrate, COUNT(*) as count FROM tracks GROUP BY bitrate ORDER BY count DESC", conn)
-        conn.close()
-        return ext_df, br_df, None
-    except Exception as e:
-        return None, None, str(e)
-
 import os
 import sys
 import json
@@ -22,6 +5,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from dotenv import load_dotenv
+import sqlite3
 
 # Load environment variables from .env file
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
@@ -54,6 +38,20 @@ st.title(f"Spotiseek Observability Dashboard - {ENV.upper()} Environment")
 LOGS_DIR = os.path.join(os.path.dirname(__file__), "logs", ENV)
 DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'database', ENV, f'database_{ENV}.db')
 
+def get_extension_bitrate_breakdown(db_path):
+    """
+    Returns two DataFrames: extension breakdown and bitrate breakdown from the tracks table.
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        ext_df = pd.read_sql_query(
+            "SELECT extension, COUNT(*) as count FROM tracks GROUP BY extension ORDER BY count DESC", conn)
+        br_df = pd.read_sql_query(
+            "SELECT bitrate, COUNT(*) as count FROM tracks GROUP BY bitrate ORDER BY count DESC", conn)
+        conn.close()
+        return ext_df, br_df, None
+    except Exception as e:
+        return None, None, str(e)
 
 def render_log_breakdown_section():
     """Render the warning and error log breakdown section."""
