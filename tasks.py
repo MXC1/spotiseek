@@ -138,6 +138,8 @@ def setenv(c, env):
         f.writelines(lines)
     
     print(f"APP_ENV set to '{env}'")
+    print("Running 'invoke up' to apply environment change...")
+    subprocess.run(["invoke", "up"], check=True)
 
 @task(default=True)
 def help(c):
