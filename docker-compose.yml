@@ -16,7 +16,7 @@ services:
     user: 1000:1000
     image: slskd/slskd:latest
 
-  streamlit-dashboard:
+  streamlit:
     build:
       context: .
       dockerfile: infra/Dockerfile.streamlit
