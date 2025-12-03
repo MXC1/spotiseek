@@ -297,8 +297,6 @@ def export_itunes_xml(xml_path: str, music_folder_url: Optional[str] = None) -> 
                    {"total_tracks": len(tracks), "downloaded_tracks": len(downloaded_tracks)})
     
     for idx, (spotify_id, track_name, artist, _, _, local_file_path, _) in enumerate(downloaded_tracks, 1):
-        write_log.debug("XML_ADDING_TRACK", "Adding track to XML.", 
-                       {"track_id": idx, "spotify_id": spotify_id, "track_name": track_name, "local_file_path": local_file_path})
         try:
             _add_track_to_xml(tracks_dict, idx, track_name, artist, spotify_id, local_file_path)
             spotify_id_to_track_id[spotify_id] = idx

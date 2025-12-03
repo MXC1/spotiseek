@@ -1,0 +1,25 @@
+# Dockerfile for Manual Import Streamlit App
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code (runtime data will be mounted as volumes)
+COPY scripts/ /app/scripts/
+
+# Create directories for volume mounts
+RUN mkdir -p /app/database /app/slskd_docker_data /app/observability
+
+# Expose Streamlit port
+EXPOSE 8502
+
+# Run the manual import app
+CMD ["streamlit", "run", "scripts/manual_import.py", "--server.port=8502", "--server.address=0.0.0.0"]
