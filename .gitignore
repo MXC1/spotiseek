@@ -51,7 +51,7 @@ web/.env
 *.swo
 *~
 
-playlists/*
-!playlists/_init
+input_playlists/*
+!input_playlists/_init
 .cache
 dev
