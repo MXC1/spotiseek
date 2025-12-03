@@ -328,6 +328,58 @@ def update_download_statuses() -> None:
                 _update_file_status(file)
 
 
+def mark_tracks_for_quality_upgrade() -> None:
+    """
+    Identify completed tracks that are not WAV format and mark them for quality upgrade.
+    
+    This function:
+    1. Queries all tracks with status='completed'
+    2. Checks their file extension
+    3. Marks non-WAV tracks as 'redownload_pending' for quality upgrade
+    
+    Quality upgrade logic:
+    - WAV files are considered optimal quality and are not upgraded
+    - All other formats (FLAC, MP3, etc.) are marked for potential upgrade
+    - The actual upgrade decision (whether a better file exists) happens during search
+    
+    Note:
+        This function should be called before process_redownload_queue() to ensure
+        all eligible tracks are queued for quality checks.
+    """
+    write_log.info("QUALITY_UPGRADE_SCAN", "Scanning completed tracks for quality upgrade opportunities.")
+    
+    # Get all completed tracks
+    completed_tracks = track_db.get_tracks_by_status("completed")
+    
+    if not completed_tracks:
+        write_log.debug("QUALITY_UPGRADE_NO_COMPLETED", "No completed tracks found to check for upgrades.")
+        return
+    
+    write_log.info("QUALITY_UPGRADE_CHECKING", f"Checking {len(completed_tracks)} completed tracks for upgrade eligibility.")
+    
+    upgrade_count = 0
+    for track_row in completed_tracks:
+        spotify_id = track_row[0]  # First column is spotify_id
+        
+        # Get current file extension
+        current_extension = track_db.get_track_extension(spotify_id)
+        
+        # Mark for upgrade if not WAV (or if extension is unknown/null)
+        if not current_extension or current_extension.lower() != "wav":
+            track_db.update_track_status(spotify_id, "redownload_pending")
+            upgrade_count += 1
+            write_log.debug("QUALITY_UPGRADE_MARKED", "Marked track for quality upgrade.", 
+                          {"spotify_id": spotify_id, "current_extension": current_extension or "unknown"})
+    
+    if upgrade_count > 0:
+        write_log.info("QUALITY_UPGRADE_MARKED_COMPLETE", 
+                      f"Marked {upgrade_count} tracks for quality upgrade (non-WAV files).",
+                      {"marked_count": upgrade_count, "total_completed": len(completed_tracks)})
+    else:
+        write_log.info("QUALITY_UPGRADE_NO_CANDIDATES", 
+                      "All completed tracks are already WAV format or already queued for upgrade.")
+
+
 def _update_file_status(file: dict) -> None:
     """
     Update database status for a single download file.
@@ -657,7 +709,12 @@ def main(reset_db: bool = False) -> None:
     write_log.info("BATCH_SEARCH_START", "Initiating searches for all new tracks.", 
                   {"total_tracks": len(all_tracks)})
     download_tracks_async(all_tracks)
-    write_log.info("BATCH_SEARCH_INITIATED", "All searches initiated. They will continue in slskd.")
+    write_log.info("BATCH_SEARCH_INITIATED", "All searches initiated. They will continue in slskd.",
+                  {"total_tracks": len(all_tracks)})
+    
+    # Mark completed non-WAV tracks for quality upgrade
+    write_log.info("QUALITY_UPGRADE_MARK_START", "Marking completed tracks for quality upgrade.")
+    mark_tracks_for_quality_upgrade()
     
     # Initiate quality upgrade searches (fire-and-forget)
     write_log.info("REDOWNLOAD_QUEUE_START", "Initiating quality upgrade searches.")
