@@ -566,6 +566,27 @@ class TrackDB:
         write_log.debug("TRACK_EXTENSION_RESULT", "Track extension result.", {"spotify_id": spotify_id, "extension": extension})
         return extension
     
+    def get_local_file_path(self, spotify_id: str) -> Optional[str]:
+        """
+        Retrieve the local file path of a track.
+        
+        Args:
+            spotify_id: Spotify track identifier
+        
+        Returns:
+            Local file path string if track exists and has one, None otherwise
+        """
+        write_log.debug("TRACK_LOCAL_PATH_QUERY", "Querying local_file_path for track.", {"spotify_id": spotify_id})
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT local_file_path FROM tracks WHERE spotify_id = ?",
+            (spotify_id,)
+        )
+        result = cursor.fetchone()
+        local_path = result[0] if result else None
+        write_log.debug("TRACK_LOCAL_PATH_RESULT", "Track local_file_path result.", {"spotify_id": spotify_id, "local_file_path": local_path})
+        return local_path
+    
     def update_local_file_path(self, spotify_id: str, local_file_path: str) -> None:
         """
         Update the local filesystem path for a downloaded track.

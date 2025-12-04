@@ -436,8 +436,9 @@ def _handle_completed_download(file: dict, spotify_id: str) -> None:
     1. Checks if track is marked for redownload (skips status update if so)
     2. Extracts the file path from slskd response
     3. Constructs the local file path
-    4. Updates the database with the local file path
-    5. Updates all M3U8 files that contain this track
+    4. Checks if this is an old slskd record being reprocessed (same file already tracked)
+    5. Updates the database with the local file path
+    6. Updates all M3U8 files that contain this track
     
     Args:
         file: File object from slskd API
@@ -480,6 +481,18 @@ def _handle_completed_download(file: dict, spotify_id: str) -> None:
     
     # Keep forward slashes for Linux/Docker environment
     local_file_path = os.path.join(config.downloads_root, relative_path)
+    
+    # Check if this is an old slskd record being reprocessed (e.g., after quality upgrade reset)
+    # This prevents double-counting when the same file is seen again from slskd history
+    existing_path = track_db.get_local_file_path(spotify_id)
+    if existing_path:
+        # Normalize paths for comparison
+        existing_normalized = existing_path.replace("\\", "/").lower()
+        new_normalized = local_file_path.replace("\\", "/").lower()
+        if existing_normalized == new_normalized or os.path.basename(existing_normalized) == os.path.basename(new_normalized):
+            write_log.debug("DOWNLOAD_DUPLICATE_RECORD", "Skipping old slskd record - file already tracked.", 
+                           {"spotify_id": spotify_id, "existing_path": existing_path, "slskd_path": local_file_path})
+            return
     
     # If FLAC, remux and use new path; otherwise, use as is
     extension = None
