@@ -73,9 +73,12 @@ def build(c):
     subprocess.run(["docker-compose", "build"], check=True)
 
 @task
-def up(c):
-    """Start all services using docker-compose. Use --build to force image rebuild."""
-    subprocess.run(["docker-compose", "up", "-d", "--build"], check=True)
+def up(c, service=None):
+    """Start all services using docker-compose. Use --build to force image rebuild. Optionally specify a service (e.g. invoke up streamlit)."""
+    cmd = ["docker-compose", "up", "-d", "--build"]
+    if service:
+        cmd.append(service)
+    subprocess.run(cmd, check=True)
 
 @task
 def down(c):
