@@ -40,7 +40,8 @@ DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'database', ENV, f'datab
 
 def get_extension_bitrate_breakdown(db_path):
     """
-    Returns two DataFrames: extension breakdown and bitrate breakdown from the tracks table.
+    Returns three DataFrames: extension breakdown, bitrate breakdown, and download status breakdown from the tracks table.
+    Handles both NULL and empty string as 'Not Downloaded'.
     """
     try:
         conn = sqlite3.connect(db_path)
@@ -48,10 +49,23 @@ def get_extension_bitrate_breakdown(db_path):
             "SELECT extension, COUNT(*) as count FROM tracks GROUP BY extension ORDER BY count DESC", conn)
         br_df = pd.read_sql_query(
             "SELECT bitrate, COUNT(*) as count FROM tracks GROUP BY bitrate ORDER BY count DESC", conn)
+        # Downloaded/not downloaded breakdown (treat NULL and empty string as Not Downloaded)
+        dl_df = pd.read_sql_query(
+            """
+            SELECT 
+                CASE 
+                    WHEN local_file_path IS NOT NULL AND TRIM(local_file_path) != '' THEN 'Downloaded'
+                    ELSE 'Not Downloaded'
+                END AS download_status,
+                COUNT(*) as count
+            FROM tracks
+            GROUP BY download_status
+            ORDER BY count DESC
+            """, conn)
         conn.close()
-        return ext_df, br_df, None
+        return ext_df, br_df, dl_df, None
     except Exception as e:
-        return None, None, str(e)
+        return None, None, None, str(e)
 
 def render_log_breakdown_section():
     """Render the warning and error log breakdown section."""
@@ -205,16 +219,16 @@ def render_status_table(status_df: pd.DataFrame):
 
 
 def render_extension_bitrate_section():
-    """Render the extension and bitrate breakdown section."""
-    st.subheader("Track Extension and Bitrate Breakdown")
+    """Render the extension, bitrate, and download status breakdown section."""
+    st.subheader("Track Extension, Bitrate, and Download Status Breakdown")
     if not os.path.exists(DB_PATH):
         st.info("Database file not found.")
         return
-    ext_df, br_df, error = get_extension_bitrate_breakdown(DB_PATH)
+    ext_df, br_df, dl_df, error = get_extension_bitrate_breakdown(DB_PATH)
     if error:
         st.error(f"Error querying extension/bitrate breakdown: {error}")
         return
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown("**File Extension Breakdown**")
         if ext_df is not None and not ext_df.empty:
@@ -227,6 +241,12 @@ def render_extension_bitrate_section():
             st.dataframe(br_df)
         else:
             st.info("No bitrate data found.")
+    with col3:
+        st.markdown("**Download Status Breakdown**")
+        if dl_df is not None and not dl_df.empty:
+            st.dataframe(dl_df)
+        else:
+            st.info("No download status data found.")
 
 
 def render_workflow_runs_section():
