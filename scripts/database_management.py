@@ -186,9 +186,16 @@ class TrackDB:
             CREATE TABLE IF NOT EXISTS slskd_mapping (
                 slskd_uuid TEXT PRIMARY KEY,
                 spotify_id TEXT NOT NULL,
+                username TEXT,
                 FOREIGN KEY (spotify_id) REFERENCES tracks(spotify_id)
             )
         """)
+        
+        # Add username column if it does not exist (migration for existing DBs)
+        cursor.execute("PRAGMA table_info(slskd_mapping)")
+        mapping_columns = [row[1] for row in cursor.fetchall()]
+        if "username" not in mapping_columns:
+            cursor.execute("ALTER TABLE slskd_mapping ADD COLUMN username TEXT")
 
         # Blacklist table: stores blacklisted slskd_uuids
         cursor.execute("""
@@ -467,22 +474,56 @@ class TrackDB:
         )
         return cursor.fetchall()
 
-    def add_slskd_mapping(self, slskd_uuid: str, spotify_id: str) -> None:
+    def add_slskd_mapping(self, slskd_uuid: str, spotify_id: str, username: str = None) -> None:
         """
         Create a mapping between a Soulseek download UUID and a Spotify track ID.
         
         Args:
             slskd_uuid: Unique identifier from Soulseek download system
             spotify_id: Spotify track identifier
+            username: Soulseek username the download is from
         
         Note:
             Uses INSERT OR IGNORE to prevent duplicate mappings.
         """
-        write_log.debug("SLSKD_MAPPING_ADD", "Adding slskd mapping.", {"slskd_uuid": slskd_uuid, "spotify_id": spotify_id})
+        write_log.debug("SLSKD_MAPPING_ADD", "Adding slskd mapping.", {"slskd_uuid": slskd_uuid, "spotify_id": spotify_id, "username": username})
         cursor = self.conn.cursor()
         cursor.execute(
-            "INSERT OR IGNORE INTO slskd_mapping (slskd_uuid, spotify_id) VALUES (?, ?)",
-            (slskd_uuid, spotify_id)
+            "INSERT OR IGNORE INTO slskd_mapping (slskd_uuid, spotify_id, username) VALUES (?, ?, ?)",
+            (slskd_uuid, spotify_id, username)
+        )
+        self.conn.commit()
+
+    def get_username_by_slskd_uuid(self, slskd_uuid: str) -> Optional[str]:
+        """
+        Retrieve the Soulseek username associated with a download UUID.
+        
+        Args:
+            slskd_uuid: Soulseek download UUID
+        
+        Returns:
+            Username if found, None otherwise
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT username FROM slskd_mapping WHERE slskd_uuid = ?",
+            (slskd_uuid,)
+        )
+        result = cursor.fetchone()
+        return result[0] if result else None
+
+    def delete_slskd_mapping(self, slskd_uuid: str) -> None:
+        """
+        Delete a mapping between a Soulseek download UUID and a Spotify track ID.
+        
+        Args:
+            slskd_uuid: Soulseek download UUID to remove
+        """
+        write_log.debug("SLSKD_MAPPING_DELETE", "Deleting slskd mapping.", {"slskd_uuid": slskd_uuid})
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "DELETE FROM slskd_mapping WHERE slskd_uuid = ?",
+            (slskd_uuid,)
         )
         self.conn.commit()
 

@@ -46,7 +46,7 @@ load_dotenv(dotenv_path)
 from logs_utils import setup_logging, write_log
 from database_management import TrackDB
 from spotify_scraper import get_tracks_from_playlist
-from soulseek_client import download_tracks_async, query_download_status, process_redownload_queue, wait_for_slskd_ready, process_pending_searches
+from soulseek_client import download_tracks_async, query_download_status, process_redownload_queue, wait_for_slskd_ready, process_pending_searches, remove_download_from_slskd
 from m3u8_manager import delete_all_m3u8_files, write_playlist_m3u8, update_track_in_m3u8
 from xml_exporter import export_itunes_xml
 
@@ -321,11 +321,12 @@ def update_download_statuses() -> None:
     download_statuses = query_download_status()
     
     for status in download_statuses:
+        username = status.get("username")
         directories = status.get("directories", [])
         for directory in directories:
             files = directory.get("files", [])
             for file in files:
-                _update_file_status(file)
+                _update_file_status(file, username)
 
 
 def mark_tracks_for_quality_upgrade() -> None:
@@ -380,18 +381,21 @@ def mark_tracks_for_quality_upgrade() -> None:
                       "All completed tracks are already WAV format or already queued for upgrade.")
 
 
-def _update_file_status(file: dict) -> None:
+def _update_file_status(file: dict, username: str = None) -> None:
     """
     Update database status for a single download file.
     
     Maps slskd file states to database status values and updates accordingly.
     For completed downloads, also updates the local file path and M3U8 files.
+    For failed downloads, removes the download from slskd to prevent duplicate logs.
     
     Args:
         file: File object from slskd API containing id, state, filename
+        username: Soulseek username the download is from (used for removing failed downloads)
     """
     slskd_uuid = file.get("id")
     spotify_id = track_db.get_spotify_id_by_slskd_uuid(slskd_uuid)
+    download_username = username or track_db.get_username_by_slskd_uuid(slskd_uuid)
     
     if not spotify_id:
         write_log.debug("SLSKD_UUID_UNKNOWN", "No Spotify ID found for slskd UUID.", 
@@ -406,7 +410,7 @@ def _update_file_status(file: dict) -> None:
     if state == "Completed, Succeeded":
         _handle_completed_download(file, spotify_id)
     
-    # Handle failed downloads
+    # Handle failed downloads - remove from slskd to prevent duplicate logs
     elif state in ("Completed, Errored", "Completed, TimedOut", "Completed, Cancelled", "Completed, Rejected", "Completed, Aborted"):
         track_db.update_track_status(spotify_id, "failed")
         write_log.info("DOWNLOAD_FAILED", "Download failed.", 
@@ -426,6 +430,13 @@ def _update_file_status(file: dict) -> None:
         track_db.update_track_status(spotify_id, normalized_state)
         write_log.debug("DOWNLOAD_STATE_UNKNOWN", "Unknown download state encountered.", 
                        {"spotify_id": spotify_id, "state": state})
+    
+    if state.startswith("Completed"):
+        if download_username and slskd_uuid:
+            remove_download_from_slskd(download_username, slskd_uuid)
+        else:
+            write_log.warn("DOWNLOAD_REMOVE_SKIP", "Cannot remove failed download - missing username or UUID.",
+                            {"spotify_id": spotify_id, "slskd_uuid": slskd_uuid, "username": download_username})
 
 
 def _handle_completed_download(file: dict, spotify_id: str) -> None:
@@ -741,10 +752,6 @@ def main(reset_db: bool = False) -> None:
     write_log.info("REDOWNLOAD_QUEUE_START", "Initiating quality upgrade searches.")
     process_redownload_queue()
     write_log.info("REDOWNLOAD_QUEUE_INITIATED", "Quality upgrade searches initiated. They will continue in slskd.")
-    
-    # Check download statuses for any completed downloads
-    write_log.info("DOWNLOAD_STATUS_FINAL_CHECK", "Checking download statuses.")
-    update_download_statuses()
     
     # Note: All searches are now running in slskd and will complete asynchronously.
     # They will be processed on the next workflow run via process_pending_searches()

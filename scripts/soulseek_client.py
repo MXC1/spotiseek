@@ -613,7 +613,7 @@ def enqueue_download(search_id: str, file: Dict[str, Any], username: str, spotif
             write_log.info("SLSKD_ENQUEUE_SUCCESS", "Successfully enqueued download.", 
                           {"slskd_uuid": slskd_uuid, "spotify_id": spotify_id, "attempt": attempt + 1})
             
-            track_db.add_slskd_mapping(slskd_uuid, spotify_id)
+            track_db.add_slskd_mapping(slskd_uuid, spotify_id, username)
             track_db.update_track_status(spotify_id, "downloading")
             track_db.update_slskd_file_name(spotify_id, filename)
             track_db.update_extension_bitrate(spotify_id, extension, bitrate)
@@ -903,6 +903,70 @@ def process_pending_searches() -> None:
     
     write_log.info("PENDING_SEARCHES_PROCESSED", "Finished checking pending searches.", 
                   {"processed": processed_count, "still_searching": still_searching_count})
+
+
+def remove_download_from_slskd(username: str, slskd_uuid: str, max_retries: int = 3) -> bool:
+    """
+    Remove a download from slskd to prevent it from appearing in future status queries.
+    
+    This is useful for cleaning up failed downloads so they don't produce duplicate
+    log entries on subsequent workflow runs.
+    
+    Args:
+        username: Soulseek username the download is from
+        slskd_uuid: UUID of the download to remove
+        max_retries: Maximum number of retry attempts (default: 3)
+    
+    Returns:
+        True if the download was successfully removed, False otherwise
+    """
+    write_log.info("SLSKD_REMOVE_DOWNLOAD", "Removing download from slskd.", 
+                  {"username": username, "slskd_uuid": slskd_uuid})
+    
+    for attempt in range(max_retries):
+        try:
+            url = f"{SLSKD_URL}/transfers/downloads/{username}/{slskd_uuid}?remove=true"
+            resp = requests.delete(
+                url,
+                headers={"X-API-Key": TOKEN},
+                timeout=10
+            )
+            
+            if resp.status_code in (200, 204, 404):
+                # 200/204 = successfully removed, 404 = already gone
+                write_log.info("SLSKD_REMOVE_SUCCESS", "Successfully removed download from slskd.", 
+                              {"username": username, "slskd_uuid": slskd_uuid})
+                # Also remove from our database mapping
+                track_db.delete_slskd_mapping(slskd_uuid)
+                return True
+            
+            resp.raise_for_status()
+            
+        except (requests.Timeout, requests.exceptions.ConnectionError) as e:
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt
+                write_log.debug("SLSKD_REMOVE_RETRY", "Network error removing download, retrying.",
+                              {"attempt": attempt + 1, "max_retries": max_retries, 
+                               "wait_time": wait_time, "error": str(e)})
+                time.sleep(wait_time)
+            else:
+                write_log.warn("SLSKD_REMOVE_FAIL", "Failed to remove download after all retries.",
+                              {"username": username, "slskd_uuid": slskd_uuid, "error": str(e)})
+                return False
+                
+        except requests.HTTPError as e:
+            write_log.warn("SLSKD_REMOVE_FAIL", "HTTP error removing download.",
+                          {"username": username, "slskd_uuid": slskd_uuid, 
+                           "status_code": e.response.status_code if e.response else None, 
+                           "error": str(e)})
+            return False
+            
+        except requests.RequestException as e:
+            write_log.warn("SLSKD_REMOVE_FAIL", "Failed to remove download.",
+                          {"username": username, "slskd_uuid": slskd_uuid, "error": str(e)})
+            return False
+    
+    return False
 
 
 def query_download_status(max_retries: int = 3) -> List[Dict[str, Any]]:
