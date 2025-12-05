@@ -505,9 +505,17 @@ def _handle_completed_download(file: dict, spotify_id: str) -> None:
     if extension == "flac":
         final_path = _remux_flac_to_mp3(local_file_path, spotify_id, file) or local_file_path
 
+    existing_path = track_db.get_local_file_path(spotify_id)
     track_db.update_local_file_path(spotify_id, final_path)
-    write_log.info("DOWNLOAD_COMPLETE", "Download completed successfully.", 
-                  {"spotify_id": spotify_id, "local_file_path": final_path})
+    write_log.info(
+        "DOWNLOAD_COMPLETE",
+        "Download completed successfully.",
+        {
+            "spotify_id": spotify_id,
+            "local_file_path": final_path,
+            "is_new": not bool(existing_path)
+        }
+    )
     _update_m3u8_files_for_track(spotify_id, final_path)
     track_db.update_track_status(spotify_id, "completed")
     
@@ -697,7 +705,7 @@ def main(reset_db: bool = False) -> None:
         playlists = read_playlists_from_csv(config.playlists_csv)
         write_log.info("PLAYLISTS_LOADED", "Loaded playlists from CSV.", {"count": len(playlists)})
     except FileNotFoundError:
-        fallback_csv = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "playlists", "playlists.csv"))
+        fallback_csv = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "input_playlists", "playlists.csv"))
         write_log.warn("PLAYLISTS_CSV_MISSING", "Primary playlists CSV not found, falling back to default.", {"primary_csv": config.playlists_csv, "fallback_csv": fallback_csv})
         try:
             playlists = read_playlists_from_csv(fallback_csv)

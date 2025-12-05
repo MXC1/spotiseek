@@ -302,7 +302,7 @@ def get_workflow_runs(logs_dir: str) -> List[dict]:
                 timestamp_str = f"{date_str}_{time_str}"
                 timestamp = pd.to_datetime(timestamp_str, format='%Y%m%d_%H%M%S')
                 
-                display_name = timestamp.strftime('%a %d %B %Y %H:%M')
+                display_name = timestamp.strftime('%a %d %B %Y %H:%M:%S')
                 
                 runs.append({
                     'run_id': run_id,
@@ -360,6 +360,8 @@ def analyze_workflow_run(log_file: str) -> dict:
         'tracks_upgraded': 0,
         'playlists_added': 0,
         'downloads_completed': 0,
+        'downloads_completed_new': 0,
+        'downloads_completed_upgrade': 0,
         'downloads_failed': 0,
         'searches_initiated': 0,
         'new_searches': 0,
@@ -395,6 +397,12 @@ def analyze_workflow_run(log_file: str) -> dict:
             metrics['playlists_added'] += 1
         elif event_id == 'DOWNLOAD_COMPLETE':
             metrics['downloads_completed'] += 1
+            # Split new vs upgrade using is_new field in context
+            is_new = context.get('is_new', None)
+            if is_new is True:
+                metrics['downloads_completed_new'] += 1
+            elif is_new is False:
+                metrics['downloads_completed_upgrade'] += 1
         elif event_id == 'DOWNLOAD_FAILED':
             metrics['downloads_failed'] += 1
         elif event_id == 'SLSKD_SEARCH_CREATE':

@@ -65,23 +65,25 @@ track_db = TrackDB(db_path=DB_PATH)
 
 def get_non_completed_tracks_by_playlist() -> Dict[str, List[Tuple]]:
     """
-    Retrieve all non-completed tracks grouped by playlist.
+    Retrieve all tracks missing a local_file_path, grouped by playlist.
     
     Returns:
-        Dictionary mapping playlist names to lists of track tuples:
+        Dictionary mapping playlist names to lists of track dicts:
         {
             "Playlist Name": [
-                (spotify_id, track_name, artist, status),
+                {
+                    'spotify_id': ..., 'track_name': ..., 'artist': ..., 'status': ..., 'playlist_url': ...
+                },
                 ...
             ],
             ...
         }
     """
-    write_log.info("IMPORT_UI_QUERY", "Querying non-completed tracks grouped by playlist.")
+    write_log.info("IMPORT_UI_QUERY", "Querying tracks missing local_file_path grouped by playlist.")
     
     cursor = track_db.conn.cursor()
     
-    # Query tracks with their playlist associations
+    # Query tracks with their playlist associations, only those missing local_file_path
     query = """
         SELECT 
             p.playlist_name,
@@ -93,7 +95,7 @@ def get_non_completed_tracks_by_playlist() -> Dict[str, List[Tuple]]:
         FROM tracks t
         JOIN playlist_tracks pt ON t.spotify_id = pt.spotify_id
         JOIN playlists p ON pt.playlist_url = p.playlist_url
-        WHERE t.download_status != 'completed'
+        WHERE t.local_file_path IS NULL OR t.local_file_path = ''
         ORDER BY p.playlist_name, t.track_name
     """
     
@@ -114,7 +116,7 @@ def get_non_completed_tracks_by_playlist() -> Dict[str, List[Tuple]]:
             'playlist_url': playlist_url
         })
     
-    write_log.debug("IMPORT_UI_QUERY_RESULT", "Retrieved non-completed tracks.", 
+    write_log.debug("IMPORT_UI_QUERY_RESULT", "Retrieved tracks missing local_file_path.", 
                    {"playlist_count": len(grouped_tracks)})
     
     return grouped_tracks

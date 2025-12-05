@@ -324,8 +324,12 @@ def render_run_summary(run: dict, analysis: dict):
         st.metric("Searches (New)", analysis['new_searches'])
         st.metric("Searches (Upgrade)", analysis['upgrade_searches'])
     
+    # Split downloads completed into new vs upgrades
+    downloads_new = analysis.get('downloads_completed_new', 0)
+    downloads_upgrade = analysis.get('downloads_completed_upgrade', 0)
     with col5:
-        st.metric("Downloads Completed", analysis['downloads_completed'])
+        st.metric("Downloads Completed (New)", downloads_new)
+        st.metric("Downloads Completed (Upgrade)", downloads_upgrade)
         st.metric("Downloads Failed", analysis['downloads_failed'])
     
     # Timeline
