@@ -62,7 +62,7 @@ def nuke(c):
         print("Could not determine APP_ENV, skipping directory deletion.")
 
 @task
-def workflow(c, attach=False):
+def start_workflow(c, attach=False):
     """Run the workflow script inside the Docker container. Use --detached to run in detached mode."""
     flag = "" if attach else "-d "
     c.run(f"docker-compose exec {flag}workflow python scripts/workflow.py")
