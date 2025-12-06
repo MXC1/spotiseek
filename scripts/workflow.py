@@ -582,12 +582,14 @@ def _remux_flac_to_mp3(local_file_path: str, spotify_id: str, file: dict) -> str
             now.strftime("%d")
         )
         os.makedirs(dated_logs_dir, exist_ok=True)
+        # Use a single log file per workflow run (date-based, no timestamp)
         ffmpeg_log_file = os.path.join(
             dated_logs_dir,
-            f"ffmpeg_remux_{now.strftime('%Y%m%d_%H%M%S_%f')}.log"
+            "ffmpeg_remux.log"
         )
         write_log.info("FFMPEG_REMUX", "Remuxing FLAC to MP3 320kbps.", {"input": ffmpeg_input, "output": ffmpeg_output, "ffmpeg_log_file": ffmpeg_log_file})
-        with open(ffmpeg_log_file, "w", encoding="utf-8") as logf:
+        with open(ffmpeg_log_file, "a", encoding="utf-8") as logf:
+            logf.write(f"\n--- Remux {now.strftime('%Y-%m-%d %H:%M:%S')} | Spotify ID: {spotify_id} | Input: {ffmpeg_input} | Output: {ffmpeg_output} ---\n")
             subprocess.run(ffmpeg_cmd, check=True, stdout=logf, stderr=subprocess.STDOUT)
         track_db.update_extension_bitrate(spotify_id, extension="mp3", bitrate=320)
         write_log.info("REMUX_SUCCESS", "FLAC remuxed to MP3 320kbps.", {"spotify_id": spotify_id, "mp3_path": mp3_path, "ffmpeg_log_file": ffmpeg_log_file})
