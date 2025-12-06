@@ -312,7 +312,6 @@ class TrackDB:
         result = cursor.fetchone()
 
         if result:
-            write_log.info("PLAYLIST_EXISTS", "Playlist already exists.", {"playlist_url": playlist_url})
             cursor.execute(
                 "UPDATE playlists SET m3u8_path = ?, playlist_name = ? WHERE playlist_url = ?",
                 (m3u8_path, playlist_name, playlist_url)
