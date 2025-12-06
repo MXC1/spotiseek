@@ -12,9 +12,9 @@ from typing import Optional, List, Tuple
 
 # Handle both relative and absolute imports for flexibility
 try:
-    from .logs_utils import write_log
+    from scripts.logs_utils import write_log
 except ImportError:
-    from logs_utils import write_log
+    from scripts.logs_utils import write_log
 
 # Get environment configuration (used by TrackDB class)
 ENV = os.getenv("APP_ENV")
@@ -556,7 +556,6 @@ class TrackDB:
         Returns:
             Soulseek download UUID if found, None otherwise
         """
-        write_log.debug("SLSKD_QUERY_UUID", "Querying slskd_uuid for Spotify ID.", {"spotify_id": spotify_id})
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT slskd_uuid FROM slskd_mapping WHERE spotify_id = ?",

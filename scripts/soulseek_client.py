@@ -36,8 +36,8 @@ import requests
 from typing import List, Dict, Any, Optional, Tuple
 from dotenv import load_dotenv
 
-from logs_utils import write_log
-from database_management import TrackDB
+from scripts.logs_utils import write_log
+from scripts.database_management import TrackDB
 
 load_dotenv()
 
@@ -506,7 +506,6 @@ def check_search_status(search_id: str) -> Tuple[bool, List[Dict[str, Any]]]:
         - is_complete: True if search finished (with or without results)
         - responses: List of response objects if any found, empty list otherwise
     """
-    write_log.debug("SLSKD_SEARCH_CHECK", "Checking search status.", {"search_id": search_id})
     
     try:
         # Get search responses
@@ -550,8 +549,6 @@ def check_search_status(search_id: str) -> Tuple[bool, List[Dict[str, Any]]]:
         return (False, [])
         
     except Exception as e:
-        write_log.warn("SLSKD_SEARCH_CHECK_ERROR", "Error checking search status.", 
-                      {"search_id": search_id, "error": str(e)})
         return (False, [])
 
 def enqueue_download(search_id: str, file: Dict[str, Any], username: str, spotify_id: str, max_retries: int = 3) -> Dict[str, Any]:
@@ -742,8 +739,6 @@ def process_search_results(search_id: str, search_text: str, spotify_id: str, ch
         
         # If search is not complete, leave status as 'searching'
         if not is_complete:
-            write_log.debug("SLSKD_SEARCH_STILL_RUNNING", "Search still in progress.", 
-                          {"search_id": search_id, "spotify_id": spotify_id})
             return False
         
         # Search is complete but no results

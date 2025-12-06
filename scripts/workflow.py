@@ -43,12 +43,12 @@ sys.dont_write_bytecode = True
 dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(dotenv_path)
 
-from logs_utils import setup_logging, write_log
-from database_management import TrackDB
-from spotify_scraper import get_tracks_from_playlist
-from soulseek_client import download_tracks_async, query_download_status, process_redownload_queue, wait_for_slskd_ready, process_pending_searches, remove_download_from_slskd
-from m3u8_manager import delete_all_m3u8_files, write_playlist_m3u8, update_track_in_m3u8
-from xml_exporter import export_itunes_xml
+from scripts.logs_utils import setup_logging, write_log
+from scripts.database_management import TrackDB
+from scripts.spotify_scraper import get_tracks_from_playlist
+from scripts.soulseek_client import download_tracks_async, query_download_status, process_redownload_queue, wait_for_slskd_ready, process_pending_searches, remove_download_from_slskd
+from scripts.m3u8_manager import delete_all_m3u8_files, write_playlist_m3u8, update_track_in_m3u8
+from scripts.xml_exporter import export_itunes_xml
 
 # Initialize logging with environment-specific directory
 setup_logging(log_name_prefix="workflow")

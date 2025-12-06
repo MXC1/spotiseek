@@ -86,10 +86,13 @@ def down(c):
     subprocess.run(["docker-compose", "down"], check=True)
 
 @task
-def logs(c):
+def logs(c, service=None):
     """Show logs for all services"""
-    subprocess.run(["docker-compose", "logs", "-f"], check=True)
-
+    cmd = ["docker-compose", "logs", "-f"]
+    if service:
+        cmd.append(service)
+    subprocess.run(cmd, check=True)
+    
 @task
 def prune(c):
     """Remove all stopped containers, networks, images, and volumes"""

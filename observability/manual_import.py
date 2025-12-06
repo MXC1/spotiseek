@@ -10,7 +10,7 @@ failed to download automatically. It provides:
 - iTunes XML library re-export
 
 Usage:
-    streamlit run scripts/manual_import.py
+    streamlit run observability/manual_import.py
 """
 
 import os
@@ -30,10 +30,10 @@ sys.dont_write_bytecode = True
 dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(dotenv_path)
 
-from logs_utils import setup_logging, write_log
-from database_management import TrackDB
-from m3u8_manager import update_track_in_m3u8
-from xml_exporter import export_itunes_xml, extract_file_metadata
+from scripts.logs_utils import setup_logging, write_log
+from scripts.database_management import TrackDB
+from scripts.m3u8_manager import update_track_in_m3u8
+from scripts.xml_exporter import export_itunes_xml, extract_file_metadata
 
 # Initialize logging
 setup_logging(log_name_prefix="manual_import")
