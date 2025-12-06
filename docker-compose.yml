@@ -16,25 +16,12 @@ services:
     user: 1000:1000
     image: slskd/slskd:latest
 
-  streamlit:
+  dashboard:
     build:
       context: .
-      dockerfile: infra/Dockerfile.streamlit
+      dockerfile: infra/Dockerfile.dashboard
     ports:
       - "8501:8501"
-    environment:
-      - APP_ENV=${APP_ENV}
-    volumes:
-      - ./observability:/app/observability:ro
-      - ./database:/app/database:ro
-    restart: unless-stopped
-
-  manual_import:
-    build:
-      context: .
-      dockerfile: infra/Dockerfile.manual_import
-    ports:
-      - "8502:8502"
     environment:
       - APP_ENV=${APP_ENV}
       - HOST_BASE_PATH=${HOST_BASE_PATH}

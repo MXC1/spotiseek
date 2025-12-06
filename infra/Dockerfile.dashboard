@@ -1,4 +1,4 @@
-# Dockerfile for Manual Import Streamlit App
+# Dockerfile for Combined Spotiseek Dashboard (Observability + Manual Import)
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -14,14 +14,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code (runtime data will be mounted as volumes)
 COPY scripts/ /app/scripts/
+COPY observability/ /app/observability/
 
 # Create directories for volume mounts
-RUN mkdir -p /app/database /app/slskd_docker_data /app/observability
+RUN mkdir -p /app/database /app/slskd_docker_data
 
 # Expose Streamlit port
-EXPOSE 8502
+EXPOSE 8501
 
 # Set PYTHONPATH so 'scripts' is importable as a package
 ENV PYTHONPATH="/app"
-# Run the manual import app
-CMD ["streamlit", "run", "observability/manual_import.py", "--server.port=8502", "--server.address=0.0.0.0"]
+ENV STREAMLIT_SERVER_PORT=8501
+ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
+
+# Run the combined dashboard
+CMD ["streamlit", "run", "observability/combined_dashboard.py", "--server.port=8501", "--server.address=0.0.0.0"]
