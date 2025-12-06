@@ -89,6 +89,7 @@ IS_DOCKER = os.path.exists("/.dockerenv")
 # Ensure directories exist
 os.makedirs(IMPORTED_DIR, exist_ok=True)
 os.makedirs(XML_DIR, exist_ok=True)
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 # Initialize database
 track_db = TrackDB(db_path=DB_PATH)
