@@ -25,5 +25,7 @@ RUN sed -i 's/\r$//' /app/infra/workflow.cron && \
 	sed -i 's/\r$//' /app/infra/entrypoint-workflow.sh && \
 	chmod +x /app/infra/entrypoint-workflow.sh
 
+# Set PYTHONPATH so 'scripts' is importable as a package
+ENV PYTHONPATH="/app"
 # Run entrypoint script
 CMD ["/app/infra/entrypoint-workflow.sh"]

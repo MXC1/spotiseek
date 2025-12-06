@@ -38,8 +38,8 @@ from mutagen import File as MutagenFile
 from mutagen.mp3 import MP3
 from mutagen.flac import FLAC
 
-from database_management import TrackDB
-from logs_utils import write_log
+from scripts.database_management import TrackDB
+from scripts.logs_utils import write_log
 
 
 def convert_to_windows_path(container_path: str) -> str:

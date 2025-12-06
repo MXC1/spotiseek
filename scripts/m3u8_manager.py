@@ -28,7 +28,7 @@ import os
 import glob
 from typing import List, Tuple
 
-from logs_utils import write_log
+from scripts.logs_utils import write_log
 
 
 def write_playlist_m3u8(m3u8_path: str, tracks: List[Tuple[str, str, str]]) -> None:

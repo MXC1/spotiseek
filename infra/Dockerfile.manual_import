@@ -21,5 +21,7 @@ RUN mkdir -p /app/database /app/slskd_docker_data /app/observability
 # Expose Streamlit port
 EXPOSE 8502
 
+# Set PYTHONPATH so 'scripts' is importable as a package
+ENV PYTHONPATH="/app"
 # Run the manual import app
-CMD ["streamlit", "run", "scripts/manual_import.py", "--server.port=8502", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "observability/manual_import.py", "--server.port=8502", "--server.address=0.0.0.0"]

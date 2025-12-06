@@ -25,7 +25,7 @@ import spotipy
 from dotenv import load_dotenv
 from spotipy.oauth2 import SpotifyClientCredentials
 
-from logs_utils import write_log
+from scripts.logs_utils import write_log
 
 load_dotenv()
 
