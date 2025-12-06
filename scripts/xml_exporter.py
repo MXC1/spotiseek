@@ -180,9 +180,13 @@ def extract_file_metadata(local_file_path: str) -> Dict[str, Any]:
                     metadata['genre'] = str(audio.tags['TCON'].text[0])
                 # Year
                 if 'TDRC' in audio.tags:
-                    metadata['year'] = int(str(audio.tags['TDRC'].text[0])[:4])
+                        year_str = str(audio.tags['TDRC'].text[0])[:4]
+                        if year_str and year_str.isdigit():
+                            metadata['year'] = int(year_str)
                 elif 'TYER' in audio.tags:
-                    metadata['year'] = int(str(audio.tags['TYER'].text[0]))
+                        year_str = str(audio.tags['TYER'].text[0])
+                        if year_str and year_str.isdigit():
+                            metadata['year'] = int(year_str)
         
         elif isinstance(audio, FLAC):
             # FLAC Vorbis comments
@@ -192,8 +196,10 @@ def extract_file_metadata(local_file_path: str) -> Dict[str, Any]:
                 if 'genre' in audio.tags:
                     metadata['genre'] = audio.tags['genre'][0]
                 if 'date' in audio.tags:
-                    date_str = audio.tags['date'][0]
-                    metadata['year'] = int(date_str[:4])
+                        date_str = audio.tags['date'][0]
+                        year_str = date_str[:4]
+                        if year_str and year_str.isdigit():
+                            metadata['year'] = int(year_str)
         
         else:
             # Generic tag handling for other formats
@@ -208,11 +214,12 @@ def extract_file_metadata(local_file_path: str) -> Dict[str, Any]:
                     if genre_key in audio.tags:
                         metadata['genre'] = str(audio.tags[genre_key][0]) if isinstance(audio.tags[genre_key], list) else str(audio.tags[genre_key])
                         break
-                
                 for year_key in ['date', 'DATE', 'year', 'YEAR']:
                     if year_key in audio.tags:
                         year_val = str(audio.tags[year_key][0]) if isinstance(audio.tags[year_key], list) else str(audio.tags[year_key])
-                        metadata['year'] = int(year_val[:4])
+                        year_str = year_val[:4]
+                        if year_str and year_str.isdigit():
+                            metadata['year'] = int(year_str)
                         break
         
         write_log.debug("METADATA_EXTRACTED", "Successfully extracted file metadata.", 
