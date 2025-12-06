@@ -95,9 +95,20 @@ track_db = TrackDB(db_path=DB_PATH)
 
 
 # ============================================================================
+# CACHING & PERFORMANCE CONFIGURATION
+# ============================================================================
+
+# Cache TTL values for different operation types
+CACHE_TTL_SHORT = 300   # 5 minutes for stats queries
+CACHE_TTL_LONG = 600    # 10 minutes for expensive log analysis
+CACHE_TTL_MEDIUM = 180  # 3 minutes for import data
+
+
+# ============================================================================
 # OVERALL STATS TAB FUNCTIONS
 # ============================================================================
 
+@st.cache_data(ttl=CACHE_TTL_SHORT)
 def get_extension_bitrate_breakdown(db_path):
     """
     Returns three DataFrames: extension breakdown, bitrate breakdown, and download status breakdown from the tracks table.
@@ -128,12 +139,19 @@ def get_extension_bitrate_breakdown(db_path):
         return None, None, None, str(e)
 
 
-def render_log_breakdown_section():
-    """Render the warning and error log breakdown section."""
-    log_files = get_log_files(LOGS_DIR)
+@st.cache_data(ttl=CACHE_TTL_SHORT)
+def _get_warning_error_logs(logs_dir: str) -> Tuple[pd.DataFrame, List[dict]]:
+    """Cached helper to load and parse warning/error logs."""
+    log_files = get_log_files(logs_dir)
     log_entries = parse_logs(log_files)
     warn_err_logs = filter_warning_error_logs(log_entries)
     df_logs = logs_to_dataframe(warn_err_logs)
+    return df_logs, warn_err_logs
+
+
+def render_log_breakdown_section():
+    """Render the warning and error log breakdown section."""
+    df_logs, warn_err_logs = _get_warning_error_logs(LOGS_DIR)
     
     st.subheader("WARNING and ERROR Log Summary")
     
@@ -314,12 +332,24 @@ def render_extension_bitrate_section():
 # EXECUTION INSPECTION TAB FUNCTIONS
 # ============================================================================
 
+@st.cache_data(ttl=CACHE_TTL_SHORT)
+def _get_cached_workflow_runs(logs_dir: str) -> List[dict]:
+    """Cached helper to load workflow runs."""
+    return get_workflow_runs(logs_dir)
+
+
+@st.cache_data(ttl=CACHE_TTL_LONG)
+def _analyze_workflow_run_cached(log_file: str) -> dict:
+    """Cached helper to analyze workflow run."""
+    return analyze_workflow_run(log_file)
+
+
 def render_workflow_runs_section():
     """Render workflow run selection and detailed inspection section."""
     st.subheader("Workflow Run Inspection")
     
-    # Get all workflow runs
-    runs = get_workflow_runs(LOGS_DIR)
+    # Get all workflow runs (cached)
+    runs = _get_cached_workflow_runs(LOGS_DIR)
     
     if not runs:
         st.info("No workflow runs found.")
@@ -340,9 +370,9 @@ def render_workflow_runs_section():
     
     selected_run = run_options[selected_display]
     
-    # Analyze the selected run
+    # Analyze the selected run (cached)
     with st.spinner("Analyzing workflow run..."):
-        analysis = analyze_workflow_run(selected_run['log_file'])
+        analysis = _analyze_workflow_run_cached(selected_run['log_file'])
     
     # Display run summary
     render_run_summary(selected_run, analysis)
@@ -437,25 +467,18 @@ def render_run_summary(run: dict, analysis: dict):
 # MANUAL IMPORT TAB FUNCTIONS
 # ============================================================================
 
-def get_non_completed_tracks_by_playlist() -> Dict[str, List[Tuple]]:
+@st.cache_data(ttl=CACHE_TTL_MEDIUM)
+def _get_non_completed_tracks_cached(db_path: str) -> Dict[str, List[dict]]:
     """
-    Retrieve all tracks missing a local_file_path, grouped by playlist.
+    Cached helper to retrieve all tracks missing a local_file_path, grouped by playlist.
     
     Returns:
-        Dictionary mapping playlist names to lists of track dicts:
-        {
-            "Playlist Name": [
-                {
-                    'spotify_id': ..., 'track_name': ..., 'artist': ..., 'status': ..., 'playlist_url': ...
-                },
-                ...
-            ],
-            ...
-        }
+        Dictionary mapping playlist names to lists of track dicts
     """
     write_log.info("IMPORT_UI_QUERY", "Querying tracks missing local_file_path grouped by playlist.")
     
-    cursor = track_db.conn.cursor()
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
     
     # Query tracks with their playlist associations, only those missing local_file_path
     query = """
@@ -493,7 +516,28 @@ def get_non_completed_tracks_by_playlist() -> Dict[str, List[Tuple]]:
     write_log.debug("IMPORT_UI_QUERY_RESULT", "Retrieved tracks missing local_file_path.", 
                    {"playlist_count": len(grouped_tracks)})
     
+    conn.close()
     return grouped_tracks
+
+
+def get_non_completed_tracks_by_playlist() -> Dict[str, List[Tuple]]:
+    """
+    Retrieve all tracks missing a local_file_path, grouped by playlist.
+    Uses cached version for better performance.
+    
+    Returns:
+        Dictionary mapping playlist names to lists of track dicts:
+        {
+            "Playlist Name": [
+                {
+                    'spotify_id': ..., 'track_name': ..., 'artist': ..., 'status': ..., 'playlist_url': ...
+                },
+                ...
+            ],
+            ...
+        }
+    """
+    return _get_non_completed_tracks_cached(DB_PATH)
 
 
 def extract_metadata_from_file(file_path: str) -> Dict[str, Optional[any]]:
@@ -618,9 +662,8 @@ def render_manual_import_section():
     st.subheader("Manual Import Tool")
     st.markdown(f"**Environment:** `{ENV}`")
     
-    # Fetch non-completed tracks
-    with st.spinner("Loading tracks..."):
-        grouped_tracks = get_non_completed_tracks_by_playlist()
+    # Fetch non-completed tracks (uses caching)
+    grouped_tracks = get_non_completed_tracks_by_playlist()
     
     if not grouped_tracks:
         st.success("✨ All tracks have been successfully downloaded!")
@@ -687,8 +730,8 @@ def render_manual_import_section():
                             if success:
                                 st.success(message)
                                 st.balloons()
-                                # Refresh the page after successful import
-                                st.rerun()
+                                # Clear cache so next load shows updated tracks
+                                st.cache_data.clear()
                             else:
                                 st.error(message)
     

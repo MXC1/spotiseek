@@ -73,7 +73,12 @@ class TrackDB:
         
         self._initialized = True
         write_log.info("DB_CONNECT", "Connecting to database.", {"db_path": db_path})
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        # Optimize SQLite connection for performance
+        self.conn = sqlite3.connect(db_path, check_same_thread=False, timeout=5.0)
+        # Enable write-ahead logging for better concurrency
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        # Optimize query performance
+        self.conn.execute("PRAGMA synchronous=NORMAL")
         self._create_tables()
 
     def clear_database(self) -> None:
@@ -205,6 +210,24 @@ class TrackDB:
                 added_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        # Create indexes for frequently queried columns (performance optimization)
+        # These help queries that filter on local_file_path, download_status, etc.
+        indexes = [
+            ("idx_tracks_local_file_path", "tracks", "local_file_path"),
+            ("idx_tracks_download_status", "tracks", "download_status"),
+            ("idx_tracks_spotify_id", "tracks", "spotify_id"),
+            ("idx_playlist_tracks_playlist_url", "playlist_tracks", "playlist_url"),
+            ("idx_playlist_tracks_spotify_id", "playlist_tracks", "spotify_id"),
+            ("idx_slskd_mapping_spotify_id", "slskd_mapping", "spotify_id"),
+        ]
+        
+        for index_name, table_name, column_name in indexes:
+            try:
+                cursor.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name}({column_name})")
+            except sqlite3.OperationalError:
+                # Index might already exist, which is fine
+                pass
 
         self.conn.commit()
 
