@@ -60,7 +60,7 @@ services:
     volumes:
       - ./database:/app/database:rw
       - ./playlists:/app/playlists:rw
-      - ./slskd_docker_data/${APP_ENV}/downloads:/app/slskd_docker_data/${APP_ENV}/downloads:rw
+      - ./slskd_docker_data/${APP_ENV}:/app/slskd_docker_data/${APP_ENV}:rw
       - ./observability:/app/observability:rw
       - ./scripts:/app/scripts:ro
     depends_on:

@@ -68,6 +68,17 @@ def start_workflow(c, attach=False):
     c.run(f"docker-compose exec {flag}workflow python scripts/workflow.py")
 
 @task
+def exec(c, service, command):
+    """
+    Execute a command inside a running Docker container.
+    Usage: invoke exec --service <service_name> --command '<command>'
+    """
+    if not service or not command:
+        print("You must specify both --service and --command.")
+        return
+    subprocess.run(["docker-compose", "exec", service] + command.split(), check=True)
+
+@task
 def build(c):
     """Build all Docker images"""
     subprocess.run(["docker-compose", "build"], check=True)
