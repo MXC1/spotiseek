@@ -112,14 +112,17 @@ CACHE_TTL_MEDIUM = 180  # 3 minutes for import data
 def get_extension_bitrate_breakdown(db_path):
     """
     Returns three DataFrames: extension breakdown, bitrate breakdown, and download status breakdown from the tracks table.
+    Extension and bitrate breakdowns only include tracks with local_file_path.
     Handles both NULL and empty string as 'Not Downloaded'.
     """
     try:
         conn = sqlite3.connect(db_path)
+        # Extension breakdown - only tracks with local_file_path
         ext_df = pd.read_sql_query(
-            "SELECT extension, COUNT(*) as count FROM tracks GROUP BY extension ORDER BY count DESC", conn)
+            "SELECT extension, COUNT(*) as count FROM tracks WHERE local_file_path IS NOT NULL AND TRIM(local_file_path) != '' GROUP BY extension ORDER BY count DESC", conn)
+        # Bitrate breakdown - only tracks with local_file_path
         br_df = pd.read_sql_query(
-            "SELECT bitrate, COUNT(*) as count FROM tracks GROUP BY bitrate ORDER BY count DESC", conn)
+            "SELECT bitrate, COUNT(*) as count FROM tracks WHERE local_file_path IS NOT NULL AND TRIM(local_file_path) != '' GROUP BY bitrate ORDER BY count DESC", conn)
         # Downloaded/not downloaded breakdown (treat NULL and empty string as Not Downloaded)
         dl_df = pd.read_sql_query(
             """
@@ -130,7 +133,11 @@ def get_extension_bitrate_breakdown(db_path):
                 END AS download_status,
                 COUNT(*) as count
             FROM tracks
-            GROUP BY download_status
+            GROUP BY 
+                CASE 
+                    WHEN local_file_path IS NOT NULL AND TRIM(local_file_path) != '' THEN 'Downloaded'
+                    ELSE 'Not Downloaded'
+                END
             ORDER BY count DESC
             """, conn)
         conn.close()
@@ -294,7 +301,7 @@ def render_status_table(status_df: pd.DataFrame):
     total = status_df['count'].sum()
     total_row = pd.DataFrame({'download_status': ['Total'], 'count': [total]})
     status_df_with_total = pd.concat([status_df, total_row], ignore_index=True)
-    st.dataframe(status_df_with_total)
+    st.dataframe(status_df_with_total, hide_index=True)
 
 
 def render_extension_bitrate_section():
