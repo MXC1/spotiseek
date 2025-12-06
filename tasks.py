@@ -23,7 +23,6 @@ def nuke(c):
     subprocess.run(["docker", "system", "prune", "-a", "--volumes", "-f"], check=True)
     app_env = get_app_env()
     if app_env:
-        import shutil
         targets = [
             Path('slskd_docker_data') / app_env,
             Path('observability') / 'logs' / app_env,
