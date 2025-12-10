@@ -255,7 +255,7 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
     except Exception as e:
         write_log.error("PLAYLIST_DB_FAIL", "Failed to add playlist to database.",
                        {"playlist_url": playlist_url, "error": str(e)})
-        return None
+        return []
 
     # Create M3U8 file with track metadata as comments (only if it doesn't exist)
     if not os.path.exists(m3u8_path):

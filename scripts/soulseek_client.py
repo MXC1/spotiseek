@@ -639,8 +639,8 @@ def enqueue_download(search_id: str, file: dict[str, Any], username: str, spotif
             track_db.update_track_status(spotify_id, "failed")
             raise
 
-    # This should not be reached due to raise in the loop
-    raise RuntimeError("Unexpected: No search results processed")
+    # This should not be reached due to exceptions in the loop
+    raise RuntimeError("Unexpected: Download enqueue failed without raising exception")
 
 
 # Main Download Functions
