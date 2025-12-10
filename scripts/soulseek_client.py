@@ -302,12 +302,7 @@ def meets_bitrate_requirements(file: dict[str, Any]) -> bool:
         # If bitrate is unknown, reject the file
         return False
 
-    meets_requirement = bitrate >= minimum_bitrate
-
-    if not meets_requirement:
-        file.get('filename', '')
-
-    return meets_requirement
+    return bitrate >= minimum_bitrate
 
 
 def is_original_version(filename: str, allow_alternatives: bool) -> bool:
@@ -569,7 +564,6 @@ def enqueue_download(search_id: str, file: dict[str, Any], username: str, spotif
     write_log.info("SLSKD_DOWNLOAD_ENQUEUE", "Enqueuing download.",
                   {"filename": filename, "username": username, "extension": extension, "bitrate": bitrate})
 
-    last_error = None
     for attempt in range(max_retries):
         try:
             url = f"{SLSKD_URL}/transfers/downloads/{username}"
@@ -608,7 +602,6 @@ def enqueue_download(search_id: str, file: dict[str, Any], username: str, spotif
             return download_response
 
         except (requests.Timeout, requests.exceptions.ConnectionError) as e:
-            last_error = e
             if attempt < max_retries - 1:
                 wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
                 write_log.info("SLSKD_ENQUEUE_RETRY", "Download enqueue failed, retrying.",
@@ -623,7 +616,6 @@ def enqueue_download(search_id: str, file: dict[str, Any], username: str, spotif
 
         except requests.HTTPError as e:
             # Retry on 500 errors, but not on 4xx errors
-            last_error = e
             if e.response.status_code >= 500 and attempt < max_retries - 1:
                 wait_time = 2 ** attempt  # Exponential backoff
                 write_log.info("SLSKD_ENQUEUE_RETRY", "Download enqueue failed with server error, retrying.",
@@ -637,7 +629,6 @@ def enqueue_download(search_id: str, file: dict[str, Any], username: str, spotif
                 raise
 
         except requests.RequestException as e:
-            last_error = e
             write_log.warn("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download.",
                            {"error": str(e), "filename": filename})
             track_db.update_track_status(spotify_id, "failed")
@@ -648,10 +639,8 @@ def enqueue_download(search_id: str, file: dict[str, Any], username: str, spotif
             track_db.update_track_status(spotify_id, "failed")
             raise
 
-    # This should not be reached due to raise in the loop, but just in case
-    if last_error:
-        raise last_error
-    return None
+    # This should not be reached due to raise in the loop
+    raise RuntimeError("Unexpected: No search results processed")
 
 
 # Main Download Functions

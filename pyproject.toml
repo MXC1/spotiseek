@@ -43,6 +43,7 @@ lint.ignore = [
     "PLR2004", # magic value comparison
     "PTH123",  # pathlib open - many existing uses of open()
     "SIM108",  # use ternary operator - can reduce readability
+    "UP024",   # EnvironmentError is more semantic than OSError for env var issues
 ]
 
 # Maximum line length

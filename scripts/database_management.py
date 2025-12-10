@@ -67,7 +67,7 @@ class TrackDB:
 
         # Validate environment configuration when TrackDB is instantiated
         if not ENV:
-            raise OSError(
+            raise EnvironmentError(
                 "APP_ENV environment variable is not set. Database interaction is disabled."
             )
 

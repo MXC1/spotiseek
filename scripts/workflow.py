@@ -63,7 +63,7 @@ write_log.debug("ENV_LOAD", "Environment variables loaded.", {"dotenv_path": dot
 # Validate environment configuration
 ENV = os.getenv("APP_ENV")
 if not ENV:
-    raise OSError(
+    raise EnvironmentError(
         "APP_ENV environment variable is not set. Workflow execution is disabled. "
         "Set APP_ENV to 'test', 'stage', or 'prod'."
     )
@@ -239,7 +239,7 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
     except Exception as e:
         write_log.error("SPOTIFY_FETCH_FAIL", "Failed to get tracks for playlist.",
                        {"playlist_url": playlist_url, "error": str(e)})
-        return None
+        return []
 
     # Generate M3U8 file path with sanitized playlist name
     safe_name = sanitize_playlist_name(playlist_name)
@@ -576,7 +576,6 @@ def _remux_flac_to_mp3(local_file_path: str, spotify_id: str, file: dict) -> str
             "-codec:a", "libmp3lame", "-b:a", "320k", ffmpeg_output
         ]
         # Compose ffmpeg log file path in the same logs dir as workflow logs
-        os.getenv('APP_ENV', 'default')
         base_dir = os.path.dirname(os.path.dirname(__file__))
         logs_dir = os.path.join(base_dir, 'observability', "logs", ENV)
         now = datetime.now()
