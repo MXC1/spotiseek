@@ -1,0 +1,37 @@
+[flake8]
+# Maximum line length
+max-line-length = 120
+
+# Maximum cyclomatic complexity
+max-complexity = 15
+
+# Exclude paths
+exclude =
+    .git,
+    __pycache__,
+    .venv,
+    venv,
+    env,
+    .pytest_cache,
+    *.pyc,
+    slskd_docker_data,
+    database,
+    input_playlists,
+    observability/logs
+
+# Error codes to ignore
+ignore = 
+    E203,  # whitespace before ':'
+    E501,  # line too long
+    W503,  # line break before binary operator
+    W504,  # line break after binary operator
+
+# Show source code for errors
+show-source = True
+
+# Count errors
+count = True
+
+# Plugins
+enable-extensions = 
+    B,     # flake8-bugbear

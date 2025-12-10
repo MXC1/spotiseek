@@ -1,0 +1,82 @@
+[tool.ruff]
+# Target Python 3.9+ for modern syntax support
+target-version = "py39"
+
+# Exclude common directories
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "*.pyc",
+    ".pytest_cache",
+    "venv",
+    "env",
+    "slskd_docker_data",
+    "database",
+    "input_playlists",
+    "observability/logs",
+]
+
+# Enable specific rule sets
+lint.select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort (import sorting)
+    "N",    # pep8-naming
+    "UP",   # pyupgrade (modernize code)
+    "B",    # flake8-bugbear (find likely bugs)
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "PIE",  # flake8-pie
+    "RET",  # flake8-return
+    "RSE",  # flake8-raise
+    "PTH",  # flake8-use-pathlib
+    "PL",   # pylint rules
+    "C90",  # mccabe (complexity)
+]
+
+# Ignore specific rules that may be too strict for this codebase
+lint.ignore = [
+    "E501",    # line too long (let formatter handle this)
+    "PLR0913", # too many arguments
+    "PLR2004", # magic value comparison
+    "PTH123",  # pathlib open - many existing uses of open()
+    "SIM108",  # use ternary operator - can reduce readability
+]
+
+# Maximum line length
+line-length = 120
+
+# Allow autofix for all enabled rules
+lint.fixable = ["ALL"]
+lint.unfixable = []
+
+# Maximum complexity for functions
+lint.mccabe.max-complexity = 15
+
+[tool.ruff.lint.per-file-ignores]
+# Tests can have more complex assertions
+"**/test_*.py" = ["PLR2004"]
+
+[tool.pylint.messages_control]
+# Disable some overly strict checks
+disable = [
+    "C0103",  # invalid-name
+    "C0114",  # missing-module-docstring (we have docstrings, but not enforcing)
+    "C0115",  # missing-class-docstring
+    "C0116",  # missing-function-docstring
+    "R0913",  # too-many-arguments
+    "R0914",  # too-many-locals
+    "R0912",  # too-many-branches
+    "R0915",  # too-many-statements
+    "W0212",  # protected-access
+    "W0621",  # redefined-outer-name
+]
+
+[tool.pylint.format]
+max-line-length = 120
+
+[tool.pylint.design]
+# Complexity thresholds
+max-complexity = 15

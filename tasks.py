@@ -119,9 +119,41 @@ def test(c):
     c.run(".\\.venv\\Scripts\\python.exe -m pytest")
 
 @task
-def lint(c):
-    """Run flake8 linter on scripts/"""
-    c.run(".\\.venv\\Scripts\\flake8 scripts/")
+def lint(c, tool="all"):
+    """
+    Run linters on the codebase. 
+    Usage: invoke lint [--tool=all|ruff|flake8|pylint]
+    Default runs all linters.
+    """
+    targets = "scripts/ tasks.py observability/"
+    
+    if tool in ["all", "ruff"]:
+        print("Running ruff linter...")
+        c.run(f".\\.venv\\Scripts\\ruff check {targets}")
+    
+    if tool in ["all", "flake8"]:
+        print("Running flake8 linter...")
+        c.run(f".\\.venv\\Scripts\\flake8 {targets}")
+    
+    if tool in ["all", "pylint"]:
+        print("Running pylint...")
+        c.run(f".\\.venv\\Scripts\\pylint {targets}")
+
+@task
+def lint_fix(c):
+    """Run ruff linter with auto-fix enabled"""
+    targets = "scripts/ tasks.py observability/"
+    print("Running ruff with auto-fix...")
+    c.run(f".\\.venv\\Scripts\\ruff check --fix {targets}")
+
+@task
+def complexity(c):
+    """Analyze code complexity with radon"""
+    targets = "scripts/ tasks.py observability/"
+    print("Analyzing cyclomatic complexity...")
+    c.run(f".\\.venv\\Scripts\\radon cc {targets} -a -nb")
+    print("\nAnalyzing maintainability index...")
+    c.run(f".\\.venv\\Scripts\\radon mi {targets} -nb")
 
 @task
 def setenv(c, env):
