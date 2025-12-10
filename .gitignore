@@ -27,6 +27,11 @@ coverage/
 .coverage
 htmlcov/
 
+# Linting and static analysis
+.ruff_cache/
+.mypy_cache/
+.pylint.d/
+
 # Logs
 *.log
 
