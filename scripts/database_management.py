@@ -8,7 +8,10 @@ that tracks Spotify playlists, tracks, download statuses, and mappings to Soulse
 import os
 import sqlite3
 import threading
-from typing import Optional, List, Tuple
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 # Handle both relative and absolute imports for flexibility
 try:
@@ -27,17 +30,17 @@ DB_PATH = os.path.join(DB_DIR, f"database_{ENV}.db") if ENV else None
 class TrackDB:
     """
     Thread-safe singleton database manager for track and playlist management.
-    
+
     This class implements the Singleton pattern to ensure only one database connection
     exists throughout the application lifecycle. It manages:
     - Track metadata and download status
     - Playlist information and track associations
     - Mappings between Spotify IDs and Soulseek download UUIDs
-    
+
     Attributes:
         conn: SQLite database connection
     """
-    
+
     _instance = None
     _lock = threading.Lock()
 
@@ -45,32 +48,32 @@ class TrackDB:
         """Ensure only one instance of TrackDB exists (thread-safe)."""
         with cls._lock:
             if cls._instance is None:
-                cls._instance = super(TrackDB, cls).__new__(cls)
+                cls._instance = super().__new__(cls)
                 cls._instance._initialized = False
         return cls._instance
 
     def __init__(self, db_path: str = DB_PATH):
         """
         Initialize the database connection and create tables if needed.
-        
+
         Args:
             db_path: Path to the SQLite database file. Defaults to environment-specific path.
-        
+
         Note:
             Due to singleton pattern, initialization only happens once per application run.
         """
         if self._initialized:
             return
-        
+
         # Validate environment configuration when TrackDB is instantiated
         if not ENV:
-            raise EnvironmentError(
+            raise OSError(
                 "APP_ENV environment variable is not set. Database interaction is disabled."
             )
-        
+
         # Ensure database directory exists
         os.makedirs(DB_DIR, exist_ok=True)
-        
+
         self._initialized = True
         write_log.info("DB_CONNECT", "Connecting to database.", {"db_path": db_path})
         # Optimize SQLite connection for performance
@@ -84,13 +87,13 @@ class TrackDB:
     def clear_database(self) -> None:
         """
         Delete the database file and reinitialize with empty tables.
-        
+
         This method includes safeguards for production environments, requiring
         explicit user confirmation before proceeding with deletion.
-        
+
         Raises:
             RuntimeError: If running in production and no input is available for confirmation.
-        
+
         Warning:
             This operation is destructive and cannot be undone. All track, playlist,
             and download mapping data will be permanently lost.
@@ -108,7 +111,7 @@ class TrackDB:
                 raise RuntimeError(
                     "No input available for confirmation prompt. Aborting clear_database()."
                 )
-            
+
             if confirm.strip().lower() != "yes":
                 write_log.info("DB_CLEAR_ABORTED", "clear_database() aborted by user.", {"ENV": ENV})
                 return
@@ -117,14 +120,14 @@ class TrackDB:
         db_path = getattr(self.conn, "database", DB_PATH)
         write_log.info("DB_DELETE_ATTEMPT", "Attempting to delete database file.", {"db_path": db_path})
         self.close()
-        
+
         # Delete database file if it exists
         if os.path.exists(db_path):
             os.remove(db_path)
             write_log.info("DB_DELETED", "Database file deleted.", {"db_path": db_path})
         else:
             write_log.warn("DB_DELETE_MISSING", "Database file does not exist.", {"db_path": db_path})
-        
+
         # Reconnect and recreate tables
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self._create_tables()
@@ -132,7 +135,7 @@ class TrackDB:
     def _create_tables(self) -> None:
         """
         Create database schema if it doesn't already exist.
-        
+
         Schema includes:
         - tracks: Spotify track metadata and download status
         - playlists: Playlist names and IDs
@@ -156,7 +159,7 @@ class TrackDB:
                 added_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         # Add extension and bitrate columns if they do not exist (migration for existing DBs)
         cursor.execute("PRAGMA table_info(tracks)")
         columns = [row[1] for row in cursor.fetchall()]
@@ -195,7 +198,7 @@ class TrackDB:
                 FOREIGN KEY (spotify_id) REFERENCES tracks(spotify_id)
             )
         """)
-        
+
         # Add username column if it does not exist (migration for existing DBs)
         cursor.execute("PRAGMA table_info(slskd_mapping)")
         mapping_columns = [row[1] for row in cursor.fetchall()]
@@ -221,7 +224,7 @@ class TrackDB:
             ("idx_playlist_tracks_spotify_id", "playlist_tracks", "spotify_id"),
             ("idx_slskd_mapping_spotify_id", "slskd_mapping", "spotify_id"),
         ]
-        
+
         for index_name, table_name, column_name in indexes:
             try:
                 cursor.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name}({column_name})")
@@ -286,11 +289,11 @@ class TrackDB:
             already exists, this operation has no effect.
         """
         cursor = self.conn.cursor()
-        
+
         # Check if track already exists
         cursor.execute("SELECT 1 FROM tracks WHERE spotify_id = ?", (spotify_id,))
         already_exists = cursor.fetchone() is not None
-        
+
         if not already_exists:
             write_log.debug(
                 "TRACK_ADD", "Adding track.", {
@@ -302,10 +305,10 @@ class TrackDB:
                     "bitrate": bitrate
                 }
             )
-        
+
         cursor.execute(
             """
-            INSERT OR IGNORE INTO tracks 
+            INSERT OR IGNORE INTO tracks
             (spotify_id, track_name, artist, download_status, slskd_file_name, extension, bitrate)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
@@ -316,12 +319,12 @@ class TrackDB:
     def add_playlist(self, playlist_url: str, m3u8_path: str = None, playlist_name: str = None) -> int:
         """
         Add a new playlist to the database if it doesn't already exist.
-        
+
         Args:
             playlist_url: Name of the playlist
             m3u8_path: Path to the m3u8 file for this playlist
             playlist_name: Name of the playlist from Spotify
-        
+
         Returns:
             The database ID of the playlist (existing or newly created)
         """
@@ -384,11 +387,11 @@ class TrackDB:
     def link_track_to_playlist(self, spotify_id: str, playlist_url: str) -> None:
         """
         Create an association between a track and a playlist.
-        
+
         Args:
             spotify_id: Spotify track identifier
             playlist_url: Database playlist URL
-        
+
         Note:
             Uses INSERT OR IGNORE to prevent duplicate associations.
             A track can be linked to multiple playlists.
@@ -408,7 +411,7 @@ class TrackDB:
     ) -> None:
         """
         Update the download status for a track.
-        
+
         Args:
             spotify_id: Spotify track identifier
             status: New download status (e.g., "pending", "downloading", "completed", "failed")
@@ -434,7 +437,7 @@ class TrackDB:
         """
         Update the Soulseek file name for a track.
         Only store the last subdirectory and filename (e.g., 'folder/filename.ext' or 'folder\\filename.ext').
-        
+
         Args:
             spotify_id: Spotify track identifier
             slskd_file_name: Soulseek filename to update (may be a full or partial path)
@@ -461,7 +464,7 @@ class TrackDB:
             (trimmed, spotify_id)
         )
         self.conn.commit()
-        
+
     def update_extension_bitrate(self, spotify_id: str, extension: str = None, bitrate: int = None) -> None:
         """
         Update the extension and bitrate for a track.
@@ -478,13 +481,13 @@ class TrackDB:
         )
         self.conn.commit()
 
-    def get_tracks_by_status(self, status: str) -> List[Tuple]:
+    def get_tracks_by_status(self, status: str) -> list[tuple]:
         """
         Retrieve all tracks with a specific download status.
-        
+
         Args:
             status: Download status to filter by
-        
+
         Returns:
             List of tuples containing all track fields for matching tracks
         """
@@ -499,12 +502,12 @@ class TrackDB:
     def add_slskd_mapping(self, slskd_uuid: str, spotify_id: str, username: str = None) -> None:
         """
         Create a mapping between a Soulseek download UUID and a Spotify track ID.
-        
+
         Args:
             slskd_uuid: Unique identifier from Soulseek download system
             spotify_id: Spotify track identifier
             username: Soulseek username the download is from
-        
+
         Note:
             Uses INSERT OR IGNORE to prevent duplicate mappings.
         """
@@ -519,10 +522,10 @@ class TrackDB:
     def get_username_by_slskd_uuid(self, slskd_uuid: str) -> Optional[str]:
         """
         Retrieve the Soulseek username associated with a download UUID.
-        
+
         Args:
             slskd_uuid: Soulseek download UUID
-        
+
         Returns:
             Username if found, None otherwise
         """
@@ -537,7 +540,7 @@ class TrackDB:
     def delete_slskd_mapping(self, slskd_uuid: str) -> None:
         """
         Delete a mapping between a Soulseek download UUID and a Spotify track ID.
-        
+
         Args:
             slskd_uuid: Soulseek download UUID to remove
         """
@@ -552,10 +555,10 @@ class TrackDB:
     def get_spotify_id_by_slskd_uuid(self, slskd_uuid: str) -> Optional[str]:
         """
         Retrieve the Spotify ID associated with a Soulseek download UUID.
-        
+
         Args:
             slskd_uuid: Soulseek download UUID
-        
+
         Returns:
             Spotify track ID if found, None otherwise
         """
@@ -571,10 +574,10 @@ class TrackDB:
     def get_sldkd_uuid_by_spotify_id(self, spotify_id: str) -> Optional[str]:
         """
         Retrieve the Soulseek download UUID associated with a Spotify track ID.
-        
+
         Args:
             spotify_id: Spotify track identifier
-        
+
         Returns:
             Soulseek download UUID if found, None otherwise
         """
@@ -589,10 +592,10 @@ class TrackDB:
     def get_track_status(self, spotify_id: str) -> Optional[str]:
         """
         Retrieve the download status of a track.
-        
+
         Args:
             spotify_id: Spotify track identifier
-        
+
         Returns:
             Download status string if track exists, None otherwise
         """
@@ -606,14 +609,14 @@ class TrackDB:
         status = result[0] if result else None
         write_log.debug("TRACK_STATUS_RESULT", "Track status result.", {"spotify_id": spotify_id, "status": status})
         return status
-    
+
     def get_track_extension(self, spotify_id: str) -> Optional[str]:
         """
         Retrieve the file extension of a track.
-        
+
         Args:
             spotify_id: Spotify track identifier
-        
+
         Returns:
             File extension string if track exists, None otherwise
         """
@@ -627,14 +630,14 @@ class TrackDB:
         extension = result[0] if result else None
         write_log.debug("TRACK_EXTENSION_RESULT", "Track extension result.", {"spotify_id": spotify_id, "extension": extension})
         return extension
-    
+
     def get_local_file_path(self, spotify_id: str) -> Optional[str]:
         """
         Retrieve the local file path of a track.
-        
+
         Args:
             spotify_id: Spotify track identifier
-        
+
         Returns:
             Local file path string if track exists and has one, None otherwise
         """
@@ -648,11 +651,11 @@ class TrackDB:
         local_path = result[0] if result else None
         write_log.debug("TRACK_LOCAL_PATH_RESULT", "Track local_file_path result.", {"spotify_id": spotify_id, "local_file_path": local_path})
         return local_path
-    
+
     def update_local_file_path(self, spotify_id: str, local_file_path: str) -> None:
         """
         Update the local filesystem path for a downloaded track.
-        
+
         Args:
             spotify_id: Spotify track identifier
             local_file_path: Absolute path to the downloaded file
@@ -688,8 +691,10 @@ class TrackDB:
         self.conn.close()
 
 # --- Dashboard Helper Functions ---
-from typing import Optional, Tuple
-def get_playlists(db_path: str) -> Tuple[Optional['pd.DataFrame'], Optional[str]]:
+from typing import Optional
+
+
+def get_playlists(db_path: str) -> tuple[Optional['pd.DataFrame'], Optional[str]]:
     """
     Retrieve all playlists from the database.
     Args:
@@ -707,7 +712,7 @@ def get_playlists(db_path: str) -> Tuple[Optional['pd.DataFrame'], Optional[str]
     except Exception as e:
         return None, str(e)
 
-def get_track_status_breakdown(db_path: str) -> Tuple[Optional['pd.DataFrame'], Optional[str]]:
+def get_track_status_breakdown(db_path: str) -> tuple[Optional['pd.DataFrame'], Optional[str]]:
     """
     Retrieve track download status breakdown from the database.
     Args:
