@@ -68,13 +68,18 @@ class TrackDB:
                 "APP_ENV environment variable is not set. Database interaction is disabled."
             )
         
-        # Ensure database directory exists
-        os.makedirs(DB_DIR, exist_ok=True)
+        # Normalize the db_path to resolve any .. references
+        db_path = os.path.abspath(db_path)
+        
+        # Ensure database directory exists (use path from actual db_path parameter)
+        db_dir = os.path.dirname(db_path)
+        write_log.info("DB_MKDIR", "Creating database directory.", {"db_dir": db_dir})
+        os.makedirs(db_dir, exist_ok=True)
         
         self._initialized = True
         write_log.info("DB_CONNECT", "Connecting to database.", {"db_path": db_path})
         # Optimize SQLite connection for performance
-        self.conn = sqlite3.connect(db_path, check_same_thread=False, timeout=5.0)
+        self.conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
         # Enable write-ahead logging for better concurrency
         self.conn.execute("PRAGMA journal_mode=WAL")
         # Optimize query performance
