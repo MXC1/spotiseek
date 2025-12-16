@@ -10,6 +10,7 @@ Key Features:
 - Human-readable console output
 - Log aggregation and analysis utilities
 - Thread-safe singleton initialization
+- Daily log rotation for long-running processes
 
 Public API:
 - setup_logging(): Configure logging system (idempotent)
@@ -22,6 +23,7 @@ Public API:
 """
 
 import logging
+import logging.handlers
 import os
 import json
 import glob
@@ -255,11 +257,73 @@ def prepare_log_summary(df_logs, warn_err_logs):
     return summary[ordered_cols + extra_cols]
 
 
+def get_task_scheduler_logs(logs_dir: str) -> List[dict]:
+    """
+    Extract task scheduler log files from directory.
+    
+    Handles both the current log file (task_scheduler.log) and rotated logs
+    (task_scheduler.log.YYYY-MM-DD).
+    
+    Args:
+        logs_dir: Root directory path containing log files
+        
+    Returns:
+        List of dictionaries with log file metadata:
+            - log_id: Unique identifier for the log
+            - date: Date of the log (today for current, date suffix for rotated)
+            - log_file: Full path to log file
+            - display_name: Human-readable name for UI
+            - is_current: Whether this is the current (non-rotated) log
+    """
+    import pandas as pd
+    
+    logs = []
+    
+    # Look for task_scheduler.log and task_scheduler.log.YYYY-MM-DD files
+    log_pattern = os.path.join(logs_dir, "task_scheduler.log*")
+    log_files = glob.glob(log_pattern)
+    
+    for log_path in log_files:
+        filename = os.path.basename(log_path)
+        
+        if filename == "task_scheduler.log":
+            # Current log file
+            logs.append({
+                'log_id': 'task_scheduler_current',
+                'date': pd.Timestamp.now(),
+                'log_file': log_path,
+                'display_name': 'Current (Today)',
+                'is_current': True
+            })
+        elif filename.startswith("task_scheduler.log."):
+            # Rotated log file (task_scheduler.log.YYYY-MM-DD)
+            date_suffix = filename.replace("task_scheduler.log.", "")
+            try:
+                log_date = pd.to_datetime(date_suffix, format='%Y-%m-%d')
+                display_name = log_date.strftime('%a %d %B %Y')
+                logs.append({
+                    'log_id': f'task_scheduler_{date_suffix}',
+                    'date': log_date,
+                    'log_file': log_path,
+                    'display_name': display_name,
+                    'is_current': False
+                })
+            except ValueError:
+                # Skip files with unexpected naming format
+                continue
+    
+    # Sort by date descending (newest first), with current log always first
+    logs.sort(key=lambda x: (not x['is_current'], -x['date'].timestamp() if x['date'] else 0))
+    
+    return logs
+
+
 def get_workflow_runs(logs_dir: str) -> List[dict]:
     """
-    Extract unique workflow runs from log files in directory.
+    Extract unique workflow and task scheduler runs from log files in directory.
     
-    Only includes files starting with 'workflow_' prefix.
+    Includes both workflow_* files and task_scheduler log files (current and rotated).
+    
     
     Args:
         logs_dir: Root directory path containing log files
@@ -288,6 +352,33 @@ def get_workflow_runs(logs_dir: str) -> List[dict]:
         filename = os.path.basename(log_path)
         run_id = os.path.splitext(filename)[0]
         
+        # Handle task_scheduler.log files (current and rotated)
+        if filename == 'task_scheduler.log':
+            # Current task scheduler log
+            runs.append({
+                'run_id': 'task_scheduler_current',
+                'timestamp': pd.Timestamp.now(),
+                'log_file': log_path,
+                'display_name': 'Task Scheduler (Current)'
+            })
+            continue
+        elif filename.startswith('task_scheduler.log.'):
+            # Rotated task scheduler log (task_scheduler.log.YYYY-MM-DD)
+            date_suffix = filename.replace('task_scheduler.log.', '')
+            try:
+                log_date = pd.to_datetime(date_suffix, format='%Y-%m-%d')
+                display_name = f"Task Scheduler - {log_date.strftime('%a %d %B %Y')}"
+                runs.append({
+                    'run_id': f'task_scheduler_{date_suffix}',
+                    'timestamp': log_date,
+                    'log_file': log_path,
+                    'display_name': display_name
+                })
+                continue
+            except ValueError:
+                # Skip files with unexpected naming format
+                continue
+        
         # Only include workflow runs (skip ffmpeg, etc.)
         if not run_id.startswith('workflow_'):
             continue
@@ -302,7 +393,7 @@ def get_workflow_runs(logs_dir: str) -> List[dict]:
                 timestamp_str = f"{date_str}_{time_str}"
                 timestamp = pd.to_datetime(timestamp_str, format='%Y%m%d_%H%M%S')
                 
-                display_name = timestamp.strftime('%a %d %B %Y %H:%M:%S')
+                display_name = f"Workflow - {timestamp.strftime('%a %d %B %Y %H:%M:%S')}"
                 
                 runs.append({
                     'run_id': run_id,
@@ -456,7 +547,8 @@ def analyze_workflow_run(log_file: str) -> dict:
 def setup_logging(
     logs_dir: Optional[str] = None,
     log_level: int = logging.INFO,
-    log_name_prefix: str = "run"
+    log_name_prefix: str = "run",
+    rotate_daily: bool = False
 ) -> None:
     """
     Configure logging system with console and file output.
@@ -473,16 +565,27 @@ def setup_logging(
                         DD/
                             {prefix}_YYYYMMdd_HHMMSS_ffffff.log
     
+    For daemon processes with rotate_daily=True:
+        logs/
+            {ENV}/
+                {prefix}.log  (current log)
+                {prefix}.log.YYYY-MM-DD  (rotated logs)
+    
     Args:
         logs_dir: Base directory for log files. If None, uses
                  'observability/logs/{ENV}/' where ENV comes from APP_ENV.
         log_level: Minimum severity for console output. File output captures all levels.
         log_name_prefix: Prefix for log filename (e.g., "workflow", "run").
+        rotate_daily: If True, use daily log rotation for long-running daemon processes.
+                     Logs rotate at midnight and are named with date suffix.
     
     Example:
         >>> os.environ['APP_ENV'] = 'test'
         >>> setup_logging(log_name_prefix="workflow", log_level=logging.DEBUG)
         # Creates: observability/test_logs/2025/11/27/workflow_20251127_143025_123456.log
+        
+        >>> setup_logging(log_name_prefix="task_scheduler", rotate_daily=True)
+        # Creates: observability/logs/test/task_scheduler.log (rotates daily)
         
     Note:
         Must be called before any logging operations. Subsequent calls are no-ops.
@@ -498,20 +601,26 @@ def setup_logging(
         base_dir = os.path.join(os.path.dirname(__file__), '..', 'observability')
         logs_dir = os.path.join(base_dir, "logs", ENV)
 
-    # Create dated directory structure
-    now = datetime.now()
-    dated_logs_dir = os.path.join(
-        logs_dir,
-        now.strftime("%Y"),
-        now.strftime("%m"),
-        now.strftime("%d")
-    )
-    os.makedirs(dated_logs_dir, exist_ok=True)
-    
-    # Generate unique log filename with microsecond precision
-    timestamp = now.strftime("%Y%m%d_%H%M%S_%f")
-    log_filename = f"{log_name_prefix}_{timestamp}.log"
-    log_path = os.path.join(dated_logs_dir, log_filename)
+    if rotate_daily:
+        # For daemon processes: single log file with daily rotation
+        os.makedirs(logs_dir, exist_ok=True)
+        log_filename = f"{log_name_prefix}.log"
+        log_path = os.path.join(logs_dir, log_filename)
+    else:
+        # For short-lived processes: dated directory structure with unique files
+        now = datetime.now()
+        dated_logs_dir = os.path.join(
+            logs_dir,
+            now.strftime("%Y"),
+            now.strftime("%m"),
+            now.strftime("%d")
+        )
+        os.makedirs(dated_logs_dir, exist_ok=True)
+        
+        # Generate unique log filename with microsecond precision
+        timestamp = now.strftime("%Y%m%d_%H%M%S_%f")
+        log_filename = f"{log_name_prefix}_{timestamp}.log"
+        log_path = os.path.join(dated_logs_dir, log_filename)
     
     # Configure root logger
     logger = logging.getLogger()
@@ -545,12 +654,26 @@ def setup_logging(
     logger.addHandler(console_handler)
 
     # File handler with JSON formatting for structured parsing
-    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    if rotate_daily:
+        # Use TimedRotatingFileHandler for daemon processes - rotates at midnight
+        file_handler = logging.handlers.TimedRotatingFileHandler(
+            log_path,
+            when='midnight',
+            interval=1,
+            backupCount=30,  # Keep 30 days of logs
+            encoding='utf-8'
+        )
+        # Add date suffix to rotated files (e.g., task_scheduler.log.2025-12-10)
+        file_handler.suffix = "%Y-%m-%d"
+    else:
+        # Standard file handler for short-lived processes
+        file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    
     file_handler.setLevel(logging.NOTSET)
     file_handler.setFormatter(JsonLogFormatter())
     logger.addHandler(file_handler)
 
-    write_log.info("LOG_INIT", "Logging initialized.", {"log_file": log_path})
+    write_log.info("LOG_INIT", "Logging initialized.", {"log_file": log_path, "rotate_daily": rotate_daily})
     _LOGGING_INITIALIZED = True
 
 # Public Logging API

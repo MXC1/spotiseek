@@ -667,6 +667,280 @@ def reset_database() -> None:
     write_log.info("RESET_COMPLETE", "Database reset complete.")
 
 
+# ============================================================================
+# TASK FUNCTIONS (for task-based scheduler)
+# ============================================================================
+# Each task function can be executed independently by the task scheduler.
+# They return True on success, False on failure.
+
+def task_scrape_playlists() -> bool:
+    """
+    Task: Scrape Spotify playlists and add tracks to database.
+    
+    This task:
+    1. Reads playlist URLs from the CSV file
+    2. Fetches track metadata from Spotify API
+    3. Adds playlists and tracks to the database
+    4. Creates M3U8 playlist files (if they don't exist)
+    
+    Returns:
+        True if successful, False if failed
+    """
+    write_log.info("TASK_SCRAPE_START", "Starting playlist scrape task.")
+    
+    try:
+        # Load playlists from CSV
+        try:
+            playlists = read_playlists_from_csv(config.playlists_csv)
+            write_log.info("PLAYLISTS_LOADED", "Loaded playlists from CSV.", 
+                          {"count": len(playlists)})
+        except FileNotFoundError:
+            fallback_csv = os.path.abspath(os.path.join(
+                os.path.dirname(os.path.dirname(__file__)), 
+                "input_playlists", "playlists.csv"
+            ))
+            write_log.warn("PLAYLISTS_CSV_MISSING", 
+                          "Primary playlists CSV not found, falling back to default.",
+                          {"primary_csv": config.playlists_csv, "fallback_csv": fallback_csv})
+            playlists = read_playlists_from_csv(fallback_csv)
+            write_log.info("PLAYLISTS_LOADED_FALLBACK", 
+                          "Loaded playlists from fallback CSV.", 
+                          {"count": len(playlists)})
+        
+        # Process each playlist
+        total_tracks = 0
+        for playlist_url in playlists:
+            tracks = process_playlist(playlist_url)
+            if tracks:
+                total_tracks += len(tracks)
+        
+        write_log.info("TASK_SCRAPE_COMPLETE", "Playlist scrape task completed.",
+                      {"playlists_processed": len(playlists), "tracks_found": total_tracks})
+        return True
+        
+    except Exception as e:
+        write_log.error("TASK_SCRAPE_FAILED", "Playlist scrape task failed.",
+                       {"error": str(e)})
+        return False
+
+
+def task_initiate_searches() -> bool:
+    """
+    Task: Initiate Soulseek searches for tracks that need downloading.
+    
+    This task:
+    1. Queries the database for tracks needing searches: 'pending', 'new', 'not_found', 'no_suitable_file'
+    2. Skips tracks already in 'searching' status (pending search)
+    3. Initiates async searches on slskd for each eligible track
+    
+    Returns:
+        True if successful, False if failed
+    """
+    write_log.info("TASK_INITIATE_SEARCHES_START", "Starting search initiation task.")
+    
+    try:
+        # Wait for slskd to be ready
+        if not wait_for_slskd_ready(max_wait_seconds=60, poll_interval=2):
+            write_log.error("SLSKD_UNAVAILABLE", 
+                           "slskd service is not available. Cannot initiate searches.")
+            return False
+        
+        # Get tracks that need searching
+        candidates_statuses = ["pending", "new", "not_found", "no_suitable_file"]
+        tracks_to_search = []
+
+        for status in candidates_statuses:
+            rows = track_db.get_tracks_by_status(status)
+            for track_row in rows:
+                # Skip if there is already an active search for this track
+                spotify_id = track_row[0]
+                current_status = track_db.get_track_status(spotify_id)
+                if current_status == "searching":
+                    write_log.debug("TASK_INITIATE_SEARCH_SKIP_SEARCHING", "Skipping track with active search.", {"spotify_id": spotify_id})
+                    continue
+                track_name = track_row[1]
+                artist = track_row[2]
+                tracks_to_search.append((spotify_id, artist, track_name))
+        
+        if not tracks_to_search:
+            write_log.info("TASK_INITIATE_SEARCHES_NO_TRACKS", 
+                          "No tracks pending search.")
+            return True
+        
+        # Initiate searches
+        download_tracks_async(tracks_to_search)
+        
+        write_log.info("TASK_INITIATE_SEARCHES_COMPLETE", 
+                      "Search initiation task completed.",
+                      {"tracks_searched": len(tracks_to_search)})
+        return True
+        
+    except Exception as e:
+        write_log.error("TASK_INITIATE_SEARCHES_FAILED", 
+                       "Search initiation task failed.",
+                       {"error": str(e)})
+        return False
+
+
+def task_poll_search_results() -> bool:
+    """
+    Task: Poll slskd for completed searches and initiate downloads.
+    
+    This task:
+    1. Checks for searches that have completed on slskd
+    2. Processes search results and selects best files
+    3. Initiates downloads for matched tracks
+    
+    Returns:
+        True if successful, False if failed
+    """
+    write_log.info("TASK_POLL_SEARCH_START", "Starting search polling task.")
+    
+    try:
+        # Wait for slskd to be ready
+        if not wait_for_slskd_ready(max_wait_seconds=60, poll_interval=2):
+            write_log.error("SLSKD_UNAVAILABLE", 
+                           "slskd service is not available. Cannot poll searches.")
+            return False
+        
+        # Process pending searches
+        process_pending_searches()
+        
+        write_log.info("TASK_POLL_SEARCH_COMPLETE", "Search polling task completed.")
+        return True
+        
+    except Exception as e:
+        write_log.error("TASK_POLL_SEARCH_FAILED", "Search polling task failed.",
+                       {"error": str(e)})
+        return False
+
+
+def task_sync_download_status() -> bool:
+    """
+    Task: Sync download status from slskd API to database.
+    
+    This task:
+    1. Queries slskd for all active downloads
+    2. Updates track status in the database
+    3. Handles completed downloads (update file paths, M3U8 files)
+    
+    Returns:
+        True if successful, False if failed
+    """
+    write_log.info("TASK_SYNC_STATUS_START", "Starting download status sync task.")
+    
+    try:
+        # Wait for slskd to be ready
+        if not wait_for_slskd_ready(max_wait_seconds=60, poll_interval=2):
+            write_log.error("SLSKD_UNAVAILABLE", 
+                           "slskd service is not available. Cannot sync status.")
+            return False
+        
+        # Update download statuses
+        update_download_statuses()
+        
+        write_log.info("TASK_SYNC_STATUS_COMPLETE", "Download status sync task completed.")
+        return True
+        
+    except Exception as e:
+        write_log.error("TASK_SYNC_STATUS_FAILED", "Download status sync task failed.",
+                       {"error": str(e)})
+        return False
+
+
+def task_mark_quality_upgrades() -> bool:
+    """
+    Task: Mark completed non-WAV tracks for quality upgrade.
+    
+    This task:
+    1. Scans all completed downloads
+    2. Identifies tracks that are not in WAV format
+    3. Marks them for potential quality upgrade
+    
+    Returns:
+        True if successful, False if failed
+    """
+    write_log.info("TASK_MARK_UPGRADES_START", "Starting quality upgrade marking task.")
+    
+    try:
+        mark_tracks_for_quality_upgrade()
+        
+        write_log.info("TASK_MARK_UPGRADES_COMPLETE", 
+                      "Quality upgrade marking task completed.")
+        return True
+        
+    except Exception as e:
+        write_log.error("TASK_MARK_UPGRADES_FAILED", 
+                       "Quality upgrade marking task failed.",
+                       {"error": str(e)})
+        return False
+
+
+def task_process_upgrades() -> bool:
+    """
+    Task: Process the quality upgrade queue.
+    
+    This task:
+    1. Gets all tracks marked for redownload
+    2. Initiates searches for better quality versions
+    
+    Returns:
+        True if successful, False if failed
+    """
+    write_log.info("TASK_PROCESS_UPGRADES_START", "Starting quality upgrade processing task.")
+    
+    try:
+        # Wait for slskd to be ready
+        if not wait_for_slskd_ready(max_wait_seconds=60, poll_interval=2):
+            write_log.error("SLSKD_UNAVAILABLE", 
+                           "slskd service is not available. Cannot process upgrades.")
+            return False
+        
+        # Process redownload queue
+        process_redownload_queue()
+        
+        write_log.info("TASK_PROCESS_UPGRADES_COMPLETE", 
+                      "Quality upgrade processing task completed.")
+        return True
+        
+    except Exception as e:
+        write_log.error("TASK_PROCESS_UPGRADES_FAILED", 
+                       "Quality upgrade processing task failed.",
+                       {"error": str(e)})
+        return False
+
+
+def task_export_library() -> bool:
+    """
+    Task: Export iTunes-compatible XML library.
+    
+    This task:
+    1. Reads all completed tracks from database
+    2. Generates iTunes-compatible XML file
+    3. Saves to configured XML directory
+    
+    Returns:
+        True if successful, False if failed
+    """
+    write_log.info("TASK_EXPORT_LIBRARY_START", "Starting library export task.")
+    
+    try:
+        xml_path = config.get_xml_export_path()
+        music_folder_url = config.get_music_folder_url()
+        
+        export_itunes_xml(xml_path, music_folder_url)
+        
+        write_log.info("TASK_EXPORT_LIBRARY_COMPLETE", 
+                      "Library export task completed.",
+                      {"xml_path": xml_path})
+        return True
+        
+    except Exception as e:
+        write_log.error("TASK_EXPORT_LIBRARY_FAILED", "Library export task failed.",
+                       {"error": str(e)})
+        return False
+
+
 # Main Workflow Function
 
 def main(reset_db: bool = False) -> None:

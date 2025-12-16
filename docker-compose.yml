@@ -12,7 +12,7 @@ services:
     ports:
       - 5030:5030/tcp
       - 5031:5031/tcp
-      - 50300:50300/tcp
+      - 127.0.0.1:54300:50300/tcp
     user: 1000:1000
     image: slskd/slskd:latest
 
@@ -25,12 +25,19 @@ services:
     environment:
       - APP_ENV=${APP_ENV}
       - HOST_BASE_PATH=${HOST_BASE_PATH}
+      - SLSKD_BASE_URL=http://slskd:5030
+      - TOKEN=${TOKEN}
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
     volumes:
       - ./database:/app/database:rw
       - ./slskd_docker_data/${APP_ENV}/imported:/app/slskd_docker_data/${APP_ENV}/imported:rw
       - ./slskd_docker_data/${APP_ENV}/downloads:/app/slskd_docker_data/${APP_ENV}/downloads:ro
       - ./observability:/app/observability:rw
       - ./scripts:/app/scripts:ro
+      - ./input_playlists:/app/input_playlists:ro
+    depends_on:
+      - slskd
     restart: unless-stopped
 
   workflow:
