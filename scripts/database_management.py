@@ -589,6 +589,25 @@ class TrackDB:
         result = cursor.fetchone()
         return result[0] if result else None
 
+    def get_spotify_id_by_slskd_download_uuid(self, slskd_uuid: str) -> Optional[str]:
+        """
+        Retrieve the Spotify ID associated with a Soulseek download UUID.
+        
+        Args:
+            slskd_uuid: Soulseek download UUID
+        
+        Returns:
+            Spotify track ID if found, None otherwise
+        """
+        write_log.debug("SLSKD_QUERY_SPOTIFY_ID_DOWNLOAD", "Querying Spotify ID for slskd_download_uuid.", {"slskd_uuid": slskd_uuid})
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT spotify_id FROM tracks WHERE slskd_download_uuid = ?",
+            (slskd_uuid,)
+        )
+        result = cursor.fetchone()
+        return result[0] if result else None
+
     def get_download_uuid_by_spotify_id(self, spotify_id: str) -> Optional[str]:
         """
         Retrieve the Soulseek download UUID associated with a Spotify track ID.
