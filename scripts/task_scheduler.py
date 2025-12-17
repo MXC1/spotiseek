@@ -53,8 +53,8 @@ sys.dont_write_bytecode = True
 dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(dotenv_path)
 
-from scripts.database_management import TrackDB
-from scripts.logs_utils import setup_logging, write_log
+from scripts.database_management import TrackDB  # noqa: E402
+from scripts.logs_utils import setup_logging, write_log  # noqa: E402
 
 # Initialize logging with daily rotation for long-running daemon
 setup_logging(log_name_prefix="task_scheduler", rotate_daily=True)
@@ -252,9 +252,8 @@ class TaskRegistry:
             LIMIT ?
         """, (task_name, limit))
 
-        history = []
-        for row in cursor.fetchall():
-            history.append({
+        history = [
+            {
                 "id": row[0],
                 "task_name": row[1],
                 "started_at": row[2],
@@ -262,7 +261,9 @@ class TaskRegistry:
                 "status": row[4],
                 "error_message": row[5],
                 "tracks_processed": row[6]
-            })
+            }
+            for row in cursor.fetchall()
+        ]
         return history
 
     def get_recent_runs(self, limit: int = 100) -> list[dict[str, Any]]:
@@ -276,9 +277,8 @@ class TaskRegistry:
             LIMIT ?
         """, (limit,))
 
-        runs = []
-        for row in cursor.fetchall():
-            runs.append({
+        runs = [
+            {
                 "id": row[0],
                 "task_name": row[1],
                 "started_at": row[2],
@@ -286,7 +286,9 @@ class TaskRegistry:
                 "status": row[4],
                 "error_message": row[5],
                 "tracks_processed": row[6]
-            })
+            }
+            for row in cursor.fetchall()
+        ]
         return runs
 
     def _record_run_start(self, task_name: str) -> int:
@@ -567,7 +569,7 @@ _registry: TaskRegistry | None = None
 
 def get_task_registry() -> TaskRegistry:
     """Get or create the global task registry."""
-    global _registry
+    global _registry  # noqa: PLW0603
     if _registry is None:
         db = TrackDB()
         _registry = TaskRegistry(db)
@@ -577,7 +579,8 @@ def get_task_registry() -> TaskRegistry:
 
 def _register_all_tasks(registry: TaskRegistry) -> None:
     """Register all workflow tasks."""
-    from scripts.workflow import (
+    # Import here to avoid circular imports
+    from scripts.workflow import (  # noqa: PLC0415
         task_export_library,
         task_initiate_searches,
         task_mark_quality_upgrades,

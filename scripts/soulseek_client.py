@@ -51,6 +51,14 @@ TOKEN = os.getenv("TOKEN")
 MAX_SEARCH_ATTEMPTS = 50
 SEARCH_POLL_INTERVAL = 2  # seconds
 
+# HTTP status codes
+HTTP_OK = 200
+HTTP_NOT_FOUND = 404
+HTTP_SERVER_ERROR = 500
+
+# Quality thresholds
+MIN_BITRATE_KBPS = 320
+
 # Database instance
 track_db = TrackDB()
 
@@ -89,7 +97,7 @@ def wait_for_slskd_ready(max_wait_seconds: int = 60, poll_interval: int = 2) -> 
                 timeout=5
             )
 
-            if resp.status_code == 200:
+            if resp.status_code == HTTP_OK:
                 try:
                     data = resp.json()
                     state = data.get("state", "Unknown")
@@ -208,8 +216,8 @@ def is_better_quality(file: dict[str, Any], current_extension: str, current_bitr
         if current_extension in ("wav", "flac"):
             return False
         if current_extension == "mp3":
-            # Only upgrade if current MP3 is less than 320kbps
-            return bool(current_bitrate is not None and current_bitrate < 320)
+            # Only upgrade if current MP3 is less than MIN_BITRATE_KBPS
+            return bool(current_bitrate is not None and current_bitrate < MIN_BITRATE_KBPS)
         # If current is lower quality (e.g., ogg, m4a, etc.), allow upgrade
         return current_extension not in ("wav", "flac", "mp3")
 
@@ -507,8 +515,8 @@ def check_search_status(search_id: str) -> tuple[bool, list[dict[str, Any]]]:
             timeout=10
         )
 
-        # If search UUID not found (404), return None to indicate missing search
-        if resp.status_code == 404:
+        # If search UUID not found (HTTP_NOT_FOUND), return None to indicate missing search
+        if resp.status_code == HTTP_NOT_FOUND:
             write_log.warn("SLSKD_SEARCH_NOT_FOUND", "Search UUID not found in slskd",
                           {"search_id": search_id})
             return (None, [])
@@ -525,8 +533,8 @@ def check_search_status(search_id: str) -> tuple[bool, list[dict[str, Any]]]:
                 timeout=10
             )
 
-            # If search UUID not found (404), return None to indicate missing search
-            if status_resp.status_code == 404:
+            # If search UUID not found (HTTP_NOT_FOUND), return None to indicate missing search
+            if status_resp.status_code == HTTP_NOT_FOUND:
                 write_log.warn("SLSKD_SEARCH_NOT_FOUND", "Search UUID not found in slskd",
                               {"search_id": search_id})
                 return (None, [])
@@ -559,7 +567,9 @@ def check_search_status(search_id: str) -> tuple[bool, list[dict[str, Any]]]:
                        {"search_id": search_id, "error": str(e)})
         return (False, [])
 
-def enqueue_download(search_id: str, file: dict[str, Any], username: str, spotify_id: str, max_retries: int = 3) -> dict[str, Any]:
+def enqueue_download(  # noqa: PLR0915
+    search_id: str, file: dict[str, Any], username: str, spotify_id: str, max_retries: int = 3
+) -> dict[str, Any]:
     """
     Queue a file for download from a Soulseek user and track the mapping.
 
@@ -599,8 +609,11 @@ def enqueue_download(search_id: str, file: dict[str, Any], username: str, spotif
                 headers={"X-API-Key": TOKEN},
                 timeout=30  # Increased from 10 to 30 seconds
             )
-            write_log.debug("SLSKD_DOWNLOAD_RESPONSE", "Download POST response.",
-                           {"status_code": resp.status_code, "response_preview": resp.text[:200], "attempt": attempt + 1})
+            write_log.debug(
+                "SLSKD_DOWNLOAD_RESPONSE",
+                "Download POST response.",
+                {"status_code": resp.status_code, "response_preview": resp.text[:200], "attempt": attempt + 1}
+            )
             resp.raise_for_status()
 
             download_response = resp.json()
@@ -640,9 +653,9 @@ def enqueue_download(search_id: str, file: dict[str, Any], username: str, spotif
                 raise
 
         except requests.HTTPError as e:
-            # Retry on 500 errors, but not on 4xx errors
+            # Retry on server errors, but not on 4xx errors
             last_error = e
-            if e.response.status_code >= 500 and attempt < max_retries - 1:
+            if e.response.status_code >= HTTP_SERVER_ERROR and attempt < max_retries - 1:
                 wait_time = 2 ** attempt  # Exponential backoff
                 write_log.info("SLSKD_ENQUEUE_RETRY", "Download enqueue failed with server error, retrying.",
                               {"error": str(e), "status_code": e.response.status_code, "attempt": attempt + 1,
@@ -721,7 +734,9 @@ def initiate_track_search(artist: str, track: str, spotify_id: str) -> tuple[str
         return None
 
 
-def process_search_results(search_id: str, search_text: str, spotify_id: str, check_quality_upgrade: bool = False) -> bool:
+def process_search_results(
+    search_id: str, search_text: str, spotify_id: str, check_quality_upgrade: bool = False
+) -> bool:
     """
     Check search results once and enqueue download if suitable file is found.
 
@@ -886,7 +901,8 @@ def process_pending_searches() -> None:
         spotify_id = track_row[0]  # First column is spotify_id
         track_name = track_row[1]
         artist = track_row[2]
-        local_file_path = track_row[6] if len(track_row) > 6 else None  # Column 6 is local_file_path
+        # Column 6 is local_file_path
+        local_file_path = track_row[6] if len(track_row) > 6 else None  # noqa: PLR2004
 
         # Try to get the slskd search UUID for this track
         slskd_uuid = track_db.get_search_uuid_by_spotify_id(spotify_id)
@@ -1007,27 +1023,44 @@ def query_download_status(max_retries: int = 3) -> list[dict[str, Any]]:
         except (requests.Timeout, requests.exceptions.ConnectionError) as e:
             if attempt < max_retries - 1:
                 backoff_time = 2 ** attempt
-                write_log.debug("SLSKD_QUERY_STATUS_RETRY", "Network error querying download status, retrying.",
-                              {"attempt": attempt + 1, "max_retries": max_retries, "backoff_seconds": backoff_time, "error": str(e)})
+                write_log.debug(
+                    "SLSKD_QUERY_STATUS_RETRY",
+                    "Network error querying download status, retrying.",
+                    {"attempt": attempt + 1, "max_retries": max_retries,
+                     "backoff_seconds": backoff_time, "error": str(e)}
+                )
                 time.sleep(backoff_time)
             else:
-                write_log.warn("SLSKD_QUERY_STATUS_FAIL", "Network error querying download status after all retries.",
-                              {"attempts": max_retries, "error": str(e)})
+                write_log.warn(
+                    "SLSKD_QUERY_STATUS_FAIL",
+                    "Network error querying download status after all retries.",
+                    {"attempts": max_retries, "error": str(e)}
+                )
 
         except requests.HTTPError as e:
-            if e.response and e.response.status_code >= 500:
+            if e.response and e.response.status_code >= HTTP_SERVER_ERROR:
                 if attempt < max_retries - 1:
                     backoff_time = 2 ** attempt
-                    write_log.debug("SLSKD_QUERY_STATUS_RETRY", "Server error querying download status, retrying.",
-                                  {"attempt": attempt + 1, "max_retries": max_retries, "status_code": e.response.status_code,
-                                   "backoff_seconds": backoff_time, "error": str(e)})
+                    write_log.debug(
+                        "SLSKD_QUERY_STATUS_RETRY",
+                        "Server error querying download status, retrying.",
+                        {"attempt": attempt + 1, "max_retries": max_retries,
+                         "status_code": e.response.status_code,
+                         "backoff_seconds": backoff_time, "error": str(e)}
+                    )
                     time.sleep(backoff_time)
                 else:
-                    write_log.warn("SLSKD_QUERY_STATUS_FAIL", "Server error querying download status after all retries.",
-                                  {"attempts": max_retries, "status_code": e.response.status_code, "error": str(e)})
+                    write_log.warn(
+                        "SLSKD_QUERY_STATUS_FAIL",
+                        "Server error querying download status after all retries.",
+                        {"attempts": max_retries, "status_code": e.response.status_code, "error": str(e)}
+                    )
             else:
-                write_log.warn("SLSKD_QUERY_STATUS_FAIL", "HTTP error querying download status.",
-                              {"status_code": e.response.status_code if e.response else None, "error": str(e)})
+                write_log.warn(
+                    "SLSKD_QUERY_STATUS_FAIL",
+                    "HTTP error querying download status.",
+                    {"status_code": e.response.status_code if e.response else None, "error": str(e)}
+                )
                 return []
 
         except requests.RequestException as e:
