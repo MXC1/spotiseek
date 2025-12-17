@@ -36,7 +36,7 @@ observability/*_logs/
 # Downloads and data directories (large files)
 slskd_docker_data/
 database/
-playlists/
+input_playlists/
 observability/logs/
 
 # MusicBee dev files
