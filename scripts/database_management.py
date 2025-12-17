@@ -484,7 +484,7 @@ class TrackDB:
             trimmed = parts[0]
         else:
             trimmed = slskd_file_name
-        write_log.info(
+        write_log.debug(
             "TRACK_SLSKD_FILENAME_UPDATE", "Updating Soulseek file name for track.", {
                 "spotify_id": spotify_id,
                 "slskd_file_name": trimmed

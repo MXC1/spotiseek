@@ -625,7 +625,7 @@ def enqueue_download(
     size = file.get("size")
     extension, bitrate = extract_file_quality(file)
 
-    write_log.info("SLSKD_DOWNLOAD_ENQUEUE", "Enqueuing download.",
+    write_log.debug("SLSKD_DOWNLOAD_ENQUEUE", "Enqueuing download.",
                   {"filename": filename, "username": username, "extension": extension, "bitrate": bitrate})
 
     url = f"{SLSKD_URL}/transfers/downloads/{username}"
@@ -638,7 +638,7 @@ def enqueue_download(
             slskd_uuid = _validate_download_response(download_response)
 
             # Update database after successful download enqueue
-            write_log.info("SLSKD_ENQUEUE_SUCCESS", "Successfully enqueued download.",
+            write_log.debug("SLSKD_ENQUEUE_SUCCESS", "Successfully enqueued download.",
                           {"slskd_uuid": slskd_uuid, "spotify_id": spotify_id, "attempt": attempt + 1})
             track_db.set_download_uuid(spotify_id, slskd_uuid, username)
             track_db.update_track_status(spotify_id, "downloading")
