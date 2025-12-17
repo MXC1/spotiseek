@@ -1,0 +1,55 @@
+[tool.ruff]
+# Target Python 3.10+ for modern syntax support
+target-version = "py310"
+line-length = 120
+
+# Exclude common directories that should not be linted
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".pytest_cache",
+    "*.egg-info",
+    "build",
+    "dist",
+    "node_modules",
+    "slskd_docker_data",
+    "database",
+    "observability",
+]
+
+[tool.ruff.lint]
+# Enable comprehensive linting rules
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes (unused imports, variables, etc.)
+    "I",      # isort (import sorting)
+    "B",      # flake8-bugbear (common bugs and design problems)
+    "C4",     # flake8-comprehensions (simplify comprehensions)
+    "UP",     # pyupgrade (modern Python syntax)
+    "SIM",    # flake8-simplify (simplify code)
+    "PIE",    # flake8-pie (misc lints)
+    "RUF",    # Ruff-specific rules
+    "PL",     # Pylint rules (code smells, complexity)
+    "PERF",   # Perflint (performance issues)
+    "ARG",    # flake8-arg-names (argument naming conventions)
+]
+
+# Rules to ignore (with justification)
+ignore = [
+    "PERF203", # try-except in loop - acceptable for error isolation in batch processing
+    "SIM105",  # contextlib.suppress - try-except-pass is often more readable
+]
+
+# Allow autofix for all enabled rules
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.per-file-ignores]
+# Test files can have more relaxed rules
+"tests/*" = ["PLR2004", "S101"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["scripts"]
