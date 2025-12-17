@@ -79,12 +79,6 @@ def nuke(c, env=None):
         print("Could not determine APP_ENV, skipping directory deletion.")
 
 @task
-def start_workflow(c, attach=False):
-    """Run the workflow script inside the Docker container. Use --detached to run in detached mode."""
-    flag = "" if attach else "-d "
-    c.run(f"docker-compose exec {flag}workflow python scripts/workflow.py")
-
-@task
 def exec(c, service, command):
     """
     Execute a command inside a running Docker container.
@@ -138,6 +132,11 @@ def clean(c):
 def test(c):
     """Run Python tests (pytest)"""
     c.run(".\\.venv\\Scripts\\python.exe -m pytest")
+
+@task
+def run_all_tasks(c):
+    """Run all task scheduler tasks in dependency order inside the Docker container"""
+    subprocess.run(["docker-compose", "exec", "workflow", "python", "-m", "scripts.task_scheduler", "--run-all"], check=True)
 
 @task
 def lint(c):
