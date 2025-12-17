@@ -812,23 +812,10 @@ def render_tasks_section():
     
     with col1:
         if st.button("▶️ Run All Tasks", type="primary", use_container_width=True):
-            with st.spinner("Running all tasks in dependency order..."):
-                results = registry.run_all_tasks()
-            
-            # Display results
-            all_success = all(success for success, _ in results.values())
-            if all_success:
-                st.success("✅ All tasks completed successfully!")
-            else:
-                st.warning("⚠️ Some tasks failed. See details below.")
-            
-            for task_name, (success, message) in results.items():
-                if success:
-                    st.success(f"✓ {task_name}: {message}")
-                else:
-                    st.error(f"✗ {task_name}: {message}")
-            
+            registry.run_all_tasks()
+            st.success("✅ All tasks have been started! Check task history below for progress.")
             st.cache_data.clear()
+            time.sleep(1)
             st.rerun()
     
     with col2:
