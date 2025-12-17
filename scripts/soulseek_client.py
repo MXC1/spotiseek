@@ -7,18 +7,21 @@ track download status and maintain mappings between Soulseek and Spotify IDs.
 
 Key Features:
 - Asynchronous batch searching for improved performance
-- Intelligent file quality selection (WAV > FLAC > MP3 320 > others)
+- Intelligent file quality selection prioritizing lossless formats
 - Automatic filtering of remixes/edits unless explicitly requested
-- Quality upgrade system for existing downloads
+- Quality upgrade system for existing downloads (upgrades lossy to lossless)
 - Download status polling and database synchronization
 - Thread-safe API communication
 
-Quality Priority:
-1. WAV files (lossless, uncompressed)
-2. FLAC files (lossless, compressed)
-3. MP3 320kbps (high quality lossy)
-4. MP3 lower bitrates
-5. Other formats (OGG, M4A, etc.)
+Quality Priority (all lossless formats will be remuxed to WAV):
+1. Lossless formats: WAV, FLAC, ALAC, APE (all remuxed to WAV)
+2. MP3 320kbps (remuxed from any lossy format)
+3. Lower bitrate lossy formats
+4. Other formats (OGG, M4A, etc.)
+
+Note: All downloads are automatically remuxed to preferred formats:
+- Lossless (FLAC, ALAC, APE) -> WAV
+- Lossy (OGG, M4A, AAC, WMA, OPUS) -> MP3 320kbps
 
 Public API:
 - download_tracks_async(): Batch async downloads (recommended for multiple tracks)
@@ -194,7 +197,11 @@ def is_better_quality(file: dict[str, Any], current_extension: str, current_bitr
     """
     Determine if a file has better quality than the current one.
 
-    Quality hierarchy: WAV > FLAC > MP3 (by bitrate) > others
+    Quality hierarchy (after remuxing):
+    - All lossless formats (WAV, FLAC, ALAC, APE) -> remuxed to WAV
+    - All lossy formats -> remuxed to MP3 320kbps
+    
+    Therefore: Lossless formats > Lossy formats
 
     Args:
         file: New file object to evaluate
@@ -206,32 +213,41 @@ def is_better_quality(file: dict[str, Any], current_extension: str, current_bitr
     """
     ext, bitrate = extract_file_quality(file)
 
-    # WAV is always preferred over anything else
-    if ext == "wav" and current_extension != "wav":
+    # Define format categories (matching workflow.py remuxing logic)
+    lossless_formats = {'wav', 'flac', 'alac', 'ape'}
+    current_is_lossless = current_extension in lossless_formats
+
+    # New file is lossless format (will become WAV)
+    if ext in lossless_formats:
+        # If current is already lossless, no upgrade needed
+        if current_is_lossless:
+            return False
+        # Lossless is always better than lossy
         return True
 
-    # FLAC is NOT considered an upgrade over MP3 320, since we remux to MP3 320
-    # Only upgrade to FLAC if current is lower than MP3 (not 320), and not if current is MP3 320 or better
-    if ext == "flac":
-        if current_extension in ("wav", "flac"):
-            return False
-        if current_extension == "mp3":
-            # Only upgrade if current MP3 is less than MIN_BITRATE_KBPS
-            return bool(current_bitrate is not None and current_bitrate < MIN_BITRATE_KBPS)
-        # If current is lower quality (e.g., ogg, m4a, etc.), allow upgrade
-        return current_extension not in ("wav", "flac", "mp3")
-
-    # Among MP3 files, prefer higher bitrate
+    # New file is lossy (will become MP3 320kbps)
+    # Only upgrade if current is also lossy but lower quality
+    if current_is_lossless:
+        # Never downgrade from lossless to lossy
+        return False
+    
+    # Both are lossy - compare bitrates
     if ext == "mp3" and current_extension == "mp3" and bitrate and current_bitrate and bitrate > current_bitrate:
         return True
 
-    # MP3 is preferred over lower quality formats
-    return bool(ext == "mp3" and current_extension not in ("mp3", "wav", "flac"))
+    # If current is a non-MP3 lossy format and new is MP3 320, that's an upgrade
+    if ext == "mp3" and bitrate and bitrate >= MIN_BITRATE_KBPS and current_extension not in ("mp3", "wav", "flac", "alac", "ape"):
+        return True
+    
+    return False
 
 
 def quality_sort_key(item: tuple[dict[str, Any], str]) -> tuple[int, int]:
     """
     Generate a sort key for file quality prioritization.
+
+    All lossless formats will be remuxed to WAV, so they have equal priority.
+    All lossy formats will be remuxed to MP3 320kbps.
 
     Args:
         item: Tuple of (file_object, username)
@@ -243,15 +259,17 @@ def quality_sort_key(item: tuple[dict[str, Any], str]) -> tuple[int, int]:
     file, _ = item
     ext, bitrate = extract_file_quality(file)
 
-    # Format priority: WAV (3) > FLAC (2) > MP3 (1) > others (0)
-    if ext == "wav":
+    # Lossless formats: WAV, FLAC, ALAC, APE (all will become WAV, priority 3)
+    lossless_formats = {'wav', 'flac', 'alac', 'ape'}
+    if ext in lossless_formats:
         return (3, 0)
-    if ext == "flac":
-        return (2, 0)
+    
+    # Lossy formats prioritized by bitrate (all will become MP3 320kbps, priority 1)
     if ext == "mp3":
         return (1, bitrate if bitrate is not None else 0)
-
-    return (0, 0)
+    
+    # Other lossy formats (OGG, M4A, AAC, WMA, OPUS) - lower priority
+    return (0, bitrate if bitrate is not None else 0)
 
 
 # File Selection Functions

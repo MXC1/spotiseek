@@ -5,22 +5,24 @@ This module coordinates the complete workflow of:
 1. Reading playlist URLs from CSV
 2. Fetching track metadata from Spotify
 3. Initiating downloads via Soulseek
-4. Tracking download status in the database
-5. Updating M3U8 playlist files
-6. Exporting iTunes-compatible XML library
+4. Remuxing all downloads to preferred formats (lossless -> WAV, lossy -> MP3 320kbps)
+5. Tracking download status in the database
+6. Updating M3U8 playlist files
+7. Exporting iTunes-compatible XML library
 
 Key Features:
 - Environment-aware configuration (test/prod/stage)
 - Playlist and track processing with error isolation
+- Automatic format standardization (lossless -> WAV, lossy -> MP3 320kbps)
 - Download status synchronization
-- Quality upgrade system for existing tracks
+- Quality upgrade system (upgrades lossy tracks to lossless when available)
 - iTunes library export for music player integration
 
 Workflow Stages:
 1. Playlist Processing: Read CSV, fetch Spotify metadata, create M3U8 files
 2. Track Processing: Add tracks to database, initiate Soulseek downloads
-3. Status Updates: Sync download status from slskd API
-4. Quality Upgrades: Redownload non-WAV tracks for better quality
+3. Status Updates: Sync download status from slskd API, remux to preferred formats
+4. Quality Upgrades: Redownload non-WAV (lossy) tracks for lossless upgrades
 5. Library Export: Generate iTunes XML for music player integration
 
 Public API:
@@ -350,7 +352,7 @@ def update_download_statuses() -> None:
 
 def mark_tracks_for_quality_upgrade() -> None:
     """
-    Identify completed tracks that are not WAV format and mark them for quality upgrade.
+    Identify completed tracks that are not in lossless WAV format and mark them for quality upgrade.
 
     This function:
     1. Queries all tracks with status='completed'
@@ -358,8 +360,8 @@ def mark_tracks_for_quality_upgrade() -> None:
     3. Marks non-WAV tracks as 'redownload_pending' for quality upgrade
 
     Quality upgrade logic:
-    - WAV files are considered optimal quality and are not upgraded
-    - All other formats (FLAC, MP3, etc.) are marked for potential upgrade
+    - WAV files are optimal quality (all lossless formats are remuxed to WAV)
+    - All non-WAV formats are marked for potential upgrade to lossless
     - The actual upgrade decision (whether a better file exists) happens during search
 
     Note:
@@ -538,20 +540,41 @@ def _handle_completed_download(file: dict, spotify_id: str) -> None:
                            {"spotify_id": spotify_id, "existing_path": existing_path, "slskd_path": local_file_path})
             return
 
-    # If FLAC, remux and use new path; otherwise, use as is
+    # Determine file extension and bitrate from file metadata
     extension = None
     if file.get("extension"):
         extension = file["extension"].lower()
     elif "." in local_file_path:
         extension = local_file_path.rsplit(".", 1)[-1].lower()
 
+    # Extract actual bitrate from file metadata
+    bitrate = file.get("bitRate") or file.get("bitrate")
+    try:
+        bitrate = int(bitrate) if bitrate is not None else None
+    except (ValueError, TypeError):
+        bitrate = None
+
+    # Define lossless and lossy format categories
+    lossless_formats = {'flac', 'alac', 'ape'}
+    lossy_formats = {'ogg', 'm4a', 'aac', 'wma', 'opus'}
+    
     final_path = local_file_path
-    if extension == "flac":
-        final_path = _remux_flac_to_mp3(local_file_path, spotify_id, file) or local_file_path
+    
+    # Remux lossless formats to WAV (except WAV itself)
+    if extension in lossless_formats:
+        final_path = _remux_lossless_to_wav(local_file_path, spotify_id, extension) or local_file_path
+    # Remux lossy formats to MP3 320kbps (except MP3 itself)
+    elif extension in lossy_formats:
+        final_path = _remux_lossy_to_mp3(local_file_path, spotify_id, extension) or local_file_path
+    # MP3 and WAV files are already in preferred format, no remuxing needed
+    elif extension == "mp3":
+        track_db.update_extension_bitrate(spotify_id, extension="mp3", bitrate=bitrate)
+    elif extension == "wav":
+        track_db.update_extension_bitrate(spotify_id, extension="wav", bitrate=None)
 
     existing_path = track_db.get_local_file_path(spotify_id)
     track_db.update_local_file_path(spotify_id, final_path)
-    write_log.info(
+    write_log.debug(
         "DOWNLOAD_COMPLETE",
         "Download completed successfully.",
         {
@@ -563,54 +586,54 @@ def _handle_completed_download(file: dict, spotify_id: str) -> None:
     _update_m3u8_files_for_track(spotify_id, final_path)
     track_db.update_track_status(spotify_id, "completed")
 
-def _remux_flac_to_mp3(local_file_path: str, spotify_id: str) -> str:
+def _is_audio_valid(audio_path: str) -> bool:
     """
-    Remux a FLAC file to 320kbps MP3. Update extension/bitrate in DB if successful.
-    Returns the new MP3 path if successful, else None.
+    Use ffmpeg to check if an audio file is valid and decodable.
+    Returns True if valid, False otherwise.
     """
+    try:
+        result = subprocess.run([
+            "ffmpeg", "-v", "error", "-i", audio_path, "-f", "null", "-"
+        ], check=False, capture_output=True, text=True)
+        return result.returncode == 0
+    except Exception as e:
+        write_log.error(
+            "AUDIO_CHECK_FAIL",
+            "Failed to check audio file integrity.",
+            {"audio_path": audio_path, "error": str(e)}
+        )
+        return False
 
-    def _is_flac_valid(flac_path: str) -> bool:
-        """
-        Use ffmpeg to check if a FLAC file is valid and decodable.
-        Returns True if valid, False otherwise.
-        """
-        try:
-            result = subprocess.run([
-                "ffmpeg", "-v", "error", "-i", flac_path, "-f", "null", "-"
-            ], check=False, capture_output=True, text=True)
-            return result.returncode == 0
-        except Exception as e:
-            write_log.error(
-                "FLAC_CHECK_FAIL",
-                "Failed to check FLAC integrity.",
-                {"flac_path": flac_path, "error": str(e)}
-            )
-            return False
 
-    mp3_path = os.path.splitext(local_file_path)[0] + ".mp3"
+def _remux_lossless_to_wav(local_file_path: str, spotify_id: str, extension: str) -> str:
+    """
+    Remux a lossless audio file (FLAC, ALAC, APE) to WAV.
+    Update extension/bitrate in DB if successful.
+    Returns the new WAV path if successful, else original path.
+    """
+    wav_path = os.path.splitext(local_file_path)[0] + ".wav"
     try:
         ffmpeg_input = local_file_path.replace("\\", "/")
-        ffmpeg_output = mp3_path.replace("\\", "/")
+        ffmpeg_output = wav_path.replace("\\", "/")
 
-        # Check FLAC integrity before remuxing
-        if not _is_flac_valid(ffmpeg_input):
+        # Check audio integrity before remuxing
+        if not _is_audio_valid(ffmpeg_input):
             write_log.warn(
-                "FLAC_INVALID",
-                "FLAC file failed integrity check. Skipping remux.",
-                {"spotify_id": spotify_id, "flac_path": ffmpeg_input}
+                "LOSSLESS_INVALID",
+                "Lossless file failed integrity check. Skipping remux.",
+                {"spotify_id": spotify_id, "file_path": ffmpeg_input, "extension": extension}
             )
             track_db.update_track_status(spotify_id, "corrupt")
             slskd_uuid_to_blacklist = track_db.get_download_uuid_by_spotify_id(spotify_id)
             if slskd_uuid_to_blacklist:
-                track_db.add_slskd_blacklist(slskd_uuid_to_blacklist, reason="corrupt_flac")
+                track_db.add_slskd_blacklist(slskd_uuid_to_blacklist, reason=f"corrupt_{extension}")
             return local_file_path
 
         ffmpeg_cmd = [
             "ffmpeg", "-y", "-i", ffmpeg_input,
-            "-codec:a", "libmp3lame", "-b:a", "320k", ffmpeg_output
+            "-codec:a", "pcm_s16le", "-ar", "44100", ffmpeg_output
         ]
         # Compose ffmpeg log file path in the same logs dir as workflow logs
-        os.getenv('APP_ENV', 'default')
         base_dir = os.path.dirname(os.path.dirname(__file__))
         logs_dir = os.path.join(base_dir, 'observability', "logs", ENV)
         now = datetime.now()
@@ -626,9 +649,77 @@ def _remux_flac_to_mp3(local_file_path: str, spotify_id: str) -> str:
             dated_logs_dir,
             "ffmpeg_remux.log"
         )
-        write_log.info(
-            "FFMPEG_REMUX",
-            "Remuxing FLAC to MP3 320kbps.",
+        write_log.debug(
+            "FFMPEG_REMUX_LOSSLESS",
+            f"Remuxing {extension.upper()} to WAV.",
+            {"input": ffmpeg_input, "output": ffmpeg_output, "ffmpeg_log_file": ffmpeg_log_file}
+        )
+        with open(ffmpeg_log_file, "a", encoding="utf-8") as logf:
+            logf.write(
+                f"\n--- Remux {now.strftime('%Y-%m-%d %H:%M:%S')} "
+                f"| Spotify ID: {spotify_id} | Input: {ffmpeg_input} | Output: {ffmpeg_output} ---\n"
+            )
+            subprocess.run(ffmpeg_cmd, check=True, stdout=logf, stderr=subprocess.STDOUT)
+        track_db.update_extension_bitrate(spotify_id, extension="wav", bitrate=None)
+        write_log.debug(
+            "REMUX_SUCCESS",
+            f"{extension.upper()} remuxed to WAV.",
+            {"spotify_id": spotify_id, "wav_path": wav_path, "ffmpeg_log_file": ffmpeg_log_file}
+        )
+        return wav_path
+    except Exception as e:
+        write_log.error("REMUX_FAIL", f"Failed to remux {extension.upper()} to WAV.", {"spotify_id": spotify_id, "error": str(e)})
+        track_db.update_extension_bitrate(spotify_id, extension=extension)
+        return local_file_path
+
+
+def _remux_lossy_to_mp3(local_file_path: str, spotify_id: str, extension: str) -> str:
+    """
+    Remux a lossy audio file (OGG, M4A, AAC, WMA, OPUS) to MP3 320kbps.
+    Update extension/bitrate in DB if successful.
+    Returns the new MP3 path if successful, else original path.
+    """
+    mp3_path = os.path.splitext(local_file_path)[0] + ".mp3"
+    try:
+        ffmpeg_input = local_file_path.replace("\\", "/")
+        ffmpeg_output = mp3_path.replace("\\", "/")
+
+        # Check audio integrity before remuxing
+        if not _is_audio_valid(ffmpeg_input):
+            write_log.warn(
+                "LOSSY_INVALID",
+                "Lossy file failed integrity check. Skipping remux.",
+                {"spotify_id": spotify_id, "file_path": ffmpeg_input, "extension": extension}
+            )
+            track_db.update_track_status(spotify_id, "corrupt")
+            slskd_uuid_to_blacklist = track_db.get_download_uuid_by_spotify_id(spotify_id)
+            if slskd_uuid_to_blacklist:
+                track_db.add_slskd_blacklist(slskd_uuid_to_blacklist, reason=f"corrupt_{extension}")
+            return local_file_path
+
+        ffmpeg_cmd = [
+            "ffmpeg", "-y", "-i", ffmpeg_input,
+            "-codec:a", "libmp3lame", "-b:a", "320k", ffmpeg_output
+        ]
+        # Compose ffmpeg log file path in the same logs dir as workflow logs
+        base_dir = os.path.dirname(os.path.dirname(__file__))
+        logs_dir = os.path.join(base_dir, 'observability', "logs", ENV)
+        now = datetime.now()
+        dated_logs_dir = os.path.join(
+            logs_dir,
+            now.strftime("%Y"),
+            now.strftime("%m"),
+            now.strftime("%d")
+        )
+        os.makedirs(dated_logs_dir, exist_ok=True)
+        # Use a single log file per workflow run (date-based, no timestamp)
+        ffmpeg_log_file = os.path.join(
+            dated_logs_dir,
+            "ffmpeg_remux.log"
+        )
+        write_log.debug(
+            "FFMPEG_REMUX_LOSSY",
+            f"Remuxing {extension.upper()} to MP3 320kbps.",
             {"input": ffmpeg_input, "output": ffmpeg_output, "ffmpeg_log_file": ffmpeg_log_file}
         )
         with open(ffmpeg_log_file, "a", encoding="utf-8") as logf:
@@ -640,13 +731,13 @@ def _remux_flac_to_mp3(local_file_path: str, spotify_id: str) -> str:
         track_db.update_extension_bitrate(spotify_id, extension="mp3", bitrate=320)
         write_log.info(
             "REMUX_SUCCESS",
-            "FLAC remuxed to MP3 320kbps.",
+            f"{extension.upper()} remuxed to MP3 320kbps.",
             {"spotify_id": spotify_id, "mp3_path": mp3_path, "ffmpeg_log_file": ffmpeg_log_file}
         )
         return mp3_path
     except Exception as e:
-        write_log.error("REMUX_FAIL", "Failed to remux FLAC to MP3.", {"spotify_id": spotify_id, "error": str(e)})
-        track_db.update_extension_bitrate(spotify_id, extension="flac")
+        write_log.error("REMUX_FAIL", f"Failed to remux {extension.upper()} to MP3.", {"spotify_id": spotify_id, "error": str(e)})
+        track_db.update_extension_bitrate(spotify_id, extension=extension)
         return local_file_path
 
 def _update_m3u8_files_for_track(spotify_id: str, local_file_path: str) -> None:
