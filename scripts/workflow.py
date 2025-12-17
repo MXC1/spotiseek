@@ -459,13 +459,14 @@ def _update_file_status(file: dict, username: str | None = None) -> None:
         write_log.debug("DOWNLOAD_STATE_UNKNOWN", "Unknown download state encountered.",
                        {"spotify_id": spotify_id, "state": state})
 
-    if state.startswith("Completed"):
-        if download_username and slskd_uuid:
-            remove_download_from_slskd(download_username, slskd_uuid)
-        else:
-            write_log.warn("DOWNLOAD_REMOVE_SKIP", "Cannot remove failed download - missing username or UUID.",
-                            {"spotify_id": spotify_id, "slskd_uuid": slskd_uuid, "username": download_username})
+    # Remove below functionality because I think it is causing a bug
 
+    # if state.startswith("Completed"):
+    #     if download_username and slskd_uuid:
+    #         remove_download_from_slskd(download_username, slskd_uuid)
+    #     else:
+    #         write_log.warn("DOWNLOAD_REMOVE_SKIP", "Cannot remove failed download - missing username or UUID.",
+    #                         {"spotify_id": spotify_id, "slskd_uuid": slskd_uuid, "username": download_username})
 
 def _handle_completed_download(file: dict, spotify_id: str) -> None:
     """
