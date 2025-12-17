@@ -53,7 +53,7 @@ services:
       - HOST_BASE_PATH=${HOST_BASE_PATH}
     volumes:
       - ./database:/app/database:rw
-      - ./playlists:/app/playlists:rw
+      - ./input_playlists:/app/input_playlists:rw
       - ./slskd_docker_data/${APP_ENV}:/app/slskd_docker_data/${APP_ENV}:rw
       - ./observability:/app/observability:rw
       - ./scripts:/app/scripts:ro
