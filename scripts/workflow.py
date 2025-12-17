@@ -42,10 +42,14 @@ sys.dont_write_bytecode = True
 dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(dotenv_path)
 
-from scripts.database_management import TrackDB
-from scripts.logs_utils import setup_logging, write_log
-from scripts.m3u8_manager import delete_all_m3u8_files, update_track_in_m3u8, write_playlist_m3u8
-from scripts.soulseek_client import (
+from scripts.database_management import TrackDB  # noqa: E402
+from scripts.logs_utils import setup_logging, write_log  # noqa: E402
+from scripts.m3u8_manager import (  # noqa: E402
+    delete_all_m3u8_files,
+    update_track_in_m3u8,
+    write_playlist_m3u8,
+)
+from scripts.soulseek_client import (  # noqa: E402
     download_tracks_async,
     process_pending_searches,
     process_redownload_queue,
@@ -53,8 +57,8 @@ from scripts.soulseek_client import (
     remove_download_from_slskd,
     wait_for_slskd_ready,
 )
-from scripts.spotify_scraper import get_tracks_from_playlist
-from scripts.xml_exporter import export_itunes_xml
+from scripts.spotify_scraper import get_tracks_from_playlist  # noqa: E402
+from scripts.xml_exporter import export_itunes_xml  # noqa: E402
 
 # Initialize logging with environment-specific directory
 setup_logging(log_name_prefix="workflow")
@@ -284,7 +288,10 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
             # Only collect tracks that need to be searched for
             # Skip tracks that are already being processed or completed
             current_status = track_db.get_track_status(spotify_id)
-            skip_statuses = {"completed", "queued", "downloading", "searching", "requested", "inprogress", "redownload_pending"}
+            skip_statuses = {
+                "completed", "queued", "downloading", "searching",
+                "requested", "inprogress", "redownload_pending"
+            }
 
             if current_status not in skip_statuses:
                 tracks_to_download.append(track)
@@ -293,7 +300,7 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
                                {"spotify_id": spotify_id, "track_name": track_name, "status": current_status})
 
         except Exception as e:
-            track_name = track[2] if len(track) > 2 else str(track)
+            track_name = track[2] if len(track) > 2 else str(track)  # noqa: PLR2004
             write_log.error("TRACK_PROCESS_FAIL", "Failed to process track.",
                            {"track": track_name, "error": str(e)})
             # Update database status if possible
@@ -362,7 +369,10 @@ def mark_tracks_for_quality_upgrade() -> None:
         write_log.debug("QUALITY_UPGRADE_NO_COMPLETED", "No completed tracks found to check for upgrades.")
         return
 
-    write_log.info("QUALITY_UPGRADE_CHECKING", f"Checking {len(completed_tracks)} completed tracks for upgrade eligibility.")
+    write_log.info(
+        "QUALITY_UPGRADE_CHECKING",
+        f"Checking {len(completed_tracks)} completed tracks for upgrade eligibility."
+    )
 
     upgrade_count = 0
     for track_row in completed_tracks:
@@ -412,12 +422,18 @@ def _update_file_status(file: dict, username: str | None = None) -> None:
     write_log.debug("FILE_STATUS_UPDATE", "Updating file status.",
                    {"spotify_id": spotify_id, "state": state})
 
+    # Define failed states for comparison
+    failed_states = (
+        "Completed, Errored", "Completed, TimedOut", "Completed, Cancelled",
+        "Completed, Rejected", "Completed, Aborted"
+    )
+
     # Handle successful downloads
     if state == "Completed, Succeeded":
         _handle_completed_download(file, spotify_id)
 
     # Handle failed downloads - remove from slskd to prevent duplicate logs
-    elif state in ("Completed, Errored", "Completed, TimedOut", "Completed, Cancelled", "Completed, Rejected", "Completed, Aborted"):
+    elif state in failed_states:
         track_db.update_track_status(spotify_id, "failed")
         write_log.info("DOWNLOAD_FAILED", "Download failed.",
                       {"spotify_id": spotify_id, "state": state})
@@ -487,7 +503,7 @@ def _handle_completed_download(file: dict, spotify_id: str) -> None:
     normalized_path = filename_rel.replace("\\", "/")
     path_parts = normalized_path.split("/")
 
-    if len(path_parts) >= 2:
+    if len(path_parts) >= 2:  # noqa: PLR2004
         # Keep last two components: parent folder and filename
         relative_path = "/".join(path_parts[-2:])
     elif len(path_parts) == 1:
@@ -506,7 +522,11 @@ def _handle_completed_download(file: dict, spotify_id: str) -> None:
         # Normalize paths for comparison
         existing_normalized = existing_path.replace("\\", "/").lower()
         new_normalized = local_file_path.replace("\\", "/").lower()
-        if existing_normalized == new_normalized or os.path.basename(existing_normalized) == os.path.basename(new_normalized):
+        paths_match = (
+            existing_normalized == new_normalized
+            or os.path.basename(existing_normalized) == os.path.basename(new_normalized)
+        )
+        if paths_match:
             write_log.debug("DOWNLOAD_DUPLICATE_RECORD", "Skipping old slskd record - file already tracked.",
                            {"spotify_id": spotify_id, "existing_path": existing_path, "slskd_path": local_file_path})
             return
@@ -541,31 +561,39 @@ def _remux_flac_to_mp3(local_file_path: str, spotify_id: str, file: dict) -> str
     Remux a FLAC file to 320kbps MP3. Update extension/bitrate in DB if successful.
     Returns the new MP3 path if successful, else None.
     """
+    import subprocess  # noqa: PLC0415
+    from datetime import datetime  # noqa: PLC0415
+
     def _is_flac_valid(flac_path: str) -> bool:
         """
         Use ffmpeg to check if a FLAC file is valid and decodable.
         Returns True if valid, False otherwise.
         """
-        import subprocess
         try:
             result = subprocess.run([
                 "ffmpeg", "-v", "error", "-i", flac_path, "-f", "null", "-"
             ], check=False, capture_output=True, text=True)
             return result.returncode == 0
         except Exception as e:
-            write_log.error("FLAC_CHECK_FAIL", "Failed to check FLAC integrity.", {"flac_path": flac_path, "error": str(e)})
+            write_log.error(
+                "FLAC_CHECK_FAIL",
+                "Failed to check FLAC integrity.",
+                {"flac_path": flac_path, "error": str(e)}
+            )
             return False
 
     mp3_path = os.path.splitext(local_file_path)[0] + ".mp3"
     try:
-        import subprocess
-        from datetime import datetime
         ffmpeg_input = local_file_path.replace("\\", "/")
         ffmpeg_output = mp3_path.replace("\\", "/")
 
         # Check FLAC integrity before remuxing
         if not _is_flac_valid(ffmpeg_input):
-            write_log.warn("FLAC_INVALID", "FLAC file failed integrity check. Skipping remux.", {"spotify_id": spotify_id, "flac_path": ffmpeg_input})
+            write_log.warn(
+                "FLAC_INVALID",
+                "FLAC file failed integrity check. Skipping remux.",
+                {"spotify_id": spotify_id, "flac_path": ffmpeg_input}
+            )
             track_db.update_track_status(spotify_id, "corrupt")
             slskd_uuid_to_blacklist = track_db.get_download_uuid_by_spotify_id(spotify_id)
             if slskd_uuid_to_blacklist:
@@ -593,12 +621,23 @@ def _remux_flac_to_mp3(local_file_path: str, spotify_id: str, file: dict) -> str
             dated_logs_dir,
             "ffmpeg_remux.log"
         )
-        write_log.info("FFMPEG_REMUX", "Remuxing FLAC to MP3 320kbps.", {"input": ffmpeg_input, "output": ffmpeg_output, "ffmpeg_log_file": ffmpeg_log_file})
+        write_log.info(
+            "FFMPEG_REMUX",
+            "Remuxing FLAC to MP3 320kbps.",
+            {"input": ffmpeg_input, "output": ffmpeg_output, "ffmpeg_log_file": ffmpeg_log_file}
+        )
         with open(ffmpeg_log_file, "a", encoding="utf-8") as logf:
-            logf.write(f"\n--- Remux {now.strftime('%Y-%m-%d %H:%M:%S')} | Spotify ID: {spotify_id} | Input: {ffmpeg_input} | Output: {ffmpeg_output} ---\n")
+            logf.write(
+                f"\n--- Remux {now.strftime('%Y-%m-%d %H:%M:%S')} "
+                f"| Spotify ID: {spotify_id} | Input: {ffmpeg_input} | Output: {ffmpeg_output} ---\n"
+            )
             subprocess.run(ffmpeg_cmd, check=True, stdout=logf, stderr=subprocess.STDOUT)
         track_db.update_extension_bitrate(spotify_id, extension="mp3", bitrate=320)
-        write_log.info("REMUX_SUCCESS", "FLAC remuxed to MP3 320kbps.", {"spotify_id": spotify_id, "mp3_path": mp3_path, "ffmpeg_log_file": ffmpeg_log_file})
+        write_log.info(
+            "REMUX_SUCCESS",
+            "FLAC remuxed to MP3 320kbps.",
+            {"spotify_id": spotify_id, "mp3_path": mp3_path, "ffmpeg_log_file": ffmpeg_log_file}
+        )
         return mp3_path
     except Exception as e:
         write_log.error("REMUX_FAIL", "Failed to remux FLAC to MP3.", {"spotify_id": spotify_id, "error": str(e)})
@@ -656,7 +695,7 @@ def reset_database() -> None:
     Production safety:
         Requires explicit confirmation when ENV is "prod".
     """
-    global track_db
+    global track_db  # noqa: PLW0603
 
     write_log.info("RESET_START", "Clearing database and M3U8 files.")
 
@@ -762,7 +801,11 @@ def task_initiate_searches() -> bool:
                 spotify_id = track_row[0]
                 current_status = track_db.get_track_status(spotify_id)
                 if current_status == "searching":
-                    write_log.debug("TASK_INITIATE_SEARCH_SKIP_SEARCHING", "Skipping track with active search.", {"spotify_id": spotify_id})
+                    write_log.debug(
+                        "TASK_INITIATE_SEARCH_SKIP_SEARCHING",
+                        "Skipping track with active search.",
+                        {"spotify_id": spotify_id}
+                    )
                     continue
                 track_name = track_row[1]
                 artist = track_row[2]
@@ -968,7 +1011,7 @@ def main(reset_db: bool = False) -> None:
         The workflow is designed to be resilient - individual failures
         are logged but don't stop the entire process.
     """
-    global track_db
+    global track_db  # noqa: PLW0602
 
     write_log.info("WORKFLOW_START", "Starting Spotiseek workflow.", {"env": ENV})
 
@@ -998,19 +1041,41 @@ def main(reset_db: bool = False) -> None:
         playlists = read_playlists_from_csv(config.playlists_csv)
         write_log.info("PLAYLISTS_LOADED", "Loaded playlists from CSV.", {"count": len(playlists)})
     except FileNotFoundError:
-        fallback_csv = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "input_playlists", "playlists.csv"))
-        write_log.warn("PLAYLISTS_CSV_MISSING", "Primary playlists CSV not found, falling back to default.", {"primary_csv": config.playlists_csv, "fallback_csv": fallback_csv})
+        fallback_csv = os.path.abspath(
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "input_playlists", "playlists.csv")
+        )
+        write_log.warn(
+            "PLAYLISTS_CSV_MISSING",
+            "Primary playlists CSV not found, falling back to default.",
+            {"primary_csv": config.playlists_csv, "fallback_csv": fallback_csv}
+        )
         try:
             playlists = read_playlists_from_csv(fallback_csv)
-            write_log.info("PLAYLISTS_LOADED_FALLBACK", "Loaded playlists from fallback CSV.", {"count": len(playlists)})
+            write_log.info(
+                "PLAYLISTS_LOADED_FALLBACK",
+                "Loaded playlists from fallback CSV.",
+                {"count": len(playlists)}
+            )
         except FileNotFoundError:
-            write_log.error("PLAYLISTS_CSV_MISSING_BOTH", "Neither environment nor fallback playlists CSV file found.", {"primary_csv": config.playlists_csv, "fallback_csv": fallback_csv})
+            write_log.error(
+                "PLAYLISTS_CSV_MISSING_BOTH",
+                "Neither environment nor fallback playlists CSV file found.",
+                {"primary_csv": config.playlists_csv, "fallback_csv": fallback_csv}
+            )
             return
         except Exception as e:
-            write_log.error("PLAYLISTS_CSV_FAIL_FALLBACK", "Failed to read fallback playlists CSV.", {"csv_path": fallback_csv, "error": str(e)})
+            write_log.error(
+                "PLAYLISTS_CSV_FAIL_FALLBACK",
+                "Failed to read fallback playlists CSV.",
+                {"csv_path": fallback_csv, "error": str(e)}
+            )
             return
     except Exception as e:
-        write_log.error("PLAYLISTS_CSV_FAIL", "Failed to read playlists CSV.", {"csv_path": config.playlists_csv, "error": str(e)})
+        write_log.error(
+            "PLAYLISTS_CSV_FAIL",
+            "Failed to read playlists CSV.",
+            {"csv_path": config.playlists_csv, "error": str(e)}
+        )
         return
 
     # Process each playlist and collect all tracks for batch download

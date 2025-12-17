@@ -155,7 +155,7 @@ def logs_to_dataframe(log_entries: list[dict]):
         Requires pandas to be installed. Import is deferred to avoid
         dependency at module load time.
     """
-    import pandas as pd
+    import pandas as pd  # noqa: PLC0415
 
     rows = [
         {
@@ -207,7 +207,7 @@ def prepare_log_summary(df_logs, warn_err_logs):
         Requires pandas. The warn_err_logs list is used to access full context
         objects that may not be in the DataFrame.
     """
-    import pandas as pd
+    import pandas as pd  # noqa: PLC0415
 
     summary = df_logs.groupby(['level', 'event_id', 'message']).size().reset_index(name='count')
     samples = []
@@ -275,7 +275,7 @@ def get_task_scheduler_logs(logs_dir: str) -> list[dict]:
             - display_name: Human-readable name for UI
             - is_current: Whether this is the current (non-rotated) log
     """
-    import pandas as pd
+    import pandas as pd  # noqa: PLC0415
 
     logs = []
 
@@ -343,7 +343,7 @@ def get_workflow_runs(logs_dir: str) -> list[dict]:
          'log_file': '...',
          'display_name': 'Tue 03 December 2025 14:30'}
     """
-    import pandas as pd
+    import pandas as pd  # noqa: PLC0415
 
     log_files = get_log_files(logs_dir)
     runs = []
@@ -385,7 +385,7 @@ def get_workflow_runs(logs_dir: str) -> list[dict]:
 
         # Extract timestamp from filename (format: prefix_YYYYMMdd_HHMMSS_ffffff)
         parts = run_id.split('_')
-        if len(parts) >= 3:
+        if len(parts) >= 3:  # noqa: PLR2004
             try:
                 # Combine date and time parts
                 date_str = parts[-3]  # YYYYMMdd
@@ -411,7 +411,7 @@ def get_workflow_runs(logs_dir: str) -> list[dict]:
     return runs
 
 
-def analyze_workflow_run(log_file: str) -> dict:
+def analyze_workflow_run(log_file: str) -> dict:  # noqa: PLR0912, PLR0915
     """
     Analyze a single workflow run and extract key metrics.
 
@@ -437,7 +437,7 @@ def analyze_workflow_run(log_file: str) -> dict:
         >>> analysis['tracks_added']
         42
     """
-    import pandas as pd
+    import pandas as pd  # noqa: PLC0415
 
     # Parse log file
     log_entries = parse_logs([log_file])
@@ -590,7 +590,7 @@ def setup_logging(
     Note:
         Must be called before any logging operations. Subsequent calls are no-ops.
     """
-    global _LOGGING_INITIALIZED
+    global _LOGGING_INITIALIZED  # noqa: PLW0603
 
     if _LOGGING_INITIALIZED:
         return

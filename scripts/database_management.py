@@ -123,7 +123,11 @@ class TrackDB:
                     "This action cannot be undone. Type 'yes' to continue: "
                 )
             except EOFError:
-                write_log.error("DB_CLEAR_CONFIRM_FAIL", "No input available for confirmation prompt. Aborting clear_database().", {"ENV": env_now})
+                write_log.error(
+                    "DB_CLEAR_CONFIRM_FAIL",
+                    "No input available for confirmation prompt. Aborting clear_database().",
+                    {"ENV": env_now}
+                )
                 raise RuntimeError(
                     "No input available for confirmation prompt. Aborting clear_database()."
                 ) from None
@@ -251,7 +255,11 @@ class TrackDB:
             slskd_uuid: The Soulseek download UUID to blacklist
             reason: Optional reason for blacklisting
         """
-        write_log.info("SLSKD_BLACKLIST_ADD", "Adding slskd_uuid to blacklist.", {"slskd_uuid": slskd_uuid, "reason": reason})
+        write_log.info(
+            "SLSKD_BLACKLIST_ADD",
+            "Adding slskd_uuid to blacklist.",
+            {"slskd_uuid": slskd_uuid, "reason": reason}
+        )
         cursor = self.conn.cursor()
         cursor.execute(
             "INSERT OR IGNORE INTO slskd_blacklist (slskd_uuid, reason) VALUES (?, ?)",
@@ -274,7 +282,7 @@ class TrackDB:
         )
         return cursor.fetchone() is not None
 
-    def add_track(
+    def add_track(  # noqa: PLR0913
         self,
         spotify_id: str,
         track_name: str,
@@ -371,7 +379,11 @@ class TrackDB:
             playlist_url: Playlist URL
             m3u8_path: Path to the m3u8 file
         """
-        write_log.debug("PLAYLIST_M3U8_UPDATE", "Updating m3u8_path for playlist.", {"playlist_url": playlist_url, "m3u8_path": m3u8_path})
+        write_log.debug(
+            "PLAYLIST_M3U8_UPDATE",
+            "Updating m3u8_path for playlist.",
+            {"playlist_url": playlist_url, "m3u8_path": m3u8_path}
+        )
         cursor = self.conn.cursor()
         cursor.execute(
             "UPDATE playlists SET m3u8_path = ? WHERE playlist_url = ?",
@@ -386,7 +398,11 @@ class TrackDB:
             playlist_url: Playlist URL
             playlist_name: Name of the playlist from Spotify
         """
-        write_log.debug("PLAYLIST_NAME_UPDATE", "Updating playlist_name for playlist.", {"playlist_url": playlist_url, "playlist_name": playlist_name})
+        write_log.debug(
+            "PLAYLIST_NAME_UPDATE",
+            "Updating playlist_name for playlist.",
+            {"playlist_url": playlist_url, "playlist_name": playlist_name}
+        )
         cursor = self.conn.cursor()
         cursor.execute(
             "UPDATE playlists SET playlist_name = ? WHERE playlist_url = ?",
@@ -406,7 +422,11 @@ class TrackDB:
             Uses INSERT OR IGNORE to prevent duplicate associations.
             A track can be linked to multiple playlists.
         """
-        write_log.debug("TRACK_LINK_PLAYLIST", "Linking track to playlist.", {"spotify_id": spotify_id, "playlist_url": playlist_url})
+        write_log.debug(
+            "TRACK_LINK_PLAYLIST",
+            "Linking track to playlist.",
+            {"spotify_id": spotify_id, "playlist_url": playlist_url}
+        )
         cursor = self.conn.cursor()
         cursor.execute(
             "INSERT OR IGNORE INTO playlist_tracks (playlist_url, spotify_id) VALUES (?, ?)",
@@ -456,7 +476,7 @@ class TrackDB:
         norm_path = slskd_file_name.replace("/", "\\")
         parts = norm_path.split("\\")
         # Only keep the last two components (subfolder and filename), or just filename if only one
-        if len(parts) >= 2:
+        if len(parts) >= 2:  # noqa: PLR2004
             trimmed = parts[-2] + "\\" + parts[-1]
         elif len(parts) == 1:
             trimmed = parts[0]
@@ -475,7 +495,9 @@ class TrackDB:
         )
         self.conn.commit()
 
-    def update_extension_bitrate(self, spotify_id: str, extension: str | None = None, bitrate: int | None = None) -> None:
+    def update_extension_bitrate(
+        self, spotify_id: str, extension: str | None = None, bitrate: int | None = None
+    ) -> None:
         """
         Update the extension and bitrate for a track.
         Args:
@@ -483,7 +505,11 @@ class TrackDB:
             extension: File extension (e.g., 'mp3', 'wav')
             bitrate: Bitrate in kbps (e.g., 320)
         """
-        write_log.debug("TRACK_UPDATE_EXT_BITRATE", "Updating extension and bitrate for track.", {"spotify_id": spotify_id, "extension": extension, "bitrate": bitrate})
+        write_log.debug(
+            "TRACK_UPDATE_EXT_BITRATE",
+            "Updating extension and bitrate for track.",
+            {"spotify_id": spotify_id, "extension": extension, "bitrate": bitrate}
+        )
         cursor = self.conn.cursor()
         cursor.execute(
             "UPDATE tracks SET extension = ?, bitrate = ? WHERE spotify_id = ?",
@@ -513,7 +539,11 @@ class TrackDB:
         """
         Set or update the search UUID for a given Spotify track.
         """
-        write_log.debug("SLSKD_SEARCH_UUID_SET", "Setting search UUID for track.", {"spotify_id": spotify_id, "slskd_search_uuid": slskd_search_uuid})
+        write_log.debug(
+            "SLSKD_SEARCH_UUID_SET",
+            "Setting search UUID for track.",
+            {"spotify_id": spotify_id, "slskd_search_uuid": slskd_search_uuid}
+        )
         cursor = self.conn.cursor()
         cursor.execute(
             "UPDATE tracks SET slskd_search_uuid = ? WHERE spotify_id = ?",
@@ -526,7 +556,11 @@ class TrackDB:
         Set or update the download UUID (and optionally username) for a given Spotify track.
         Username is updated only if provided (non-None).
         """
-        write_log.debug("SLSKD_DOWNLOAD_UUID_SET", "Setting download UUID for track.", {"spotify_id": spotify_id, "slskd_download_uuid": slskd_download_uuid, "username": username})
+        write_log.debug(
+            "SLSKD_DOWNLOAD_UUID_SET",
+            "Setting download UUID for track.",
+            {"spotify_id": spotify_id, "slskd_download_uuid": slskd_download_uuid, "username": username}
+        )
         cursor = self.conn.cursor()
         if username is not None:
             cursor.execute(
@@ -583,7 +617,11 @@ class TrackDB:
         Returns:
             Spotify track ID if found, None otherwise
         """
-        write_log.debug("SLSKD_QUERY_SPOTIFY_ID", "Querying Spotify ID for slskd_search_uuid.", {"slskd_uuid": slskd_uuid})
+        write_log.debug(
+            "SLSKD_QUERY_SPOTIFY_ID",
+            "Querying Spotify ID for slskd_search_uuid.",
+            {"slskd_uuid": slskd_uuid}
+        )
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT spotify_id FROM tracks WHERE slskd_search_uuid = ?",
@@ -602,7 +640,11 @@ class TrackDB:
         Returns:
             Spotify track ID if found, None otherwise
         """
-        write_log.debug("SLSKD_QUERY_SPOTIFY_ID_DOWNLOAD", "Querying Spotify ID for slskd_download_uuid.", {"slskd_uuid": slskd_uuid})
+        write_log.debug(
+            "SLSKD_QUERY_SPOTIFY_ID_DOWNLOAD",
+            "Querying Spotify ID for slskd_download_uuid.",
+            {"slskd_uuid": slskd_uuid}
+        )
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT spotify_id FROM tracks WHERE slskd_download_uuid = ?",
@@ -674,7 +716,11 @@ class TrackDB:
         )
         result = cursor.fetchone()
         extension = result[0] if result else None
-        write_log.debug("TRACK_EXTENSION_RESULT", "Track extension result.", {"spotify_id": spotify_id, "extension": extension})
+        write_log.debug(
+            "TRACK_EXTENSION_RESULT",
+            "Track extension result.",
+            {"spotify_id": spotify_id, "extension": extension}
+        )
         return extension
 
     def get_local_file_path(self, spotify_id: str) -> str | None:
@@ -695,7 +741,11 @@ class TrackDB:
         )
         result = cursor.fetchone()
         local_path = result[0] if result else None
-        write_log.debug("TRACK_LOCAL_PATH_RESULT", "Track local_file_path result.", {"spotify_id": spotify_id, "local_file_path": local_path})
+        write_log.debug(
+            "TRACK_LOCAL_PATH_RESULT",
+            "Track local_file_path result.",
+            {"spotify_id": spotify_id, "local_file_path": local_path}
+        )
         return local_path
 
     def update_local_file_path(self, spotify_id: str, local_file_path: str) -> None:
@@ -706,7 +756,11 @@ class TrackDB:
             spotify_id: Spotify track identifier
             local_file_path: Absolute path to the downloaded file
         """
-        write_log.debug("TRACK_LOCAL_PATH_UPDATE", "Updating local_file_path for track.", {"spotify_id": spotify_id, "local_file_path": local_file_path})
+        write_log.debug(
+            "TRACK_LOCAL_PATH_UPDATE",
+            "Updating local_file_path for track.",
+            {"spotify_id": spotify_id, "local_file_path": local_file_path}
+        )
         cursor = self.conn.cursor()
         cursor.execute(
             "UPDATE tracks SET local_file_path = ? WHERE spotify_id = ?",
@@ -748,7 +802,7 @@ def get_playlists(db_path: str) -> tuple[Optional['pd.DataFrame'], str | None]:
         Tuple of (DataFrame with playlists, error message if any)
     """
     try:
-        import pandas as pd
+        import pandas as pd  # noqa: PLC0415
         conn = sqlite3.connect(db_path)
         query = "SELECT playlist_name, playlist_url FROM playlists"
         df = pd.read_sql_query(query, conn)
@@ -766,7 +820,7 @@ def get_track_status_breakdown(db_path: str) -> tuple[Optional['pd.DataFrame'], 
         Tuple of (DataFrame with status breakdown, error message if any)
     """
     try:
-        import pandas as pd
+        import pandas as pd  # noqa: PLC0415
         conn = sqlite3.connect(db_path)
         query = "SELECT download_status, COUNT(*) as count FROM tracks GROUP BY download_status"
         df = pd.read_sql_query(query, conn)

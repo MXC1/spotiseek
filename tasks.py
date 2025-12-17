@@ -40,7 +40,10 @@ def nuke(c, env=None):
             Path('database') / 'm3u8s' / app_env
         ]
         if app_env.lower() in ["prod", "stage"]:
-            print(f"WARNING: You are about to delete directories for APP_ENV='{app_env}'. This is a critical environment!")
+            print(
+                f"WARNING: You are about to delete directories for APP_ENV='{app_env}'. "
+                "This is a critical environment!"
+            )
             for t in targets:
                 print(f"  - {t}")
             confirm = input("Are you sure you want to delete these directories? Type 'YES' to confirm: ")
@@ -59,7 +62,11 @@ def nuke(c, env=None):
                         print("Warning: rmdir failed, trying PowerShell...")
                         try:
                             # Fallback to PowerShell with force and no confirmation
-                            c.run(f'powershell -Command "Remove-Item -LiteralPath \'{abs_target}\' -Recurse -Force -Confirm:$false -ErrorAction Stop"', hide=True)
+                            ps_cmd = (
+                                f'powershell -Command "Remove-Item -LiteralPath \'{abs_target}\' '
+                                '-Recurse -Force -Confirm:$false -ErrorAction Stop"'
+                            )
+                            c.run(ps_cmd, hide=True)
                         except Exception as e2:
                             print(f"Error: Could not delete {target}: {e2}")
                             print("You may need to manually delete this directory or reboot and try again.")
@@ -94,7 +101,10 @@ def build(c):
 
 @task
 def up(c, service=None):
-    """Start all services using docker-compose. Use --build to force image rebuild. Optionally specify a service (e.g. invoke up streamlit)."""
+    """Start all services using docker-compose.
+
+    Use --build to force image rebuild. Optionally specify a service (e.g. invoke up streamlit).
+    """
     cmd = ["docker-compose", "up", "-d", "--build"]
     if service:
         cmd.append(service)

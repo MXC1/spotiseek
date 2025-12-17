@@ -101,7 +101,7 @@ def format_file_location_url(local_file_path: str) -> str:
     return f'file://localhost/{encoded_path}'
 
 
-def extract_file_metadata(local_file_path: str) -> dict[str, Any]:
+def extract_file_metadata(local_file_path: str) -> dict[str, Any]:  # noqa: PLR0912, PLR0915
     """
     Extract metadata from an audio file using mutagen.
 
@@ -207,16 +207,19 @@ def extract_file_metadata(local_file_path: str) -> dict[str, Any]:
             # Try common tag keys
             for album_key in ['album', 'ALBUM', 'Album']:
                     if audio.tags.get(album_key):
-                        metadata['album'] = str(audio.tags[album_key][0]) if isinstance(audio.tags[album_key], list) else str(audio.tags[album_key])
+                        tag_val = audio.tags[album_key]
+                        metadata['album'] = str(tag_val[0]) if isinstance(tag_val, list) else str(tag_val)
                         break
 
             for genre_key in ['genre', 'GENRE', 'Genre']:
                     if audio.tags.get(genre_key):
-                        metadata['genre'] = str(audio.tags[genre_key][0]) if isinstance(audio.tags[genre_key], list) else str(audio.tags[genre_key])
+                        tag_val = audio.tags[genre_key]
+                        metadata['genre'] = str(tag_val[0]) if isinstance(tag_val, list) else str(tag_val)
                         break
             for year_key in ['date', 'DATE', 'year', 'YEAR']:
                     if audio.tags.get(year_key):
-                        year_val = str(audio.tags[year_key][0]) if isinstance(audio.tags[year_key], list) else str(audio.tags[year_key])
+                        tag_val = audio.tags[year_key]
+                        year_val = str(tag_val[0]) if isinstance(tag_val, list) else str(tag_val)
                         year_str = year_val[:4]
                         if year_str and year_str.isdigit():
                             metadata['year'] = int(year_str)
@@ -329,7 +332,7 @@ def export_itunes_xml(xml_path: str, music_folder_url: str | None = None) -> Non
     ET.indent(tree, space="\t", level=0)
 
     # Generate XML string
-    import io
+    import io  # noqa: PLC0415
     xml_io = io.BytesIO()
     tree.write(xml_io, encoding="utf-8", xml_declaration=False)
     xml_content = xml_io.getvalue().decode("utf-8")
@@ -352,8 +355,10 @@ def _add_xml_key_value(parent: ET.Element, key: str, value: str, value_type: str
     ET.SubElement(parent, value_type).text = value
 
 
-def _add_track_to_xml(tracks_dict: ET.Element, track_id: int, track_name: str,
-                      artist: str, spotify_id: str, local_file_path: str) -> None:
+def _add_track_to_xml(  # noqa: PLR0913
+    tracks_dict: ET.Element, track_id: int, track_name: str,
+    artist: str, spotify_id: str, local_file_path: str
+) -> None:
     """Add a track entry to the tracks dictionary with file metadata."""
     track_key = ET.SubElement(tracks_dict, 'key')
     track_key.text = str(track_id)

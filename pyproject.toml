@@ -38,17 +38,7 @@ select = [
 
 # Rules to ignore (with justification)
 ignore = [
-    "E501",    # Line too long - handled by formatter
-    "E402",    # Module level import not at top - needed for env loading before imports
-    "PLR0913", # Too many arguments - acceptable for some functions
-    "PLR2004", # Magic value comparison - acceptable for constants
-    "PLW0603", # Global statement - needed for singleton patterns
-    "PLW0602", # Global without assignment - needed for database module pattern
-    "PLR0912", # Too many branches - acceptable for complex workflows
-    "PLR0915", # Too many statements - acceptable for workflow functions
-    "PLC0415", # import inside function - intentional for lazy loading and circular import prevention
     "PERF203", # try-except in loop - acceptable for error isolation in batch processing
-    "PERF401", # list comprehension - not always clearer for complex transformations
     "SIM105",  # contextlib.suppress - try-except-pass is often more readable
 ]
 
