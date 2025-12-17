@@ -721,7 +721,7 @@ def initiate_track_search(artist: str, track: str, spotify_id: str) -> tuple[str
         return None
 
     search_text = f"{artist} {track}"
-    write_log.info("SLSKD_SEARCH_INITIATE", "Initiating search for track.",
+    write_log.debug("SLSKD_SEARCH_INITIATE", "Initiating search for track.",
                   {"search_text": search_text, "spotify_id": spotify_id})
 
     try:
