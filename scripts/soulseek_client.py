@@ -505,6 +505,7 @@ def check_search_status(search_id: str) -> Tuple[bool, List[Dict[str, Any]]]:
         Tuple of (is_complete, responses)
         - is_complete: True if search finished (with or without results)
         - responses: List of response objects if any found, empty list otherwise
+        - is_complete: None if search UUID not found in slskd (e.g., data wiped)
     """
     
     try:
@@ -514,6 +515,13 @@ def check_search_status(search_id: str) -> Tuple[bool, List[Dict[str, Any]]]:
             headers={"X-API-Key": TOKEN},
             timeout=10
         )
+        
+        # If search UUID not found (404), return None to indicate missing search
+        if resp.status_code == 404:
+            write_log.warn("SLSKD_SEARCH_NOT_FOUND", "Search UUID not found in slskd", 
+                          {"search_id": search_id})
+            return (None, [])
+        
         resp.raise_for_status()
         responses = resp.json()
         
@@ -525,6 +533,13 @@ def check_search_status(search_id: str) -> Tuple[bool, List[Dict[str, Any]]]:
                 headers={"X-API-Key": TOKEN},
                 timeout=10
             )
+            
+            # If search UUID not found (404), return None to indicate missing search
+            if status_resp.status_code == 404:
+                write_log.warn("SLSKD_SEARCH_NOT_FOUND", "Search UUID not found in slskd", 
+                              {"search_id": search_id})
+                return (None, [])
+            
             status_resp.raise_for_status()
             status_data = status_resp.json()
             is_complete = status_data.get("isComplete", False) or status_data.get("state") == "Completed"
@@ -549,6 +564,8 @@ def check_search_status(search_id: str) -> Tuple[bool, List[Dict[str, Any]]]:
         return (False, [])
         
     except Exception as e:
+        write_log.debug("SLSKD_SEARCH_CHECK_ERROR", "Error checking search status.", 
+                       {"search_id": search_id, "error": str(e)})
         return (False, [])
 
 def enqueue_download(search_id: str, file: Dict[str, Any], username: str, spotify_id: str, max_retries: int = 3) -> Dict[str, Any]:
@@ -736,6 +753,15 @@ def process_search_results(search_id: str, search_text: str, spotify_id: str, ch
     try:
         # Check search status once (no polling)
         is_complete, responses = check_search_status(search_id)
+        
+        # If search UUID not found in slskd (data wiped), reset track status
+        if is_complete is None:
+            write_log.warn("SLSKD_SEARCH_UUID_LOST", "Search UUID not found in slskd, resetting track.", 
+                          {"search_id": search_id, "spotify_id": spotify_id})
+            # Clear the slskd_search_uuid and reset status to allow re-searching
+            track_db.set_search_uuid(spotify_id, None)
+            track_db.update_track_status(spotify_id, "not_found")
+            return True
         
         # If search is not complete, leave status as 'searching'
         if not is_complete:
