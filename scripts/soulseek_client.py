@@ -676,12 +676,14 @@ def enqueue_download(
                 raise
 
         except requests.RequestException as e:
+            last_error = e
             write_log.warn("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download.",
                            {"error": str(e), "filename": filename})
             track_db.update_track_status(spotify_id, "failed")
             raise
 
         except ValueError as e:
+            last_error = e
             write_log.warn("SLSKD_ENQUEUE_INVALID", "Invalid download response.", {"error": str(e)})
             track_db.update_track_status(spotify_id, "failed")
             raise
