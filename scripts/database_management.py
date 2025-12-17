@@ -14,11 +14,7 @@ from typing import TYPE_CHECKING, ClassVar, Optional
 if TYPE_CHECKING:
     import pandas as pd
 
-# Handle both relative and absolute imports for flexibility
-try:
-    from scripts.logs_utils import write_log
-except ImportError:
-    from scripts.logs_utils import write_log
+from scripts.logs_utils import write_log
 
 # Get environment configuration (used by TrackDB class)
 # Note: Avoid hard-binding to ENV/DB_PATH at import time for long-lived processes.
