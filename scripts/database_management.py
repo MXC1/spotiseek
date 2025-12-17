@@ -17,11 +17,13 @@ except ImportError:
     from scripts.logs_utils import write_log
 
 # Get environment configuration (used by TrackDB class)
-ENV = os.getenv("APP_ENV")
-
-# Construct database path based on environment (used by TrackDB class)
-DB_DIR = os.path.join(os.path.dirname(__file__), '..', 'database', ENV)
-DB_PATH = os.path.join(DB_DIR, f"database_{ENV}.db") if ENV else None
+# Note: Avoid hard-binding to ENV/DB_PATH at import time for long-lived processes.
+_IMPORT_ENV = os.getenv("APP_ENV")
+_BASE_DB_DIR = os.path.join(os.path.dirname(__file__), '..', 'database')
+_IMPORT_DB_PATH = (
+    os.path.join(_BASE_DB_DIR, _IMPORT_ENV, f"database_{_IMPORT_ENV}.db")
+    if _IMPORT_ENV else None
+)
 
 
 class TrackDB:
@@ -38,48 +40,56 @@ class TrackDB:
         conn: SQLite database connection
     """
     
-    _instance = None
+    # Maintain one instance per absolute db_path
+    _instances: dict = {}
     _lock = threading.Lock()
 
-    def __new__(cls, *args, **kwargs):
-        """Ensure only one instance of TrackDB exists (thread-safe)."""
-        with cls._lock:
-            if cls._instance is None:
-                cls._instance = super(TrackDB, cls).__new__(cls)
-                cls._instance._initialized = False
-        return cls._instance
+    def __new__(cls, db_path: Optional[str] = None, *args, **kwargs):
+        """Return a singleton instance keyed by absolute db_path."""
+        # Resolve db_path deterministically at construction time
+        if db_path is None:
+            # Build path from current environment each time, not at import
+            env_now = os.getenv("APP_ENV")
+            if not env_now:
+                raise EnvironmentError(
+                    "APP_ENV environment variable is not set. Database interaction is disabled."
+                )
+            db_dir_now = os.path.join(_BASE_DB_DIR, env_now)
+            resolved_db_path = os.path.join(db_dir_now, f"database_{env_now}.db")
+        else:
+            resolved_db_path = os.path.abspath(db_path)
 
-    def __init__(self, db_path: str = DB_PATH):
+        with cls._lock:
+            inst = cls._instances.get(resolved_db_path)
+            if inst is None:
+                inst = super(TrackDB, cls).__new__(cls)
+                inst._initialized = False
+                inst.db_path = resolved_db_path
+                cls._instances[resolved_db_path] = inst
+        return inst
+
+    def __init__(self, db_path: Optional[str] = None):
         """
         Initialize the database connection and create tables if needed.
         
         Args:
-            db_path: Path to the SQLite database file. Defaults to environment-specific path.
+            db_path: Optional path to the SQLite database file. If not provided, constructed from current APP_ENV.
         
         Note:
             Due to singleton pattern, initialization only happens once per application run.
         """
         if self._initialized:
             return
-        
-        # Validate environment configuration when TrackDB is instantiated
-        if not ENV:
-            raise EnvironmentError(
-                "APP_ENV environment variable is not set. Database interaction is disabled."
-            )
-        
-        # Normalize the db_path to resolve any .. references
-        db_path = os.path.abspath(db_path)
-        
-        # Ensure database directory exists (use path from actual db_path parameter)
-        db_dir = os.path.dirname(db_path)
+
+        # self.db_path is set in __new__; ensure directory exists
+        db_dir = os.path.dirname(self.db_path)
         write_log.info("DB_MKDIR", "Creating database directory.", {"db_dir": db_dir})
         os.makedirs(db_dir, exist_ok=True)
         
         self._initialized = True
-        write_log.info("DB_CONNECT", "Connecting to database.", {"db_path": db_path})
+        write_log.info("DB_CONNECT", "Connecting to database.", {"db_path": self.db_path})
         # Optimize SQLite connection for performance
-        self.conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30.0)
         # Enable write-ahead logging for better concurrency
         self.conn.execute("PRAGMA journal_mode=WAL")
         # Optimize query performance
@@ -100,11 +110,12 @@ class TrackDB:
             This operation is destructive and cannot be undone. All track, playlist,
             and download mapping data will be permanently lost.
         """
-        # Production environment safeguard
-        if ENV == "prod":
+        # Production environment safeguard (evaluate at runtime)
+        env_now = os.getenv("APP_ENV")
+        if env_now == "prod":
             try:
                 confirm = input(
-                    f"APP_ENV is: {ENV}.\n"
+                    f"APP_ENV is: {env_now}.\n"
                     "Are you sure you want to delete the database? "
                     "This action cannot be undone. Type 'yes' to continue: "
                 )
@@ -115,11 +126,11 @@ class TrackDB:
                 )
             
             if confirm.strip().lower() != "yes":
-                write_log.info("DB_CLEAR_ABORTED", "clear_database() aborted by user.", {"ENV": ENV})
+                write_log.info("DB_CLEAR_ABORTED", "clear_database() aborted by user.", {"ENV": env_now})
                 return
 
         # Get database path and close connection
-        db_path = getattr(self.conn, "database", DB_PATH)
+        db_path = self.db_path
         write_log.info("DB_DELETE_ATTEMPT", "Attempting to delete database file.", {"db_path": db_path})
         self.close()
         
@@ -191,21 +202,30 @@ class TrackDB:
             )
         """)
 
-        # Mapping table: links Soulseek download UUIDs to Spotify IDs
+        # Mapping table: one row per spotify_id; separate search and download UUIDs
+        # If an old slskd_mapping schema exists, recreate it to match the new structure (no migration)
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='slskd_mapping'")
+        exists = cursor.fetchone() is not None
+        if exists:
+            cursor.execute("PRAGMA table_info(slskd_mapping)")
+            existing_cols = {row[1] for row in cursor.fetchall()}
+            expected_cols = {"spotify_id", "slskd_search_uuid", "slskd_download_uuid", "username"}
+            if existing_cols != expected_cols:
+                write_log.info(
+                    "DB_MIGRATE_SLSKD_MAPPING",
+                    "Recreating slskd_mapping to new schema (dropping old, no migration).",
+                )
+                cursor.execute("DROP TABLE IF EXISTS slskd_mapping")
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS slskd_mapping (
-                slskd_uuid TEXT PRIMARY KEY,
-                spotify_id TEXT NOT NULL,
+                spotify_id TEXT PRIMARY KEY,
+                slskd_search_uuid TEXT,
+                slskd_download_uuid TEXT,
                 username TEXT,
                 FOREIGN KEY (spotify_id) REFERENCES tracks(spotify_id)
             )
         """)
-        
-        # Add username column if it does not exist (migration for existing DBs)
-        cursor.execute("PRAGMA table_info(slskd_mapping)")
-        mapping_columns = [row[1] for row in cursor.fetchall()]
-        if "username" not in mapping_columns:
-            cursor.execute("ALTER TABLE slskd_mapping ADD COLUMN username TEXT")
 
         # Blacklist table: stores blacklisted slskd_uuids
         cursor.execute("""
@@ -224,7 +244,8 @@ class TrackDB:
             ("idx_tracks_spotify_id", "tracks", "spotify_id"),
             ("idx_playlist_tracks_playlist_url", "playlist_tracks", "playlist_url"),
             ("idx_playlist_tracks_spotify_id", "playlist_tracks", "spotify_id"),
-            ("idx_slskd_mapping_spotify_id", "slskd_mapping", "spotify_id"),
+            ("idx_slskd_mapping_search_uuid", "slskd_mapping", "slskd_search_uuid"),
+            ("idx_slskd_mapping_download_uuid", "slskd_mapping", "slskd_download_uuid"),
         ]
         
         for index_name, table_name, column_name in indexes:
@@ -501,23 +522,40 @@ class TrackDB:
         )
         return cursor.fetchall()
 
-    def add_slskd_mapping(self, slskd_uuid: str, spotify_id: str, username: str = None) -> None:
+    def set_search_uuid(self, spotify_id: str, slskd_search_uuid: Optional[str]) -> None:
         """
-        Create a mapping between a Soulseek download UUID and a Spotify track ID.
-        
-        Args:
-            slskd_uuid: Unique identifier from Soulseek download system
-            spotify_id: Spotify track identifier
-            username: Soulseek username the download is from
-        
-        Note:
-            Uses INSERT OR IGNORE to prevent duplicate mappings.
+        Set or update the search UUID for a given Spotify track.
+        One row per spotify_id is maintained; this upserts the value.
         """
-        write_log.debug("SLSKD_MAPPING_ADD", "Adding slskd mapping.", {"slskd_uuid": slskd_uuid, "spotify_id": spotify_id, "username": username})
+        write_log.debug("SLSKD_SEARCH_UUID_SET", "Setting search UUID for track.", {"spotify_id": spotify_id, "slskd_search_uuid": slskd_search_uuid})
         cursor = self.conn.cursor()
         cursor.execute(
-            "INSERT OR IGNORE INTO slskd_mapping (slskd_uuid, spotify_id, username) VALUES (?, ?, ?)",
-            (slskd_uuid, spotify_id, username)
+            """
+            INSERT INTO slskd_mapping (spotify_id, slskd_search_uuid)
+            VALUES (?, ?)
+            ON CONFLICT(spotify_id) DO UPDATE SET
+                slskd_search_uuid = excluded.slskd_search_uuid
+            """,
+            (spotify_id, slskd_search_uuid)
+        )
+        self.conn.commit()
+
+    def set_download_uuid(self, spotify_id: str, slskd_download_uuid: Optional[str], username: Optional[str] = None) -> None:
+        """
+        Set or update the download UUID (and optionally username) for a given Spotify track.
+        Username is updated only if provided (non-None).
+        """
+        write_log.debug("SLSKD_DOWNLOAD_UUID_SET", "Setting download UUID for track.", {"spotify_id": spotify_id, "slskd_download_uuid": slskd_download_uuid, "username": username})
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO slskd_mapping (spotify_id, slskd_download_uuid, username)
+            VALUES (?, ?, ?)
+            ON CONFLICT(spotify_id) DO UPDATE SET
+                slskd_download_uuid = excluded.slskd_download_uuid,
+                username = COALESCE(excluded.username, slskd_mapping.username)
+            """,
+            (spotify_id, slskd_download_uuid, username)
         )
         self.conn.commit()
 
@@ -533,7 +571,7 @@ class TrackDB:
         """
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT username FROM slskd_mapping WHERE slskd_uuid = ?",
+            "SELECT username FROM slskd_mapping WHERE slskd_download_uuid = ?",
             (slskd_uuid,)
         )
         result = cursor.fetchone()
@@ -549,12 +587,12 @@ class TrackDB:
         write_log.debug("SLSKD_MAPPING_DELETE", "Deleting slskd mapping.", {"slskd_uuid": slskd_uuid})
         cursor = self.conn.cursor()
         cursor.execute(
-            "DELETE FROM slskd_mapping WHERE slskd_uuid = ?",
+            "DELETE FROM slskd_mapping WHERE slskd_download_uuid = ?",
             (slskd_uuid,)
         )
         self.conn.commit()
 
-    def get_spotify_id_by_slskd_uuid(self, slskd_uuid: str) -> Optional[str]:
+    def get_spotify_id_by_slskd_search_uuid(self, slskd_uuid: str) -> Optional[str]:
         """
         Retrieve the Spotify ID associated with a Soulseek download UUID.
         
@@ -564,28 +602,34 @@ class TrackDB:
         Returns:
             Spotify track ID if found, None otherwise
         """
-        write_log.debug("SLSKD_QUERY_SPOTIFY_ID", "Querying Spotify ID for slskd_uuid.", {"slskd_uuid": slskd_uuid})
+        write_log.debug("SLSKD_QUERY_SPOTIFY_ID", "Querying Spotify ID for slskd_search_uuid.", {"slskd_uuid": slskd_uuid})
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT spotify_id FROM slskd_mapping WHERE slskd_uuid = ?",
+            "SELECT spotify_id FROM slskd_mapping WHERE slskd_search_uuid = ?",
             (slskd_uuid,)
         )
         result = cursor.fetchone()
         return result[0] if result else None
 
-    def get_sldkd_uuid_by_spotify_id(self, spotify_id: str) -> Optional[str]:
+    def get_download_uuid_by_spotify_id(self, spotify_id: str) -> Optional[str]:
         """
         Retrieve the Soulseek download UUID associated with a Spotify track ID.
-        
-        Args:
-            spotify_id: Spotify track identifier
-        
-        Returns:
-            Soulseek download UUID if found, None otherwise
         """
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT slskd_uuid FROM slskd_mapping WHERE spotify_id = ?",
+            "SELECT slskd_download_uuid FROM slskd_mapping WHERE spotify_id = ?",
+            (spotify_id,)
+        )
+        result = cursor.fetchone()
+        return result[0] if result else None
+
+    def get_search_uuid_by_spotify_id(self, spotify_id: str) -> Optional[str]:
+        """
+        Retrieve the Soulseek search UUID associated with a Spotify track ID.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT slskd_search_uuid FROM slskd_mapping WHERE spotify_id = ?",
             (spotify_id,)
         )
         result = cursor.fetchone()
