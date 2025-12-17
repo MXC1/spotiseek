@@ -411,7 +411,100 @@ def get_workflow_runs(logs_dir: str) -> list[dict]:
     return runs
 
 
-def analyze_workflow_run(log_file: str) -> dict:  # noqa: PLR0912, PLR0915
+# Event IDs that represent key workflow milestones for timeline tracking
+_KEY_WORKFLOW_EVENTS = [
+    'WORKFLOW_START', 'WORKFLOW_COMPLETE', 'WORKFLOW_ABORTED',
+    'WORKFLOW_INTERRUPTED', 'WORKFLOW_FATAL',
+    'PLAYLISTS_LOADED', 'BATCH_SEARCH_INITIATED',
+    'REDOWNLOAD_QUEUE_INITIATED', 'XML_EXPORT_SUCCESS',
+    'SLSKD_UNAVAILABLE', 'RESET_COMPLETE'
+]
+
+
+def _init_workflow_metrics(total_logs: int) -> dict:
+    """Initialize the metrics dictionary for workflow analysis."""
+    return {
+        'total_logs': total_logs,
+        'errors': [],
+        'warnings': [],
+        'tracks_added': 0,
+        'tracks_upgraded': 0,
+        'playlists_added': 0,
+        'downloads_completed': 0,
+        'downloads_completed_new': 0,
+        'downloads_completed_upgrade': 0,
+        'downloads_failed': 0,
+        'searches_initiated': 0,
+        'new_searches': 0,
+        'upgrade_searches': 0,
+        'event_counts': {},
+        'timeline': [],
+        'workflow_status': 'unknown'
+    }
+
+
+def _update_metrics_for_event(metrics: dict, entry: dict) -> None:
+    """Update metrics counters based on the log entry's event_id."""
+    event_id = entry.get('event_id', '')
+    context = entry.get('context', {})
+
+    # Count events
+    metrics['event_counts'][event_id] = metrics['event_counts'].get(event_id, 0) + 1
+
+    # Track specific metrics using a mapping
+    event_counter_map = {
+        'TRACK_ADD': 'tracks_added',
+        'TRACK_QUALITY_UPGRADE': 'tracks_upgraded',
+        'PLAYLIST_ADD': 'playlists_added',
+        'DOWNLOAD_FAILED': 'downloads_failed',
+        'SLSKD_SEARCH_CREATE': 'searches_initiated',
+    }
+
+    if event_id in event_counter_map:
+        metrics[event_counter_map[event_id]] += 1
+    elif event_id == 'DOWNLOAD_COMPLETE':
+        metrics['downloads_completed'] += 1
+        is_new = context.get('is_new', None)
+        if is_new is True:
+            metrics['downloads_completed_new'] += 1
+        elif is_new is False:
+            metrics['downloads_completed_upgrade'] += 1
+    elif event_id == 'BATCH_SEARCH_START':
+        metrics['new_searches'] = context.get('total_tracks', 0)
+    elif event_id == 'SLSKD_REDOWNLOAD_SEARCHES_INITIATED':
+        metrics['upgrade_searches'] = context.get('initiated_count', 0)
+
+
+def _update_workflow_status(metrics: dict, event_id: str) -> None:
+    """Update the workflow status based on completion/failure events."""
+    if event_id == 'WORKFLOW_COMPLETE':
+        metrics['workflow_status'] = 'completed'
+    elif event_id in ['WORKFLOW_ABORTED', 'WORKFLOW_INTERRUPTED', 'WORKFLOW_FATAL']:
+        metrics['workflow_status'] = 'failed'
+
+
+def _add_timeline_entry(metrics: dict, entry: dict, pd_module: Any) -> None:
+    """Add a timeline entry for key workflow events."""
+    event_id = entry.get('event_id', '')
+    if event_id not in _KEY_WORKFLOW_EVENTS:
+        return
+
+    timestamp = entry.get('timestamp', '')
+    message = entry.get('message', '')
+
+    try:
+        ts = pd_module.to_datetime(timestamp, format='%Y%m%d_%H%M%S_%f')
+        metrics['timeline'].append({
+            'timestamp': ts,
+            'event_id': event_id,
+            'message': message,
+            'display_time': ts.strftime('%H:%M:%S')
+        })
+    except Exception:
+        pass
+
+
+def analyze_workflow_run(log_file: str) -> dict:
     """
     Analyze a single workflow run and extract key metrics.
 
@@ -439,39 +532,12 @@ def analyze_workflow_run(log_file: str) -> dict:  # noqa: PLR0912, PLR0915
     """
     import pandas as pd  # noqa: PLC0415
 
-    # Parse log file
     log_entries = parse_logs([log_file])
+    metrics = _init_workflow_metrics(len(log_entries))
 
-    # Initialize metrics
-    metrics = {
-        'total_logs': len(log_entries),
-        'errors': [],
-        'warnings': [],
-        'tracks_added': 0,
-        'tracks_upgraded': 0,
-        'playlists_added': 0,
-        'downloads_completed': 0,
-        'downloads_completed_new': 0,
-        'downloads_completed_upgrade': 0,
-        'downloads_failed': 0,
-        'searches_initiated': 0,
-        'new_searches': 0,
-        'upgrade_searches': 0,
-        'event_counts': {},
-        'timeline': [],
-        'workflow_status': 'unknown'
-    }
-
-    # Process each log entry
     for entry in log_entries:
         level = entry.get('level', '')
         event_id = entry.get('event_id', '')
-        timestamp = entry.get('timestamp', '')
-        message = entry.get('message', '')
-        context = entry.get('context', {})
-
-        # Count events
-        metrics['event_counts'][event_id] = metrics['event_counts'].get(event_id, 0) + 1
 
         # Collect errors and warnings
         if level == 'ERROR':
@@ -479,60 +545,10 @@ def analyze_workflow_run(log_file: str) -> dict:  # noqa: PLR0912, PLR0915
         elif level == 'WARNING':
             metrics['warnings'].append(entry)
 
-        # Track specific metrics
-        if event_id == 'TRACK_ADD':
-            metrics['tracks_added'] += 1
-        elif event_id == 'TRACK_QUALITY_UPGRADE':
-            metrics['tracks_upgraded'] += 1
-        elif event_id == 'PLAYLIST_ADD':
-            metrics['playlists_added'] += 1
-        elif event_id == 'DOWNLOAD_COMPLETE':
-            metrics['downloads_completed'] += 1
-            # Split new vs upgrade using is_new field in context
-            is_new = context.get('is_new', None)
-            if is_new is True:
-                metrics['downloads_completed_new'] += 1
-            elif is_new is False:
-                metrics['downloads_completed_upgrade'] += 1
-        elif event_id == 'DOWNLOAD_FAILED':
-            metrics['downloads_failed'] += 1
-        elif event_id == 'SLSKD_SEARCH_CREATE':
-            metrics['searches_initiated'] += 1
-        elif event_id == 'BATCH_SEARCH_START':
-            # Extract count of new track searches from context
-            track_count = context.get('total_tracks', 0)
-            metrics['new_searches'] = track_count
-        elif event_id == 'SLSKD_REDOWNLOAD_SEARCHES_INITIATED':
-            # Extract count of quality upgrade searches from context
-            initiated_count = context.get('initiated_count', 0)
-            metrics['upgrade_searches'] = initiated_count
-
-        # Build timeline of key events
-        key_events = [
-            'WORKFLOW_START', 'WORKFLOW_COMPLETE', 'WORKFLOW_ABORTED',
-            'WORKFLOW_INTERRUPTED', 'WORKFLOW_FATAL',
-            'PLAYLISTS_LOADED', 'BATCH_SEARCH_INITIATED',
-            'REDOWNLOAD_QUEUE_INITIATED', 'XML_EXPORT_SUCCESS',
-            'SLSKD_UNAVAILABLE', 'RESET_COMPLETE'
-        ]
-
-        if event_id in key_events:
-            try:
-                ts = pd.to_datetime(timestamp, format='%Y%m%d_%H%M%S_%f')
-                metrics['timeline'].append({
-                    'timestamp': ts,
-                    'event_id': event_id,
-                    'message': message,
-                    'display_time': ts.strftime('%H:%M:%S')
-                })
-            except Exception:
-                pass
-
-        # Determine workflow status
-        if event_id == 'WORKFLOW_COMPLETE':
-            metrics['workflow_status'] = 'completed'
-        elif event_id in ['WORKFLOW_ABORTED', 'WORKFLOW_INTERRUPTED', 'WORKFLOW_FATAL']:
-            metrics['workflow_status'] = 'failed'
+        # Update metrics and timeline
+        _update_metrics_for_event(metrics, entry)
+        _add_timeline_entry(metrics, entry, pd)
+        _update_workflow_status(metrics, event_id)
 
     # Sort timeline by timestamp
     metrics['timeline'].sort(key=lambda x: x['timestamp'])
