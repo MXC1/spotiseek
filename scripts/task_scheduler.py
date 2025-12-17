@@ -729,7 +729,7 @@ def main():
 
     if args.daemon:
         # Run as daemon with scheduler
-        def signal_handler(signum, frame):
+        def signal_handler():
             print("\nShutdown signal received...")
             registry.stop_scheduler()
             sys.exit(0)
