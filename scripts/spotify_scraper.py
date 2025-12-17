@@ -19,7 +19,7 @@ Public API:
 import argparse
 import os
 import re
-from typing import List, Tuple
+import sys
 
 import spotipy
 from dotenv import load_dotenv
@@ -33,16 +33,16 @@ load_dotenv()
 def clean_name(name: str) -> str:
     """
     Normalize track and artist names for improved search consistency.
-    
+
     Removes common punctuation and normalizes whitespace that may interfere
     with Soulseek search queries. This improves match rates.
-    
+
     Args:
         name: Original track or artist name from Spotify
-    
+
     Returns:
         Cleaned name with normalized spacing and removed punctuation
-    
+
     Example:
         >>> clean_name("DC Breaks, InsideInfo - Remix")
         "DC Breaks InsideInfo Remix"
@@ -53,38 +53,38 @@ def clean_name(name: str) -> str:
     name = name.replace(",", "")
     name = name.replace(" - ", " ")
     name = name.replace("&", "")
-    
+
     # Normalize whitespace (collapse multiple spaces)
     name = " ".join(name.split())
-    
+
     return name
 
 
-def get_tracks_from_playlist(playlist_url: str) -> Tuple[str, List[Tuple[str, str, str]]]:
+def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, str, str]]]:
     """
     Extract track information and playlist name from a Spotify playlist.
-    
+
     This function:
     1. Authenticates with the Spotify API using client credentials
     2. Extracts the playlist ID from the URL
     3. Fetches playlist metadata (name) and all tracks with pagination
     4. Cleans artist and track names for improved search results
     5. Returns structured track data
-    
+
     Args:
-        playlist_url: Full Spotify playlist URL 
+        playlist_url: Full Spotify playlist URL
                      (e.g., "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M")
-    
+
     Returns:
         Tuple containing:
             - playlist_name (str): The name of the playlist
             - tracks (List[Tuple]): List of (spotify_id, artists, track_name) tuples.
               Artist names are space-concatenated and cleaned.
-    
+
     Raises:
         ValueError: If API credentials are missing or playlist URL is invalid
         spotipy.SpotifyException: If API requests fail
-    
+
     Example:
         >>> playlist_name, tracks = get_tracks_from_playlist("https://open.spotify.com/playlist/...")
         >>> print(playlist_name)
@@ -117,7 +117,7 @@ def get_tracks_from_playlist(playlist_url: str) -> Tuple[str, List[Tuple[str, st
     if not match:
         write_log.error("SPOTIFY_URL_INVALID", "Invalid playlist URL format.", {"playlist_url": playlist_url})
         raise ValueError("Invalid playlist URL. Expected format: https://open.spotify.com/playlist/...")
-    
+
     playlist_id = match.group(1)
     write_log.info("SPOTIFY_FETCH", "Fetching playlist metadata and tracks.", {"playlist_id": playlist_id})
 
@@ -127,19 +127,19 @@ def get_tracks_from_playlist(playlist_url: str) -> Tuple[str, List[Tuple[str, st
         playlist_name = playlist_obj.get("name", "")
         results = playlist_obj["tracks"]
     except Exception as e:
-        write_log.error("SPOTIFY_FETCH_FAIL", "Failed to fetch playlist metadata or tracks.", 
+        write_log.error("SPOTIFY_FETCH_FAIL", "Failed to fetch playlist metadata or tracks.",
                        {"playlist_id": playlist_id, "error": str(e)})
         raise
 
     tracks = results["items"]
-    
+
     # Handle pagination for large playlists (Spotify API limits to 100 per request)
     while results["next"]:
         try:
             results = sp.next(results)
             tracks.extend(results["items"])
         except Exception as e:
-            write_log.warn("SPOTIFY_PAGINATION_FAIL", "Failed to fetch next page of tracks. Partial results returned.", 
+            write_log.warn("SPOTIFY_PAGINATION_FAIL", "Failed to fetch next page of tracks. Partial results returned.",
                           {"playlist_id": playlist_id, "error": str(e)})
             break
 
@@ -147,27 +147,27 @@ def get_tracks_from_playlist(playlist_url: str) -> Tuple[str, List[Tuple[str, st
     cleaned_tracks = []
     for idx, item in enumerate(tracks, 1):
         track = item.get("track")
-        
+
         # Skip null tracks (removed/unavailable)
         if not track:
             write_log.warn("SPOTIFY_TRACK_MISSING", "Track data is null. Skipping.", {"index": idx})
             continue
-        
+
         spotify_id = track.get("id")
         if not spotify_id:
-            write_log.warn("SPOTIFY_ID_MISSING", "Track is missing Spotify ID. Skipping.", 
+            write_log.warn("SPOTIFY_ID_MISSING", "Track is missing Spotify ID. Skipping.",
                           {"index": idx, "track_name": track.get("name")})
             continue
-        
+
         # Concatenate and clean artist names (multiple artists separated by spaces)
         artists = " ".join([clean_name(artist["name"]) for artist in track.get("artists", [])])
         track_name = clean_name(track.get("name", ""))
-        
+
         cleaned_tracks.append((spotify_id, artists, track_name))
 
-    write_log.info("SPOTIFY_FETCH_SUCCESS", "Successfully fetched and cleaned tracks.", 
+    write_log.info("SPOTIFY_FETCH_SUCCESS", "Successfully fetched and cleaned tracks.",
                   {"playlist_name": playlist_name, "track_count": len(cleaned_tracks)})
-    
+
     return playlist_name, cleaned_tracks
 
 
