@@ -1,7 +1,9 @@
-import os
-from pathlib import Path
+# ruff: noqa: ARG001
 import subprocess
+from pathlib import Path
+
 from invoke import task
+
 
 def get_app_env():
     """Read APP_ENV from .env file."""
@@ -9,7 +11,7 @@ def get_app_env():
     if not env_path.exists():
         print(".env file not found!")
         return None
-    with open(env_path, 'r') as f:
+    with open(env_path) as f:
         for line in f:
             if line.strip().startswith('APP_ENV='):
                 return line.strip().split('=', 1)[1]
@@ -39,10 +41,13 @@ def nuke(c, env=None):
             Path('database') / 'm3u8s' / app_env
         ]
         if app_env.lower() in ["prod", "stage"]:
-            print(f"WARNING: You are about to delete directories for APP_ENV='{app_env}'. This is a critical environment!")
+            print(
+                f"WARNING: You are about to delete directories for APP_ENV='{app_env}'. "
+                "This is a critical environment!"
+            )
             for t in targets:
                 print(f"  - {t}")
-            confirm = input(f"Are you sure you want to delete these directories? Type 'YES' to confirm: ")
+            confirm = input("Are you sure you want to delete these directories? Type 'YES' to confirm: ")
             if confirm != "YES":
                 print("Aborting directory deletion.")
                 return
@@ -54,11 +59,15 @@ def nuke(c, env=None):
                     try:
                         abs_target = str(target.resolve())
                         c.run(f'rmdir /s /q "{abs_target}"', hide=True)
-                    except Exception as e:
-                        print(f"Warning: rmdir failed, trying PowerShell...")
+                    except Exception:
+                        print("Warning: rmdir failed, trying PowerShell...")
                         try:
                             # Fallback to PowerShell with force and no confirmation
-                            c.run(f'powershell -Command "Remove-Item -LiteralPath \'{abs_target}\' -Recurse -Force -Confirm:$false -ErrorAction Stop"', hide=True)
+                            ps_cmd = (
+                                f'powershell -Command "Remove-Item -LiteralPath \'{abs_target}\' '
+                                '-Recurse -Force -Confirm:$false -ErrorAction Stop"'
+                            )
+                            c.run(ps_cmd, hide=True)
                         except Exception as e2:
                             print(f"Error: Could not delete {target}: {e2}")
                             print("You may need to manually delete this directory or reboot and try again.")
@@ -70,12 +79,6 @@ def nuke(c, env=None):
         print("Could not determine APP_ENV, skipping directory deletion.")
 
 @task
-def start_workflow(c, attach=False):
-    """Run the workflow script inside the Docker container. Use --detached to run in detached mode."""
-    flag = "" if attach else "-d "
-    c.run(f"docker-compose exec {flag}workflow python scripts/workflow.py")
-
-@task
 def exec(c, service, command):
     """
     Execute a command inside a running Docker container.
@@ -84,7 +87,7 @@ def exec(c, service, command):
     if not service or not command:
         print("You must specify both --service and --command.")
         return
-    subprocess.run(["docker-compose", "exec", service] + command.split(), check=True)
+    subprocess.run(["docker-compose", "exec", service, *command.split()], check=True)
 
 @task
 def build(c):
@@ -93,7 +96,10 @@ def build(c):
 
 @task
 def up(c, service=None):
-    """Start all services using docker-compose. Use --build to force image rebuild. Optionally specify a service (e.g. invoke up streamlit)."""
+    """Start all services using docker-compose.
+
+    Use --build to force image rebuild. Optionally specify a service (e.g. invoke up streamlit).
+    """
     cmd = ["docker-compose", "up", "-d", "--build"]
     if service:
         cmd.append(service)
@@ -111,7 +117,7 @@ def logs(c, service=None):
     if service:
         cmd.append(service)
     subprocess.run(cmd, check=True)
-    
+
 @task
 def prune(c):
     """Remove all stopped containers, networks, images, and volumes"""
@@ -128,9 +134,19 @@ def test(c):
     c.run(".\\.venv\\Scripts\\python.exe -m pytest")
 
 @task
+def run_all_tasks(c):
+    """Run all task scheduler tasks in dependency order inside the Docker container"""
+    subprocess.run(["docker-compose", "exec", "workflow", "python", "-m", "scripts.task_scheduler", "--run-all"], check=True)
+
+@task
 def lint(c):
-    """Run flake8 linter on scripts/"""
-    c.run(".\\.venv\\Scripts\\flake8 scripts/")
+    """Run ruff linter on scripts/ and tasks.py"""
+    c.run("ruff check scripts/ tasks.py")
+
+@task
+def lint_fix(c):
+    """Run ruff linter with auto-fix on scripts/ and tasks.py"""
+    c.run("ruff check scripts/ tasks.py --fix")
 
 @task
 def setenv(c, env):
@@ -139,11 +155,11 @@ def setenv(c, env):
     if not env_path.exists():
         print(".env file not found!")
         return
-    
+
     # Read current .env content
-    with open(env_path, 'r') as f:
+    with open(env_path) as f:
         lines = f.readlines()
-    
+
     # Update or add APP_ENV
     found = False
     for i, line in enumerate(lines):
@@ -151,14 +167,14 @@ def setenv(c, env):
             lines[i] = f'APP_ENV={env}\n'
             found = True
             break
-    
+
     if not found:
         lines.append(f'APP_ENV={env}\n')
-    
+
     # Write back to .env
     with open(env_path, 'w') as f:
         f.writelines(lines)
-    
+
     print(f"APP_ENV set to '{env}'")
     print("Running 'invoke up' to apply environment change...")
     subprocess.run(["invoke", "up"], check=True)
