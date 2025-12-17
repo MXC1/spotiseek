@@ -156,7 +156,7 @@ class WorkflowConfig:
 config = WorkflowConfig(ENV)
 
 # Initialize database connection
-track_db = TrackDB(db_path=config.db_path)
+track_db = TrackDB()
 
 
 # Playlist Processing Functions
@@ -712,7 +712,7 @@ def reset_database() -> None:
                   {"m3u8_dir": config.m3u8_dir})
 
     # Re-initialize database connection
-    track_db = TrackDB(db_path=config.db_path)
+    track_db = TrackDB()
     write_log.info("RESET_COMPLETE", "Database reset complete.")
 
 
