@@ -1,3 +1,4 @@
+# ruff: noqa: ARG001
 import subprocess
 from pathlib import Path
 

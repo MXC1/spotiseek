@@ -60,7 +60,7 @@ class TrackDB:
     _instances: ClassVar[dict] = {}
     _lock = threading.Lock()
 
-    def __new__(cls, db_path: str | None = None, *args, **kwargs):
+    def __new__(cls, db_path: str | None = None):
         """Return a singleton instance keyed by absolute db_path."""
         # Resolve db_path deterministically at construction time
         if db_path is None:
@@ -84,7 +84,7 @@ class TrackDB:
                 cls._instances[resolved_db_path] = inst
         return inst
 
-    def __init__(self, db_path: str | None = None):
+    def __init__(self):
         """
         Initialize the database connection and create tables if needed.
 

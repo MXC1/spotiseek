@@ -562,7 +562,7 @@ def _handle_completed_download(file: dict, spotify_id: str) -> None:
     _update_m3u8_files_for_track(spotify_id, final_path)
     track_db.update_track_status(spotify_id, "completed")
 
-def _remux_flac_to_mp3(local_file_path: str, spotify_id: str, file: dict) -> str:
+def _remux_flac_to_mp3(local_file_path: str, spotify_id: str) -> str:
     """
     Remux a FLAC file to 320kbps MP3. Update extension/bitrate in DB if successful.
     Returns the new MP3 path if successful, else None.
