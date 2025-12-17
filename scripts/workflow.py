@@ -31,7 +31,9 @@ import argparse
 import csv
 import os
 import re
+import subprocess
 import sys
+from datetime import datetime
 
 from dotenv import load_dotenv
 
@@ -42,7 +44,7 @@ sys.dont_write_bytecode = True
 dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(dotenv_path)
 
-from scripts.database_management import TrackDB  # noqa: E402
+from scripts.database_management import TrackData, TrackDB  # noqa: E402
 from scripts.logs_utils import setup_logging, write_log  # noqa: E402
 from scripts.m3u8_manager import (  # noqa: E402
     delete_all_m3u8_files,
@@ -280,7 +282,11 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
             spotify_id, artist, track_name = track
 
             # Add track to database (INSERT OR IGNORE - won't duplicate)
-            track_db.add_track(spotify_id=spotify_id, track_name=track_name, artist=artist)
+            track_db.add_track(TrackData(
+                spotify_id=spotify_id,
+                track_name=track_name,
+                artist=artist
+            ))
 
             # Link track to playlist in database
             track_db.link_track_to_playlist(spotify_id, playlist_url)
@@ -561,8 +567,6 @@ def _remux_flac_to_mp3(local_file_path: str, spotify_id: str, file: dict) -> str
     Remux a FLAC file to 320kbps MP3. Update extension/bitrate in DB if successful.
     Returns the new MP3 path if successful, else None.
     """
-    import subprocess  # noqa: PLC0415
-    from datetime import datetime  # noqa: PLC0415
 
     def _is_flac_valid(flac_path: str) -> bool:
         """

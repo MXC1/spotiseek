@@ -37,7 +37,7 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
-from scripts.database_management import TrackDB
+from scripts.database_management import TrackData, TrackDB
 from scripts.logs_utils import write_log
 
 load_dotenv()
@@ -567,8 +567,40 @@ def check_search_status(search_id: str) -> tuple[bool, list[dict[str, Any]]]:
                        {"search_id": search_id, "error": str(e)})
         return (False, [])
 
-def enqueue_download(  # noqa: PLR0915
-    search_id: str, file: dict[str, Any], username: str, spotify_id: str, max_retries: int = 3
+def _make_download_request(
+    url: str, payload: list[dict], attempt: int
+) -> dict[str, Any]:
+    """Make the download request to slskd API."""
+    resp = requests.post(
+        url,
+        json=payload,
+        headers={"X-API-Key": TOKEN},
+        timeout=30
+    )
+    write_log.debug(
+        "SLSKD_DOWNLOAD_RESPONSE",
+        "Download POST response.",
+        {"status_code": resp.status_code, "response_preview": resp.text[:200], "attempt": attempt + 1}
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _validate_download_response(download_response: dict[str, Any]) -> str:
+    """Validate download response and extract the slskd UUID."""
+    enqueued = download_response.get("enqueued", [])
+    if not enqueued:
+        raise ValueError("No downloads were enqueued in response.")
+
+    slskd_uuid = enqueued[0].get("id")
+    if not slskd_uuid:
+        raise ValueError("Enqueued download missing UUID.")
+
+    return slskd_uuid
+
+
+def enqueue_download(
+    file: dict[str, Any], username: str, spotify_id: str, max_retries: int = 3
 ) -> dict[str, Any]:
     """
     Queue a file for download from a Soulseek user and track the mapping.
@@ -577,7 +609,6 @@ def enqueue_download(  # noqa: PLR0915
     slskd server issues (500 errors, timeouts).
 
     Args:
-        search_id: UUID of the search that found this file
         file: File object containing 'filename' and 'size'
         username: Soulseek username to download from
         spotify_id: Spotify track ID to associate with this download
@@ -597,40 +628,18 @@ def enqueue_download(  # noqa: PLR0915
     write_log.info("SLSKD_DOWNLOAD_ENQUEUE", "Enqueuing download.",
                   {"filename": filename, "username": username, "extension": extension, "bitrate": bitrate})
 
+    url = f"{SLSKD_URL}/transfers/downloads/{username}"
+    payload = [{"filename": filename, "size": size, "username": username}]
     last_error = None
+
     for attempt in range(max_retries):
         try:
-            url = f"{SLSKD_URL}/transfers/downloads/{username}"
-            payload = [{"filename": filename, "size": size, "username": username}]
+            download_response = _make_download_request(url, payload, attempt)
+            slskd_uuid = _validate_download_response(download_response)
 
-            resp = requests.post(
-                url,
-                json=payload,
-                headers={"X-API-Key": TOKEN},
-                timeout=30  # Increased from 10 to 30 seconds
-            )
-            write_log.debug(
-                "SLSKD_DOWNLOAD_RESPONSE",
-                "Download POST response.",
-                {"status_code": resp.status_code, "response_preview": resp.text[:200], "attempt": attempt + 1}
-            )
-            resp.raise_for_status()
-
-            download_response = resp.json()
-
-            # Validate and extract enqueued download information
-            enqueued = download_response.get("enqueued", [])
-            if not enqueued:
-                raise ValueError("No downloads were enqueued in response.")
-
-            slskd_uuid = enqueued[0].get("id")
-            if not slskd_uuid:
-                raise ValueError("Enqueued download missing UUID.")
-
-            # Store mapping between Soulseek UUID and Spotify ID
+            # Update database after successful download enqueue
             write_log.info("SLSKD_ENQUEUE_SUCCESS", "Successfully enqueued download.",
                           {"slskd_uuid": slskd_uuid, "spotify_id": spotify_id, "attempt": attempt + 1})
-
             track_db.set_download_uuid(spotify_id, slskd_uuid, username)
             track_db.update_track_status(spotify_id, "downloading")
             track_db.update_slskd_file_name(spotify_id, filename)
@@ -641,7 +650,7 @@ def enqueue_download(  # noqa: PLR0915
         except (requests.Timeout, requests.exceptions.ConnectionError) as e:
             last_error = e
             if attempt < max_retries - 1:
-                wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                wait_time = 2 ** attempt
                 write_log.info("SLSKD_ENQUEUE_RETRY", "Download enqueue failed, retrying.",
                               {"error": str(e), "attempt": attempt + 1, "max_retries": max_retries,
                                "wait_time": wait_time, "filename": filename})
@@ -653,10 +662,9 @@ def enqueue_download(  # noqa: PLR0915
                 raise
 
         except requests.HTTPError as e:
-            # Retry on server errors, but not on 4xx errors
             last_error = e
             if e.response.status_code >= HTTP_SERVER_ERROR and attempt < max_retries - 1:
-                wait_time = 2 ** attempt  # Exponential backoff
+                wait_time = 2 ** attempt
                 write_log.info("SLSKD_ENQUEUE_RETRY", "Download enqueue failed with server error, retrying.",
                               {"error": str(e), "status_code": e.response.status_code, "attempt": attempt + 1,
                                "max_retries": max_retries, "wait_time": wait_time, "filename": filename})
@@ -668,7 +676,6 @@ def enqueue_download(  # noqa: PLR0915
                 raise
 
         except requests.RequestException as e:
-            last_error = e
             write_log.warn("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download.",
                            {"error": str(e), "filename": filename})
             track_db.update_track_status(spotify_id, "failed")
@@ -813,7 +820,7 @@ def process_search_results(
                           {"spotify_id": spotify_id})
 
         # Enqueue download (will update status to pending/queued)
-        enqueue_download(search_id, best_file, username, spotify_id)
+        enqueue_download(best_file, username, spotify_id)
         return True
 
     except Exception as e:
@@ -1142,7 +1149,11 @@ if __name__ == "__main__":
     setup_logging(log_name_prefix="slskd_test")
 
     for spotify_id, artist, track_name in test_tracks:
-        track_db.add_track(spotify_id, track_name, artist)
+        track_db.add_track(TrackData(
+            spotify_id=spotify_id,
+            track_name=track_name,
+            artist=artist
+        ))
         download_track(artist, track_name, spotify_id)
 
     track_db.close()

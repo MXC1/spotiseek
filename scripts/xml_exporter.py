@@ -29,6 +29,7 @@ Public API:
 - extract_file_metadata(): Extract metadata from an audio file
 """
 
+import io
 import os
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -101,7 +102,89 @@ def format_file_location_url(local_file_path: str) -> str:
     return f'file://localhost/{encoded_path}'
 
 
-def extract_file_metadata(local_file_path: str) -> dict[str, Any]:  # noqa: PLR0912, PLR0915
+def _extract_mp3_tags(audio: MP3, metadata: dict[str, Any]) -> None:
+    """Extract album, genre, and year from MP3 ID3 tags."""
+    if not audio.tags:
+        return
+
+    # Album
+    if 'TALB' in audio.tags and hasattr(audio.tags['TALB'], 'text') and audio.tags['TALB'].text:
+        metadata['album'] = str(audio.tags['TALB'].text[0])
+
+    # Genre
+    if 'TCON' in audio.tags and hasattr(audio.tags['TCON'], 'text') and audio.tags['TCON'].text:
+        metadata['genre'] = str(audio.tags['TCON'].text[0])
+
+    # Year - try TDRC first (ID3v2.4), then TYER (ID3v2.3)
+    if 'TDRC' in audio.tags and hasattr(audio.tags['TDRC'], 'text') and audio.tags['TDRC'].text:
+        year_str = str(audio.tags['TDRC'].text[0])[:4]
+        if year_str and year_str.isdigit():
+            metadata['year'] = int(year_str)
+    elif 'TYER' in audio.tags and hasattr(audio.tags['TYER'], 'text') and audio.tags['TYER'].text:
+        year_str = str(audio.tags['TYER'].text[0])
+        if year_str and year_str.isdigit():
+            metadata['year'] = int(year_str)
+
+
+def _extract_flac_tags(audio: FLAC, metadata: dict[str, Any]) -> None:
+    """Extract album, genre, and year from FLAC Vorbis comments."""
+    if not audio.tags:
+        return
+
+    if audio.tags.get('album'):
+        metadata['album'] = audio.tags['album'][0]
+    if audio.tags.get('genre'):
+        metadata['genre'] = audio.tags['genre'][0]
+    if audio.tags.get('date'):
+        date_str = audio.tags['date'][0]
+        year_str = date_str[:4]
+        if year_str and year_str.isdigit():
+            metadata['year'] = int(year_str)
+
+
+def _extract_generic_tags(audio: Any, metadata: dict[str, Any]) -> None:
+    """Extract album, genre, and year using generic tag key lookup."""
+    if not hasattr(audio, 'tags') or not audio.tags:
+        return
+
+    # Try common album tag keys
+    for album_key in ['album', 'ALBUM', 'Album']:
+        if audio.tags.get(album_key):
+            tag_val = audio.tags[album_key]
+            metadata['album'] = str(tag_val[0]) if isinstance(tag_val, list) else str(tag_val)
+            break
+
+    # Try common genre tag keys
+    for genre_key in ['genre', 'GENRE', 'Genre']:
+        if audio.tags.get(genre_key):
+            tag_val = audio.tags[genre_key]
+            metadata['genre'] = str(tag_val[0]) if isinstance(tag_val, list) else str(tag_val)
+            break
+
+    # Try common year/date tag keys
+    for year_key in ['date', 'DATE', 'year', 'YEAR']:
+        if audio.tags.get(year_key):
+            tag_val = audio.tags[year_key]
+            year_val = str(tag_val[0]) if isinstance(tag_val, list) else str(tag_val)
+            year_str = year_val[:4]
+            if year_str and year_str.isdigit():
+                metadata['year'] = int(year_str)
+            break
+
+
+def _extract_audio_info(audio: Any, metadata: dict[str, Any]) -> None:
+    """Extract bitrate, sample rate, and duration from audio info."""
+    if hasattr(audio.info, 'bitrate') and audio.info.bitrate:
+        metadata['bitrate'] = int(audio.info.bitrate / 1000)
+
+    if hasattr(audio.info, 'sample_rate') and audio.info.sample_rate:
+        metadata['sample_rate'] = int(audio.info.sample_rate)
+
+    if hasattr(audio.info, 'length') and audio.info.length:
+        metadata['duration_ms'] = int(audio.info.length * 1000)
+
+
+def extract_file_metadata(local_file_path: str) -> dict[str, Any]:
     """
     Extract metadata from an audio file using mutagen.
 
@@ -133,11 +216,8 @@ def extract_file_metadata(local_file_path: str) -> dict[str, Any]:  # noqa: PLR0
     }
 
     try:
-        # Use the path as-is for file access (works inside Docker container)
-        # Don't convert to Windows path here - that's only for XML URLs
         file_path = local_file_path
 
-        # Check if file exists
         if not os.path.exists(file_path):
             write_log.warn("FILE_NOT_FOUND", "File not found for metadata extraction.",
                           {"file_path": file_path})
@@ -157,73 +237,16 @@ def extract_file_metadata(local_file_path: str) -> dict[str, Any]:  # noqa: PLR0
                           {"file_path": file_path})
             return metadata
 
-        # Extract bitrate (convert to kbps)
-        if hasattr(audio.info, 'bitrate') and audio.info.bitrate:
-            metadata['bitrate'] = int(audio.info.bitrate / 1000)
-
-        # Extract sample rate
-        if hasattr(audio.info, 'sample_rate') and audio.info.sample_rate:
-            metadata['sample_rate'] = int(audio.info.sample_rate)
-
-        # Extract duration (convert to milliseconds)
-        if hasattr(audio.info, 'length') and audio.info.length:
-            metadata['duration_ms'] = int(audio.info.length * 1000)
+        # Extract audio info (bitrate, sample rate, duration)
+        _extract_audio_info(audio, metadata)
 
         # Extract tags based on file format
         if isinstance(audio, MP3):
-            # MP3 ID3 tags
-            if audio.tags:
-                # Album
-                    if 'TALB' in audio.tags and hasattr(audio.tags['TALB'], 'text') and audio.tags['TALB'].text:
-                        metadata['album'] = str(audio.tags['TALB'].text[0])
-                # Genre
-                    if 'TCON' in audio.tags and hasattr(audio.tags['TCON'], 'text') and audio.tags['TCON'].text:
-                        metadata['genre'] = str(audio.tags['TCON'].text[0])
-                # Year
-                    if 'TDRC' in audio.tags and hasattr(audio.tags['TDRC'], 'text') and audio.tags['TDRC'].text:
-                        year_str = str(audio.tags['TDRC'].text[0])[:4]
-                        if year_str and year_str.isdigit():
-                            metadata['year'] = int(year_str)
-                    elif 'TYER' in audio.tags and hasattr(audio.tags['TYER'], 'text') and audio.tags['TYER'].text:
-                        year_str = str(audio.tags['TYER'].text[0])
-                        if year_str and year_str.isdigit():
-                            metadata['year'] = int(year_str)
-
+            _extract_mp3_tags(audio, metadata)
         elif isinstance(audio, FLAC):
-            # FLAC Vorbis comments
-            if audio.tags:
-                    if audio.tags.get('album'):
-                        metadata['album'] = audio.tags['album'][0]
-                    if audio.tags.get('genre'):
-                        metadata['genre'] = audio.tags['genre'][0]
-                    if audio.tags.get('date'):
-                        date_str = audio.tags['date'][0]
-                        year_str = date_str[:4]
-                        if year_str and year_str.isdigit():
-                            metadata['year'] = int(year_str)
-
-        # Generic tag handling for other formats
-        elif hasattr(audio, 'tags') and audio.tags:
-            # Try common tag keys
-            for album_key in ['album', 'ALBUM', 'Album']:
-                    if audio.tags.get(album_key):
-                        tag_val = audio.tags[album_key]
-                        metadata['album'] = str(tag_val[0]) if isinstance(tag_val, list) else str(tag_val)
-                        break
-
-            for genre_key in ['genre', 'GENRE', 'Genre']:
-                    if audio.tags.get(genre_key):
-                        tag_val = audio.tags[genre_key]
-                        metadata['genre'] = str(tag_val[0]) if isinstance(tag_val, list) else str(tag_val)
-                        break
-            for year_key in ['date', 'DATE', 'year', 'YEAR']:
-                    if audio.tags.get(year_key):
-                        tag_val = audio.tags[year_key]
-                        year_val = str(tag_val[0]) if isinstance(tag_val, list) else str(tag_val)
-                        year_str = year_val[:4]
-                        if year_str and year_str.isdigit():
-                            metadata['year'] = int(year_str)
-                        break
+            _extract_flac_tags(audio, metadata)
+        else:
+            _extract_generic_tags(audio, metadata)
 
         write_log.debug("METADATA_EXTRACTED", "Successfully extracted file metadata.",
                        {"file_path": file_path, "metadata": metadata})
@@ -332,7 +355,6 @@ def export_itunes_xml(xml_path: str, music_folder_url: str | None = None) -> Non
     ET.indent(tree, space="\t", level=0)
 
     # Generate XML string
-    import io  # noqa: PLC0415
     xml_io = io.BytesIO()
     tree.write(xml_io, encoding="utf-8", xml_declaration=False)
     xml_content = xml_io.getvalue().decode("utf-8")

@@ -8,6 +8,7 @@ that tracks Spotify playlists, tracks, download statuses, and mappings to Soulse
 import os
 import sqlite3
 import threading
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Optional
 
 if TYPE_CHECKING:
@@ -27,6 +28,18 @@ _IMPORT_DB_PATH = (
     os.path.join(_BASE_DB_DIR, _IMPORT_ENV, f"database_{_IMPORT_ENV}.db")
     if _IMPORT_ENV else None
 )
+
+
+@dataclass
+class TrackData:
+    """Data class for track information to reduce function parameters."""
+    spotify_id: str
+    track_name: str
+    artist: str
+    download_status: str = "pending"
+    slskd_file_name: str | None = None
+    extension: str | None = None
+    bitrate: int | None = None
 
 
 class TrackDB:
@@ -282,26 +295,13 @@ class TrackDB:
         )
         return cursor.fetchone() is not None
 
-    def add_track(  # noqa: PLR0913
-        self,
-        spotify_id: str,
-        track_name: str,
-        artist: str,
-        download_status: str = "pending",
-        slskd_file_name: str | None = None,
-        extension: str | None = None,
-        bitrate: int | None = None
-    ) -> None:
+    def add_track(self, track_data: TrackData) -> None:
         """
         Add a track to the database if it doesn't already exist.
+
         Args:
-            spotify_id: Unique Spotify track identifier
-            track_name: Name of the track
-            artist: Artist name(s)
-            download_status: Initial download status (default: "pending")
-            slskd_file_name: Optional filename from Soulseek download
-            extension: File extension (e.g., 'mp3', 'wav')
-            bitrate: Bitrate in kbps (e.g., 320)
+            track_data: TrackData object containing track information
+
         Note:
             Uses INSERT OR IGNORE to prevent duplicate entries. If the track
             already exists, this operation has no effect.
@@ -309,18 +309,18 @@ class TrackDB:
         cursor = self.conn.cursor()
 
         # Check if track already exists
-        cursor.execute("SELECT 1 FROM tracks WHERE spotify_id = ?", (spotify_id,))
+        cursor.execute("SELECT 1 FROM tracks WHERE spotify_id = ?", (track_data.spotify_id,))
         already_exists = cursor.fetchone() is not None
 
         if not already_exists:
             write_log.debug(
                 "TRACK_ADD", "Adding track.", {
-                    "spotify_id": spotify_id,
-                    "track_name": track_name,
-                    "artist": artist,
-                    "status": download_status,
-                    "extension": extension,
-                    "bitrate": bitrate
+                    "spotify_id": track_data.spotify_id,
+                    "track_name": track_data.track_name,
+                    "artist": track_data.artist,
+                    "status": track_data.download_status,
+                    "extension": track_data.extension,
+                    "bitrate": track_data.bitrate
                 }
             )
 
@@ -330,7 +330,9 @@ class TrackDB:
             (spotify_id, track_name, artist, download_status, slskd_file_name, extension, bitrate)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (spotify_id, track_name, artist, download_status, slskd_file_name, extension, bitrate)
+            (track_data.spotify_id, track_data.track_name, track_data.artist,
+             track_data.download_status, track_data.slskd_file_name,
+             track_data.extension, track_data.bitrate)
         )
         self.conn.commit()
 
