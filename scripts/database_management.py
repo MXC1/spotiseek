@@ -107,7 +107,7 @@ class TrackDB:
         # Optimize SQLite connection for performance
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30.0)
         # Enable write-ahead logging for better concurrency
-        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA journal_mode=WAL").fetchone()
         # Optimize query performance
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self._create_tables()
