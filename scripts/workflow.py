@@ -394,7 +394,7 @@ def _update_file_status(file: dict, username: str = None) -> None:
         username: Soulseek username the download is from (used for removing failed downloads)
     """
     slskd_uuid = file.get("id")
-    spotify_id = track_db.get_spotify_id_by_slskd_search_uuid(slskd_uuid)
+    spotify_id = track_db.get_spotify_id_by_slskd_download_uuid(slskd_uuid)
     download_username = username or track_db.get_username_by_slskd_uuid(slskd_uuid)
     
     if not spotify_id:
