@@ -158,7 +158,7 @@ class TrackDB:
         write_log.info("DB_CREATE_TABLES", "Creating database tables if they don't exist.")
         cursor = self.conn.cursor()
 
-        # Tracks table: stores track metadata and download state
+        # Tracks table: stores track metadata, download state, and Soulseek mappings
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS tracks (
                 spotify_id TEXT PRIMARY KEY,
@@ -169,17 +169,26 @@ class TrackDB:
                 local_file_path TEXT,
                 extension TEXT,
                 bitrate INTEGER,
+                slskd_search_uuid TEXT,
+                slskd_download_uuid TEXT,
+                username TEXT,
                 added_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
         
-        # Add extension and bitrate columns if they do not exist (migration for existing DBs)
+        # Add extension, bitrate, and slskd columns if they do not exist (migration for existing DBs)
         cursor.execute("PRAGMA table_info(tracks)")
         columns = [row[1] for row in cursor.fetchall()]
         if "extension" not in columns:
             cursor.execute("ALTER TABLE tracks ADD COLUMN extension TEXT")
         if "bitrate" not in columns:
             cursor.execute("ALTER TABLE tracks ADD COLUMN bitrate INTEGER")
+        if "slskd_search_uuid" not in columns:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN slskd_search_uuid TEXT")
+        if "slskd_download_uuid" not in columns:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN slskd_download_uuid TEXT")
+        if "username" not in columns:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN username TEXT")
 
 
         # Playlists table: stores playlist information, m3u8 path, and playlist name
@@ -202,31 +211,6 @@ class TrackDB:
             )
         """)
 
-        # Mapping table: one row per spotify_id; separate search and download UUIDs
-        # If an old slskd_mapping schema exists, recreate it to match the new structure (no migration)
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='slskd_mapping'")
-        exists = cursor.fetchone() is not None
-        if exists:
-            cursor.execute("PRAGMA table_info(slskd_mapping)")
-            existing_cols = {row[1] for row in cursor.fetchall()}
-            expected_cols = {"spotify_id", "slskd_search_uuid", "slskd_download_uuid", "username"}
-            if existing_cols != expected_cols:
-                write_log.info(
-                    "DB_MIGRATE_SLSKD_MAPPING",
-                    "Recreating slskd_mapping to new schema (dropping old, no migration).",
-                )
-                cursor.execute("DROP TABLE IF EXISTS slskd_mapping")
-
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS slskd_mapping (
-                spotify_id TEXT PRIMARY KEY,
-                slskd_search_uuid TEXT,
-                slskd_download_uuid TEXT,
-                username TEXT,
-                FOREIGN KEY (spotify_id) REFERENCES tracks(spotify_id)
-            )
-        """)
-
         # Blacklist table: stores blacklisted slskd_uuids
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS slskd_blacklist (
@@ -242,10 +226,10 @@ class TrackDB:
             ("idx_tracks_local_file_path", "tracks", "local_file_path"),
             ("idx_tracks_download_status", "tracks", "download_status"),
             ("idx_tracks_spotify_id", "tracks", "spotify_id"),
+            ("idx_tracks_search_uuid", "tracks", "slskd_search_uuid"),
+            ("idx_tracks_download_uuid", "tracks", "slskd_download_uuid"),
             ("idx_playlist_tracks_playlist_url", "playlist_tracks", "playlist_url"),
             ("idx_playlist_tracks_spotify_id", "playlist_tracks", "spotify_id"),
-            ("idx_slskd_mapping_search_uuid", "slskd_mapping", "slskd_search_uuid"),
-            ("idx_slskd_mapping_download_uuid", "slskd_mapping", "slskd_download_uuid"),
         ]
         
         for index_name, table_name, column_name in indexes:
@@ -525,18 +509,12 @@ class TrackDB:
     def set_search_uuid(self, spotify_id: str, slskd_search_uuid: Optional[str]) -> None:
         """
         Set or update the search UUID for a given Spotify track.
-        One row per spotify_id is maintained; this upserts the value.
         """
         write_log.debug("SLSKD_SEARCH_UUID_SET", "Setting search UUID for track.", {"spotify_id": spotify_id, "slskd_search_uuid": slskd_search_uuid})
         cursor = self.conn.cursor()
         cursor.execute(
-            """
-            INSERT INTO slskd_mapping (spotify_id, slskd_search_uuid)
-            VALUES (?, ?)
-            ON CONFLICT(spotify_id) DO UPDATE SET
-                slskd_search_uuid = excluded.slskd_search_uuid
-            """,
-            (spotify_id, slskd_search_uuid)
+            "UPDATE tracks SET slskd_search_uuid = ? WHERE spotify_id = ?",
+            (slskd_search_uuid, spotify_id)
         )
         self.conn.commit()
 
@@ -547,16 +525,16 @@ class TrackDB:
         """
         write_log.debug("SLSKD_DOWNLOAD_UUID_SET", "Setting download UUID for track.", {"spotify_id": spotify_id, "slskd_download_uuid": slskd_download_uuid, "username": username})
         cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO slskd_mapping (spotify_id, slskd_download_uuid, username)
-            VALUES (?, ?, ?)
-            ON CONFLICT(spotify_id) DO UPDATE SET
-                slskd_download_uuid = excluded.slskd_download_uuid,
-                username = COALESCE(excluded.username, slskd_mapping.username)
-            """,
-            (spotify_id, slskd_download_uuid, username)
-        )
+        if username is not None:
+            cursor.execute(
+                "UPDATE tracks SET slskd_download_uuid = ?, username = ? WHERE spotify_id = ?",
+                (slskd_download_uuid, username, spotify_id)
+            )
+        else:
+            cursor.execute(
+                "UPDATE tracks SET slskd_download_uuid = ? WHERE spotify_id = ?",
+                (slskd_download_uuid, spotify_id)
+            )
         self.conn.commit()
 
     def get_username_by_slskd_uuid(self, slskd_uuid: str) -> Optional[str]:
@@ -571,7 +549,7 @@ class TrackDB:
         """
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT username FROM slskd_mapping WHERE slskd_download_uuid = ?",
+            "SELECT username FROM tracks WHERE slskd_download_uuid = ?",
             (slskd_uuid,)
         )
         result = cursor.fetchone()
@@ -579,25 +557,25 @@ class TrackDB:
 
     def delete_slskd_mapping(self, slskd_uuid: str) -> None:
         """
-        Delete a mapping between a Soulseek download UUID and a Spotify track ID.
+        Clear the Soulseek download UUID mapping for a track.
         
         Args:
             slskd_uuid: Soulseek download UUID to remove
         """
-        write_log.debug("SLSKD_MAPPING_DELETE", "Deleting slskd mapping.", {"slskd_uuid": slskd_uuid})
+        write_log.debug("SLSKD_MAPPING_DELETE", "Clearing slskd download UUID.", {"slskd_uuid": slskd_uuid})
         cursor = self.conn.cursor()
         cursor.execute(
-            "DELETE FROM slskd_mapping WHERE slskd_download_uuid = ?",
+            "UPDATE tracks SET slskd_download_uuid = NULL WHERE slskd_download_uuid = ?",
             (slskd_uuid,)
         )
         self.conn.commit()
 
     def get_spotify_id_by_slskd_search_uuid(self, slskd_uuid: str) -> Optional[str]:
         """
-        Retrieve the Spotify ID associated with a Soulseek download UUID.
+        Retrieve the Spotify ID associated with a Soulseek search UUID.
         
         Args:
-            slskd_uuid: Soulseek download UUID
+            slskd_uuid: Soulseek search UUID
         
         Returns:
             Spotify track ID if found, None otherwise
@@ -605,7 +583,7 @@ class TrackDB:
         write_log.debug("SLSKD_QUERY_SPOTIFY_ID", "Querying Spotify ID for slskd_search_uuid.", {"slskd_uuid": slskd_uuid})
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT spotify_id FROM slskd_mapping WHERE slskd_search_uuid = ?",
+            "SELECT spotify_id FROM tracks WHERE slskd_search_uuid = ?",
             (slskd_uuid,)
         )
         result = cursor.fetchone()
@@ -617,7 +595,7 @@ class TrackDB:
         """
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT slskd_download_uuid FROM slskd_mapping WHERE spotify_id = ?",
+            "SELECT slskd_download_uuid FROM tracks WHERE spotify_id = ?",
             (spotify_id,)
         )
         result = cursor.fetchone()
@@ -629,7 +607,7 @@ class TrackDB:
         """
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT slskd_search_uuid FROM slskd_mapping WHERE spotify_id = ?",
+            "SELECT slskd_search_uuid FROM tracks WHERE spotify_id = ?",
             (spotify_id,)
         )
         result = cursor.fetchone()
