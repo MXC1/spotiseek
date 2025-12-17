@@ -137,7 +137,7 @@ def test(c):
 @task
 def run_all_tasks(c):
     """Run all task scheduler tasks in dependency order inside the Docker container"""
-    subprocess.run(["docker-compose", "exec", "workflow", "python", "-m", "scripts.task_scheduler", "--run-all"], check=True)
+    subprocess.run(["docker-compose", "exec", "-d", "workflow", "python", "-m", "scripts.task_scheduler", "--run-all"], check=True)
 
 @task
 def lint(c):
