@@ -16,12 +16,21 @@ def get_app_env():
     print("APP_ENV not found in .env!")
     return None
 
-@task
-def nuke(c):
-    """Stop containers, prune system, and delete slskd_docker_data/<APP_ENV> directory."""
+@task(help={
+    'env': "Optional environment name to override APP_ENV (e.g. test_new)"
+})
+def nuke(c, env=None):
+    """Stop containers, prune system, and delete environment directories.
+
+    Usage:
+      invoke nuke [--env=<environment>]
+
+    If --env is provided, that value is used for app_env. Otherwise, APP_ENV is
+    read from .env via get_app_env().
+    """
     subprocess.run(["docker-compose", "down"], check=True)
     subprocess.run(["docker", "system", "prune", "-a", "--volumes", "-f"], check=True)
-    app_env = get_app_env()
+    app_env = env if env else get_app_env()
     if app_env:
         targets = [
             Path('slskd_docker_data') / app_env,
