@@ -394,7 +394,7 @@ def _update_file_status(file: dict, username: str = None) -> None:
         username: Soulseek username the download is from (used for removing failed downloads)
     """
     slskd_uuid = file.get("id")
-    spotify_id = track_db.get_spotify_id_by_slskd_uuid(slskd_uuid)
+    spotify_id = track_db.get_spotify_id_by_slskd_search_uuid(slskd_uuid)
     download_username = username or track_db.get_username_by_slskd_uuid(slskd_uuid)
     
     if not spotify_id:
@@ -561,7 +561,7 @@ def _remux_flac_to_mp3(local_file_path: str, spotify_id: str, file: dict) -> str
         if not _is_flac_valid(ffmpeg_input):
             write_log.warn("FLAC_INVALID", "FLAC file failed integrity check. Skipping remux.", {"spotify_id": spotify_id, "flac_path": ffmpeg_input})
             track_db.update_track_status(spotify_id, "corrupt")
-            slskd_uuid_to_blacklist = track_db.get_sldkd_uuid_by_spotify_id(spotify_id)
+            slskd_uuid_to_blacklist = track_db.get_download_uuid_by_spotify_id(spotify_id)
             if slskd_uuid_to_blacklist:
                 track_db.add_slskd_blacklist(slskd_uuid_to_blacklist, reason="corrupt_flac")
             return local_file_path

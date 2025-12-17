@@ -610,7 +610,7 @@ def enqueue_download(search_id: str, file: Dict[str, Any], username: str, spotif
             write_log.info("SLSKD_ENQUEUE_SUCCESS", "Successfully enqueued download.", 
                           {"slskd_uuid": slskd_uuid, "spotify_id": spotify_id, "attempt": attempt + 1})
             
-            track_db.add_slskd_mapping(slskd_uuid, spotify_id, username)
+            track_db.set_download_uuid(spotify_id, slskd_uuid, username)
             track_db.update_track_status(spotify_id, "downloading")
             track_db.update_slskd_file_name(spotify_id, filename)
             track_db.update_extension_bitrate(spotify_id, extension, bitrate)
@@ -698,8 +698,8 @@ def initiate_track_search(artist: str, track: str, spotify_id: str) -> Optional[
         # Create search without waiting for results
         search_id = create_search(search_text)
         
-        # Store the mapping immediately so we can find it later
-        track_db.add_slskd_mapping(search_id, spotify_id)
+        # Store the search mapping immediately so we can find it later
+        track_db.set_search_uuid(spotify_id, search_id)
         
         # Update status to searching after mapping is stored
         track_db.update_track_status(spotify_id, "searching")
@@ -872,7 +872,7 @@ def process_pending_searches() -> None:
         local_file_path = track_row[6] if len(track_row) > 6 else None  # Column 6 is local_file_path
         
         # Try to get the slskd search UUID for this track
-        slskd_uuid = track_db.get_sldkd_uuid_by_spotify_id(spotify_id)
+        slskd_uuid = track_db.get_search_uuid_by_spotify_id(spotify_id)
         
         if not slskd_uuid:
             write_log.warn("SEARCH_UUID_MISSING", "No search UUID found for track in searching status.", 
@@ -1056,7 +1056,7 @@ def process_redownload_queue() -> None:
         search_text = f"{artist} {track_name}"
         try:
             search_id = create_search(search_text)
-            track_db.add_slskd_mapping(search_id, spotify_id)
+            track_db.set_search_uuid(spotify_id, search_id)
             track_db.update_track_status(spotify_id, "searching")
             initiated_count += 1
             write_log.debug("SLSKD_REDOWNLOAD_SEARCH_INITIATED", "Initiated upgrade search.", 
