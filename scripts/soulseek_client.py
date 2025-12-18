@@ -676,7 +676,7 @@ def enqueue_download(
             else:
                 write_log.warn("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download after all retries.",
                                {"error": str(e), "filename": filename, "attempts": max_retries})
-                track_db.update_track_status(spotify_id, "failed")
+                track_db.update_track_status(spotify_id, "failed", failed_reason=str(e))
                 raise
 
         except requests.HTTPError as e:
@@ -690,20 +690,20 @@ def enqueue_download(
             else:
                 write_log.warn("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download.",
                                {"error": str(e), "filename": filename, "attempts": attempt + 1})
-                track_db.update_track_status(spotify_id, "failed")
+                track_db.update_track_status(spotify_id, "failed", failed_reason=str(e))
                 raise
 
         except requests.RequestException as e:
             last_error = e
             write_log.warn("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download.",
                            {"error": str(e), "filename": filename})
-            track_db.update_track_status(spotify_id, "failed")
+            track_db.update_track_status(spotify_id, "failed", failed_reason=str(e))
             raise
 
         except ValueError as e:
             last_error = e
             write_log.warn("SLSKD_ENQUEUE_INVALID", "Invalid download response.", {"error": str(e)})
-            track_db.update_track_status(spotify_id, "failed")
+            track_db.update_track_status(spotify_id, "failed", failed_reason=str(e))
             raise
 
     # This should not be reached due to raise in the loop, but just in case
@@ -757,7 +757,7 @@ def initiate_track_search(artist: str, track: str, spotify_id: str) -> tuple[str
     except Exception as e:
         write_log.warn("SLSKD_SEARCH_INITIATE_FAIL", "Failed to initiate search.",
                        {"artist": artist, "track": track, "error": str(e)})
-        track_db.update_track_status(spotify_id, "failed")
+        track_db.update_track_status(spotify_id, "failed", failed_reason=str(e))
         return None
 
 
@@ -846,7 +846,7 @@ def process_search_results(
     except Exception as e:
         write_log.warn("SLSKD_SEARCH_PROCESS_FAIL", "Failed to process search results.",
                        {"search_id": search_id, "spotify_id": spotify_id, "error": str(e)})
-        track_db.update_track_status(spotify_id, "failed")
+        track_db.update_track_status(spotify_id, "failed", failed_reason=str(e))
 
 
 def download_track(artist: str, track: str, spotify_id: str) -> None:
@@ -1138,7 +1138,7 @@ def process_redownload_queue() -> None:
         except Exception as e:
             write_log.warn("SLSKD_REDOWNLOAD_SEARCH_FAIL", "Failed to create search for upgrade.",
                           {"spotify_id": spotify_id, "error": str(e)})
-            track_db.update_track_status(spotify_id, "failed")
+            track_db.update_track_status(spotify_id, "failed", failed_reason=str(e))
 
     write_log.info("SLSKD_REDOWNLOAD_SEARCHES_INITIATED", "All upgrade searches initiated.",
                   {"initiated_count": initiated_count})

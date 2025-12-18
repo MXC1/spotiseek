@@ -104,7 +104,7 @@ def parse_logs(log_files: list[str]) -> list[dict]:
     log_entries = []
     for file_path in log_files:
         try:
-            with open(file_path, encoding='utf-8') as f:
+            with open(file_path, encoding='utf-8', errors='replace') as f:
                 for line in f:
                     try:
                         entry = json.loads(line.strip())

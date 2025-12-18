@@ -135,9 +135,10 @@ def test(c):
     c.run(".\\.venv\\Scripts\\python.exe -m pytest")
 
 @task
-def run_all_tasks(c):
+def run_all_tasks(c, attach=False):
     """Run all task scheduler tasks in dependency order inside the Docker container"""
-    subprocess.run(["docker-compose", "exec", "-d", "workflow", "python", "-m", "scripts.task_scheduler", "--run-all"], check=True)
+    flag = "" if attach else " -d "
+    subprocess.run(["docker-compose", f"exec{flag}", "workflow", "python", "-m", "scripts.task_scheduler", "--run-all"], check=True)
 
 @task
 def lint(c):
