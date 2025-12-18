@@ -33,6 +33,7 @@ class TrackData:
     track_name: str
     artist: str
     download_status: str = "pending"
+    failed_reason: str | None = None
     slskd_file_name: str | None = None
     extension: str | None = None
     bitrate: int | None = None
@@ -181,6 +182,7 @@ class TrackDB:
                 track_name TEXT NOT NULL,
                 artist TEXT NOT NULL,
                 download_status TEXT NOT NULL,
+                failed_reason TEXT,
                 slskd_file_name TEXT,
                 local_file_path TEXT,
                 extension TEXT,
@@ -205,6 +207,8 @@ class TrackDB:
             cursor.execute("ALTER TABLE tracks ADD COLUMN slskd_download_uuid TEXT")
         if "username" not in columns:
             cursor.execute("ALTER TABLE tracks ADD COLUMN username TEXT")
+        if "failed_reason" not in columns:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN failed_reason TEXT")
 
 
         # Playlists table: stores playlist information, m3u8 path, and playlist name
@@ -323,12 +327,12 @@ class TrackDB:
         cursor.execute(
             """
             INSERT OR IGNORE INTO tracks
-            (spotify_id, track_name, artist, download_status, slskd_file_name, extension, bitrate)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+              (spotify_id, track_name, artist, download_status, failed_reason, slskd_file_name, extension, bitrate)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (track_data.spotify_id, track_data.track_name, track_data.artist,
-             track_data.download_status, track_data.slskd_file_name,
-             track_data.extension, track_data.bitrate)
+               track_data.download_status, track_data.failed_reason,
+               track_data.slskd_file_name, track_data.extension, track_data.bitrate)
         )
         self.conn.commit()
 
@@ -362,7 +366,7 @@ class TrackDB:
             return result[0]  # Return the existing playlist ID
 
         # Insert the new playlist - only log when actually adding
-        write_log.info("PLAYLIST_ADD", "Adding playlist.", {"playlist_url": playlist_url})
+        write_log.debug("PLAYLIST_ADD", "Adding playlist.", {"playlist_url": playlist_url})
         cursor.execute(
             "INSERT INTO playlists (playlist_url, m3u8_path, playlist_name) VALUES (?, ?, ?)",
             (playlist_url, m3u8_path, playlist_name)
@@ -435,7 +439,8 @@ class TrackDB:
     def update_track_status(
         self,
         spotify_id: str,
-        status: str
+        status: str,
+        failed_reason: str | None = None
     ) -> None:
         """
         Update the download status for a track.
@@ -443,18 +448,23 @@ class TrackDB:
         Args:
             spotify_id: Spotify track identifier
             status: New download status (e.g., "pending", "downloading", "completed", "failed")
+            failed_reason: Optional reason when status is set to "failed"
         """
-        write_log.debug(
-            "TRACK_STATUS_UPDATE", "Updating track status.", {
-                "spotify_id": spotify_id,
-                "status": status
-            }
-        )
+        context = {"spotify_id": spotify_id, "status": status}
+        if failed_reason:
+            context["failed_reason"] = failed_reason
+        write_log.debug("TRACK_STATUS_UPDATE", "Updating track status.", context)
         cursor = self.conn.cursor()
-        cursor.execute(
-            "UPDATE tracks SET download_status = ? WHERE spotify_id = ?",
-            (status, spotify_id)
-        )
+        if status == "failed":
+            cursor.execute(
+                "UPDATE tracks SET download_status = ?, failed_reason = ? WHERE spotify_id = ?",
+                (status, failed_reason, spotify_id)
+            )
+        else:
+            cursor.execute(
+                "UPDATE tracks SET download_status = ?, failed_reason = NULL WHERE spotify_id = ?",
+                (status, spotify_id)
+            )
         self.conn.commit()
 
     def update_slskd_file_name(
@@ -821,6 +831,36 @@ def get_track_status_breakdown(db_path: str) -> tuple[Optional['pd.DataFrame'], 
         import pandas as pd  # noqa: PLC0415
         conn = sqlite3.connect(db_path)
         query = "SELECT download_status, COUNT(*) as count FROM tracks GROUP BY download_status"
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+        return df, None
+    except Exception as e:
+        return None, str(e)
+
+
+def get_failed_reason_breakdown(db_path: str) -> tuple[Optional['pd.DataFrame'], str | None]:
+    """
+    Retrieve breakdown of reasons why tracks don't have a local_file_path.
+
+    Includes all tracks without a local file path, grouped by download_status and failed_reason.
+
+    Args:
+        db_path: Path to the SQLite database file
+
+    Returns:
+        Tuple of (DataFrame with download_status, failed_reason, and counts, error message if any)
+    """
+    try:
+        import pandas as pd  # noqa: PLC0415
+        conn = sqlite3.connect(db_path)
+        query = (
+            "SELECT download_status, "
+            "COALESCE(NULLIF(failed_reason, ''), 'N/A') AS failed_reason, "
+            "COUNT(*) AS count FROM tracks "
+            "WHERE local_file_path IS NULL OR TRIM(local_file_path) = '' "
+            "GROUP BY download_status, COALESCE(NULLIF(failed_reason, ''), 'N/A') "
+            "ORDER BY count DESC"
+        )
         df = pd.read_sql_query(query, conn)
         conn.close()
         return df, None

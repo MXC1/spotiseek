@@ -52,6 +52,7 @@ from scripts.logs_utils import (
 from scripts.database_management import (
     get_playlists,
     get_track_status_breakdown,
+    get_failed_reason_breakdown,
     TrackDB
 )
 from scripts.m3u8_manager import update_track_in_m3u8
@@ -148,6 +149,12 @@ def get_extension_bitrate_breakdown(db_path):
         return ext_df, br_df, dl_df, None
     except Exception as e:
         return None, None, None, str(e)
+
+
+@st.cache_data(ttl=CACHE_TTL_SHORT)
+def get_failed_reason_breakdown_cached(db_path: str):
+    """Cached helper for failed reason breakdown."""
+    return get_failed_reason_breakdown(db_path)
 
 
 @st.cache_data(ttl=CACHE_TTL_SHORT)
@@ -337,6 +344,28 @@ def render_extension_bitrate_section():
             st.dataframe(dl_df)
         else:
             st.info("No download status data found.")
+
+
+def render_failed_reason_section():
+    """Render breakdown of reasons for tracks without local files."""
+    st.subheader("Tracks Without Local Files")
+    st.caption("Breakdown by status and reason for tracks that haven't been downloaded")
+
+    if not os.path.exists(DB_PATH):
+        st.info("Database file not found.")
+        return
+
+    df, error = get_failed_reason_breakdown_cached(DB_PATH)
+
+    if error:
+        st.error(f"Error querying reasons: {error}")
+        return
+
+    if df is None or df.empty:
+        st.info("All tracks have local files!")
+        return
+
+    st.dataframe(df, hide_index=True)
 
 
 # ============================================================================
@@ -1081,6 +1110,7 @@ def main():
         
         with col2:
             render_track_status_section()
+            render_failed_reason_section()
             
         # Workflow run inspection section (full width)
         render_log_breakdown_section()

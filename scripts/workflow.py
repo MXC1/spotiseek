@@ -314,7 +314,7 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
             # Update database status if possible
             if len(track) > 0:
                 try:
-                    track_db.update_track_status(track[0], "failed")
+                    track_db.update_track_status(track[0], "failed", failed_reason=str(e))
                 except Exception:
                     pass  # If status update fails, continue anyway
 
@@ -442,9 +442,18 @@ def _update_file_status(file: dict, username: str | None = None) -> None:
 
     # Handle failed downloads - remove from slskd to prevent duplicate logs
     elif state in failed_states:
-        track_db.update_track_status(spotify_id, "failed")
-        write_log.info("DOWNLOAD_FAILED", "Download failed.",
-                      {"spotify_id": spotify_id, "state": state})
+        failed_reason = (
+            file.get("error")
+            or file.get("errorMessage")
+            or file.get("message")
+            or state
+        )
+        track_db.update_track_status(spotify_id, "failed", failed_reason=failed_reason)
+        write_log.info(
+            "DOWNLOAD_FAILED",
+            "Download failed.",
+            {"spotify_id": spotify_id, "state": state, "failed_reason": failed_reason}
+        )
 
     # Handle queued downloads
     elif state == "Queued, Remotely":
