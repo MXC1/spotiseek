@@ -137,8 +137,11 @@ def test(c):
 @task
 def run_all_tasks(c, attach=False):
     """Run all task scheduler tasks in dependency order inside the Docker container"""
-    flag = "" if attach else " -d "
-    subprocess.run(["docker-compose", f"exec{flag}", "workflow", "python", "-m", "scripts.task_scheduler", "--run-all"], check=True)
+    cmd = ["docker-compose", "exec"]
+    if not attach:
+        cmd.append("-d")
+    cmd.extend(["workflow", "python", "-m", "scripts.task_scheduler", "--run-all"])
+    subprocess.run(cmd, check=True)
 
 @task
 def lint(c):

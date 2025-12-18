@@ -453,7 +453,7 @@ def _add_playlist_to_xml(playlists_array: ET.Element, playlist_id: int,
     _add_xml_key_value(playlist_dict, 'Playlist Persistent ID', persistent_id, 'string')
 
     _add_xml_key_value(playlist_dict, 'All Items', '', 'true')
-    _add_xml_key_value(playlist_dict, 'Name', playlist_name.replace(' ', '_'), 'string')
+    _add_xml_key_value(playlist_dict, 'Name', playlist_name, 'string')
 
     # Add playlist items
     ET.SubElement(playlist_dict, 'key').text = 'Playlist Items'

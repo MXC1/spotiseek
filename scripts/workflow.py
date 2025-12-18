@@ -68,6 +68,9 @@ from scripts.xml_exporter import export_itunes_xml  # noqa: E402
 setup_logging(log_name_prefix="workflow")
 write_log.debug("ENV_LOAD", "Environment variables loaded.", {"dotenv_path": dotenv_path})
 
+# Remuxing mode configuration from environment
+REMUX_ALL_TO_MP3 = os.getenv("REMUX_ALL_TO_MP3", "false").lower() in ("true", "1", "yes")
+
 # Validate environment configuration
 ENV = os.getenv("APP_ENV")
 if not ENV:
@@ -383,14 +386,16 @@ def mark_tracks_for_quality_upgrade() -> None:
     )
 
     upgrade_count = 0
+    target_format = "mp3" if REMUX_ALL_TO_MP3 else "wav"
+    
     for track_row in completed_tracks:
         spotify_id = track_row[0]  # First column is spotify_id
 
         # Get current file extension
         current_extension = track_db.get_track_extension(spotify_id)
 
-        # Mark for upgrade if not WAV (or if extension is unknown/null)
-        if not current_extension or current_extension.lower() != "wav":
+        # Mark for upgrade if not target format (or if extension is unknown/null)
+        if not current_extension or current_extension.lower() != target_format:
             track_db.update_track_status(spotify_id, "redownload_pending")
             upgrade_count += 1
             write_log.debug("QUALITY_UPGRADE_MARKED", "Marked track for quality upgrade.",
@@ -398,11 +403,11 @@ def mark_tracks_for_quality_upgrade() -> None:
 
     if upgrade_count > 0:
         write_log.info("QUALITY_UPGRADE_MARKED_COMPLETE",
-                      f"Marked {upgrade_count} tracks for quality upgrade (non-WAV files).",
+                      f"Marked {upgrade_count} tracks for quality upgrade (non-{target_format.upper()} files).",
                       {"marked_count": upgrade_count, "total_completed": len(completed_tracks)})
     else:
         write_log.info("QUALITY_UPGRADE_NO_CANDIDATES",
-                      "All completed tracks are already WAV format or already queued for upgrade.")
+                      f"All completed tracks are already {target_format.upper()} format or already queued for upgrade.")
 
 
 def _update_file_status(file: dict, username: str | None = None) -> None:
@@ -569,17 +574,31 @@ def _handle_completed_download(file: dict, spotify_id: str) -> None:
     
     final_path = local_file_path
     
-    # Remux lossless formats to WAV (except WAV itself)
-    if extension in lossless_formats:
-        final_path = _remux_lossless_to_wav(local_file_path, spotify_id, extension) or local_file_path
-    # Remux lossy formats to MP3 320kbps (except MP3 itself)
-    elif extension in lossy_formats:
-        final_path = _remux_lossy_to_mp3(local_file_path, spotify_id, extension) or local_file_path
-    # MP3 and WAV files are already in preferred format, no remuxing needed
-    elif extension == "mp3":
-        track_db.update_extension_bitrate(spotify_id, extension="mp3", bitrate=bitrate)
-    elif extension == "wav":
-        track_db.update_extension_bitrate(spotify_id, extension="wav", bitrate=None)
+    # Remuxing logic depends on REMUX_ALL_TO_MP3 flag
+    if REMUX_ALL_TO_MP3:
+        # Mode 1: Remux ALL formats to MP3 320kbps (except MP3 itself)
+        if extension in lossless_formats:
+            # Remux lossless formats (FLAC, ALAC, APE) to MP3 320kbps
+            final_path = _remux_lossy_to_mp3(local_file_path, spotify_id, extension) or local_file_path
+        elif extension in lossy_formats:
+            # Remux lossy formats to MP3 320kbps (except MP3 itself)
+            final_path = _remux_lossy_to_mp3(local_file_path, spotify_id, extension) or local_file_path
+        elif extension == 'wav':
+            # Remux WAV to MP3 320kbps
+            final_path = _remux_lossy_to_mp3(local_file_path, spotify_id, extension) or local_file_path
+    else:
+        # Mode 2: Remux lossless to WAV, lossy to MP3 320kbps (default)
+        if extension in lossless_formats:
+            # Remux lossless formats to WAV (except WAV itself)
+            final_path = _remux_lossless_to_wav(local_file_path, spotify_id, extension) or local_file_path
+        elif extension in lossy_formats:
+            # Remux lossy formats to MP3 320kbps (except MP3 itself)
+            final_path = _remux_lossy_to_mp3(local_file_path, spotify_id, extension) or local_file_path
+        # MP3 and WAV files are already in preferred format, no remuxing needed
+        elif extension == "mp3":
+            track_db.update_extension_bitrate(spotify_id, extension="mp3", bitrate=bitrate)
+        elif extension == "wav":
+            track_db.update_extension_bitrate(spotify_id, extension="wav", bitrate=None)
 
     existing_path = track_db.get_local_file_path(spotify_id)
     track_db.update_local_file_path(spotify_id, final_path)
