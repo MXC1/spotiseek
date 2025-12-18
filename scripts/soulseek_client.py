@@ -45,6 +45,9 @@ from scripts.logs_utils import write_log
 
 load_dotenv()
 
+# Remuxing mode configuration from environment
+REMUX_ALL_TO_MP3 = os.getenv("REMUX_ALL_TO_MP3", "false").lower() in ("true", "1", "yes")
+
 # slskd API configuration
 SLSKD_BASE_URL = os.getenv("SLSKD_BASE_URL", "http://localhost:5030")
 SLSKD_URL = f"{SLSKD_BASE_URL}/api/v0"
@@ -197,11 +200,13 @@ def is_better_quality(file: dict[str, Any], current_extension: str, current_bitr
     """
     Determine if a file has better quality than the current one.
 
-    Quality hierarchy (after remuxing):
-    - All lossless formats (WAV, FLAC, ALAC, APE) -> remuxed to WAV
-    - All lossy formats -> remuxed to MP3 320kbps
+    Quality hierarchy depends on REMUX_ALL_TO_MP3 mode:
     
-    Therefore: Lossless formats > Lossy formats
+    Mode 1 (REMUX_ALL_TO_MP3=True): All formats -> MP3 320kbps
+    - No quality upgrades possible (all end up as MP3 320kbps)
+    
+    Mode 2 (REMUX_ALL_TO_MP3=False): Lossless -> WAV, Lossy -> MP3 320kbps
+    - Lossless formats > Lossy formats
 
     Args:
         file: New file object to evaluate
@@ -216,7 +221,13 @@ def is_better_quality(file: dict[str, Any], current_extension: str, current_bitr
     # Define format categories (matching workflow.py remuxing logic)
     lossless_formats = {'wav', 'flac', 'alac', 'ape'}
     current_is_lossless = current_extension in lossless_formats
-
+    
+    # Mode 1: All files remux to MP3 320kbps - no quality upgrades possible
+    if REMUX_ALL_TO_MP3:
+        # All files will end up as MP3 320kbps, so no quality difference
+        return False
+    
+    # Mode 2: Lossless -> WAV, Lossy -> MP3 320kbps
     # New file is lossless format (will become WAV)
     if ext in lossless_formats:
         # If current is already lossless, no upgrade needed
@@ -246,8 +257,15 @@ def quality_sort_key(item: tuple[dict[str, Any], str]) -> tuple[int, int]:
     """
     Generate a sort key for file quality prioritization.
 
-    All lossless formats will be remuxed to WAV, so they have equal priority.
-    All lossy formats will be remuxed to MP3 320kbps.
+    Priority depends on REMUX_ALL_TO_MP3 mode:
+    
+    Mode 1 (REMUX_ALL_TO_MP3=True): All formats -> MP3 320kbps
+    - Prioritize MP3 files (already in target format)
+    - Then other formats by bitrate
+    
+    Mode 2 (REMUX_ALL_TO_MP3=False): Lossless -> WAV, Lossy -> MP3 320kbps
+    - Prioritize lossless formats (will become WAV)
+    - Then lossy formats by bitrate
 
     Args:
         item: Tuple of (file_object, username)
@@ -259,17 +277,27 @@ def quality_sort_key(item: tuple[dict[str, Any], str]) -> tuple[int, int]:
     file, _ = item
     ext, bitrate = extract_file_quality(file)
 
-    # Lossless formats: WAV, FLAC, ALAC, APE (all will become WAV, priority 3)
     lossless_formats = {'wav', 'flac', 'alac', 'ape'}
-    if ext in lossless_formats:
-        return (3, 0)
     
-    # Lossy formats prioritized by bitrate (all will become MP3 320kbps, priority 1)
-    if ext == "mp3":
+    if REMUX_ALL_TO_MP3:
+        # Mode 1: All files remux to MP3 320kbps
+        # Prioritize MP3 files (no conversion needed), then by bitrate
+        if ext == "mp3":
+            return (2, bitrate if bitrate is not None else 0)
+        # Lossless and other lossy formats need conversion
         return (1, bitrate if bitrate is not None else 0)
-    
-    # Other lossy formats (OGG, M4A, AAC, WMA, OPUS) - lower priority
-    return (0, bitrate if bitrate is not None else 0)
+    else:
+        # Mode 2: Lossless -> WAV, Lossy -> MP3 320kbps
+        # Lossless formats: WAV, FLAC, ALAC, APE (all will become WAV, priority 3)
+        if ext in lossless_formats:
+            return (3, 0)
+        
+        # Lossy formats prioritized by bitrate (all will become MP3 320kbps, priority 1)
+        if ext == "mp3":
+            return (1, bitrate if bitrate is not None else 0)
+        
+        # Other lossy formats (OGG, M4A, AAC, WMA, OPUS) - lower priority
+        return (0, bitrate if bitrate is not None else 0)
 
 
 # File Selection Functions
