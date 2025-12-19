@@ -135,7 +135,7 @@ def filter_warning_error_logs(log_entries: list[dict]) -> list[dict]:
         >>> len(errors)
         1
     """
-    return [entry for entry in log_entries if entry.get('level') in ('WARNING', 'ERROR')]
+    return [entry for entry in log_entries if isinstance(entry, dict) and entry.get('level') in ('WARNING', 'ERROR')]
 
 def logs_to_dataframe(log_entries: list[dict]):
     """
@@ -209,6 +209,9 @@ def prepare_log_summary(df_logs, warn_err_logs):
     """
     import pandas as pd  # noqa: PLC0415
 
+    # Create a mapping from DataFrame index to list position for safe lookups
+    index_to_position = {idx: pos for pos, idx in enumerate(df_logs.index)}
+
     summary = df_logs.groupby(['level', 'event_id', 'message']).size().reset_index(name='count')
     samples = []
     latest_times = []
@@ -227,8 +230,14 @@ def prepare_log_summary(df_logs, warn_err_logs):
 
         # Extract latest occurrence for sample
         sample_row = group_df.iloc[0]
-        matching_indices = group_df.index
-        context_obj = warn_err_logs[matching_indices[0]].get('context', {})
+        matching_df_index = group_df.index[0]
+        list_position = index_to_position.get(matching_df_index, 0)
+        
+        # Safely access context with bounds checking
+        if list_position < len(warn_err_logs) and isinstance(warn_err_logs[list_position], dict):
+            context_obj = warn_err_logs[list_position].get('context', {})
+        else:
+            context_obj = {}
 
         sample_str = (
             f"Timestamp: {sample_row['timestamp']}\n"
