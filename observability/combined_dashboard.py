@@ -881,7 +881,6 @@ def render_manual_import_section():
             format_func=lambda spotify_id: labels_by_id.get(spotify_id, str(spotify_id)),
         )
         track = tracks_by_id[selected_spotify_id]
-        track = rows[selected_idx]
 
         uploaded_file = st.file_uploader(
             "Select audio file",
