@@ -583,6 +583,106 @@ def get_non_completed_tracks_by_playlist() -> Dict[str, List[Tuple]]:
     return _get_non_completed_tracks_cached(DB_PATH)
 
 
+@st.cache_data(ttl=CACHE_TTL_MEDIUM)
+def _get_playlists_with_incomplete_counts_cached(db_path: str) -> pd.DataFrame:
+    """
+    Return a DataFrame of playlists with counts of tracks missing local files.
+
+    Columns: playlist_name, playlist_url, incomplete_count
+    """
+    conn = sqlite3.connect(db_path)
+    query = """
+        SELECT 
+            p.playlist_name,
+            p.playlist_url,
+            COUNT(*) AS incomplete_count
+        FROM playlists p
+        JOIN playlist_tracks pt ON p.playlist_url = pt.playlist_url
+        JOIN tracks t ON t.spotify_id = pt.spotify_id
+        WHERE t.local_file_path IS NULL OR TRIM(t.local_file_path) = ''
+        GROUP BY p.playlist_name, p.playlist_url
+        ORDER BY incomplete_count DESC, p.playlist_name
+    """
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    return df
+
+
+@st.cache_data(ttl=CACHE_TTL_MEDIUM)
+def _get_incomplete_tracks_for_playlist_cached(
+    db_path: str,
+    playlist_url: str,
+    search: Optional[str],
+    offset: int,
+    limit: int,
+    cache_nonce: int,
+) -> Tuple[List[dict], int]:
+    """
+    Paginated query of tracks missing local_file_path for a given playlist.
+
+    Returns: (rows, total_count)
+    Each row is a dict with keys: spotify_id, track_name, artist, status, playlist_url
+    cache_nonce is used to bust cache after imports without clearing global cache.
+    """
+    _ = cache_nonce  # used only to vary cache key
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    where_search = ""
+    params: List[str] = [playlist_url]
+    if search:
+        where_search = " AND (LOWER(t.track_name) LIKE ? OR LOWER(t.artist) LIKE ?)"
+        like = f"%{search.lower()}%"
+        params.extend([like, like])
+
+    # Total count first
+    count_sql = (
+        """
+        SELECT COUNT(*)
+        FROM playlist_tracks pt
+        JOIN tracks t ON t.spotify_id = pt.spotify_id
+        WHERE pt.playlist_url = ?
+          AND (t.local_file_path IS NULL OR TRIM(t.local_file_path) = '')
+        """ + where_search
+    )
+    cursor.execute(count_sql, params)
+    row = cursor.fetchone()
+    total = row[0] if row is not None else 0
+
+    # Data page
+    data_sql = (
+        """
+        SELECT 
+            pt.playlist_url,
+            t.spotify_id,
+            t.track_name,
+            t.artist,
+            t.download_status
+        FROM playlist_tracks pt
+        JOIN tracks t ON t.spotify_id = pt.spotify_id
+        WHERE pt.playlist_url = ?
+          AND (t.local_file_path IS NULL OR TRIM(t.local_file_path) = '')
+        """ + where_search + " ORDER BY t.track_name LIMIT ? OFFSET ?"
+    )
+
+    page_params = params + [limit, offset]
+    cursor.execute(data_sql, page_params)
+    rows = cursor.fetchall()
+    conn.close()
+
+    result = [
+        {
+            "playlist_url": r[0],
+            "spotify_id": r[1],
+            "track_name": r[2],
+            "artist": r[3],
+            "status": r[4],
+        }
+        for r in rows
+    ]
+    return result, int(total)
+
+
 def extract_metadata_from_file(file_path: str) -> Dict[str, Optional[any]]:
     """
     Extract extension and bitrate from an audio file using mutagen.
@@ -701,83 +801,110 @@ def import_track(spotify_id: str, uploaded_file, track_info: dict) -> Tuple[bool
 
 
 def render_manual_import_section():
-    """Render the complete manual import interface."""
+    """Render the complete manual import interface with pagination and single-uploader flow."""
     st.subheader("Manual Import Tool")
     st.markdown(f"**Environment:** `{ENV}`")
-    
-    # Fetch non-completed tracks (uses caching)
-    grouped_tracks = get_non_completed_tracks_by_playlist()
-    
-    if not grouped_tracks:
+
+    # Lightweight cache-busting nonce for manual-import-only queries
+    if "import_nonce" not in st.session_state:
+        st.session_state["import_nonce"] = 0
+
+    # Fast overview of playlists with incomplete counts
+    playlists_df = _get_playlists_with_incomplete_counts_cached(DB_PATH)
+
+    if playlists_df is None or playlists_df.empty:
         st.success("✨ All tracks have been successfully downloaded!")
         st.info("No tracks require manual import.")
         return
-    
-    # Statistics
-    total_tracks = sum(len(tracks) for tracks in grouped_tracks.values())
+
+    total_tracks = int(playlists_df["incomplete_count"].sum())
     st.metric("Total Tracks Needing Import", total_tracks)
     st.markdown("---")
-    
-    # Playlist selection
+
+    # Playlist selection (store URL as value, show name + count)
     st.subheader("📋 Select Playlist")
-    selected_playlist = st.selectbox(
+    options = [
+        f"{row.playlist_name} ({row.incomplete_count} tracks)" for _, row in playlists_df.iterrows()
+    ]
+    url_map = {options[i]: playlists_df.iloc[i].playlist_url for i in range(len(options))}
+    selected_label = st.selectbox(
         "Choose a playlist to view its incomplete tracks:",
-        options=list(grouped_tracks.keys()),
-        format_func=lambda x: f"{x} ({len(grouped_tracks[x])} tracks)"
+        options=options,
+        index=0,
     )
-    
-    if selected_playlist:
-        st.markdown("---")
-        st.subheader(f"🎶 Tracks in: **{selected_playlist}**")
-        
-        tracks = grouped_tracks[selected_playlist]
-        
-        # Display tracks with import functionality
-        for idx, track in enumerate(tracks):
-            with st.expander(
-                f"**{track['artist']} - {track['track_name']}**  •  Status: `{track['status']}`",
-                expanded=False
-            ):
-                col1, col2 = st.columns([2, 1])
-                
-                with col1:
-                    st.markdown(f"**Artist:** {track['artist']}")
-                    st.markdown(f"**Track:** {track['track_name']}")
-                    st.markdown(f"**Status:** `{track['status']}`")
-                    st.markdown(f"**Spotify ID:** `{track['spotify_id']}`")
-                
-                with col2:
-                    # File uploader for this track
-                    uploaded_file = st.file_uploader(
-                        "Select audio file",
-                        type=['mp3', 'flac', 'wav', 'm4a', 'ogg', 'wma'],
-                        key=f"upload_{track['spotify_id']}",
-                        help="Upload the audio file for this track"
-                    )
-                    
-                    if uploaded_file is not None:
-                        st.info(f"📁 Selected: `{uploaded_file.name}`")
-                        
-                        if st.button(
-                            "Import Track",
-                            key=f"import_{track['spotify_id']}",
-                            type="primary"
-                        ):
-                            with st.spinner("Importing..."):
-                                success, message = import_track(
-                                    track['spotify_id'],
-                                    uploaded_file,
-                                    track
-                                )
-                            
-                            if success:
-                                st.success(message)
-                                st.balloons()
-                                # Clear cache so next load shows updated tracks
-                                st.cache_data.clear()
-                            else:
-                                st.error(message)
-    
+    selected_playlist_url = url_map.get(selected_label)
+
+    if not selected_playlist_url:
+        return
+
+    st.markdown("---")
+    st.subheader(f"🎶 Tracks in: **{selected_label}**")
+
+    # Search + paging controls
+    search = st.text_input("Search (artist or track contains):", value="")
+    col_a, col_b, col_c = st.columns([1, 1, 2])
+    with col_a:
+        page_size = st.selectbox("Rows per page", options=[10, 25, 50, 100], index=1)
+    with col_b:
+        page_number = st.number_input("Page", min_value=1, step=1, value=1)
+
+    # Fetch page
+    offset = (int(page_number) - 1) * int(page_size)
+    with st.spinner("Loading tracks..."):
+        rows, total_for_playlist = _get_incomplete_tracks_for_playlist_cached(
+            DB_PATH, selected_playlist_url, search, offset, int(page_size), st.session_state["import_nonce"]
+        )
+
+    if offset >= max(total_for_playlist, 1):
+        offset = 0
+        page_number = 1
+        rows, total_for_playlist = _get_incomplete_tracks_for_playlist_cached(
+            DB_PATH, selected_playlist_url, search, offset, int(page_size), st.session_state["import_nonce"]
+        )
+
+    # Table view (lightweight)
+    if rows:
+        df = pd.DataFrame(rows)[["artist", "track_name", "status", "spotify_id"]]
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No matching tracks on this page.")
+
+    labels_by_id = {
+        r["spotify_id"]: f"{r['artist']} - {r['track_name']} • {r['status']} [{r['spotify_id']}]"
+        for r in rows
+    }
+    tracks_by_id = {r["spotify_id"]: r for r in rows}
+    if labels_by_id:
+        selected_spotify_id = st.selectbox(
+            "Select a track to import:",
+            options=list(labels_by_id.keys()),
+            format_func=lambda spotify_id: labels_by_id.get(spotify_id, str(spotify_id)),
+        )
+        track = tracks_by_id[selected_spotify_id]
+        track = rows[selected_idx]
+
+        uploaded_file = st.file_uploader(
+            "Select audio file",
+            type=["mp3", "flac", "wav", "m4a", "ogg", "wma"],
+            key=f"upload_{track['spotify_id']}",
+            help="Upload the audio file for this track",
+        )
+
+        if uploaded_file is not None:
+            st.info(f"📁 Selected: `{uploaded_file.name}`")
+            if st.button("Import Track", key=f"import_{track['spotify_id']}", type="primary"):
+                with st.spinner("Importing..."):
+                    success, message = import_track(track["spotify_id"], uploaded_file, track)
+                if success:
+                    st.success(message)
+                    # Bust only manual-import caches
+                    st.session_state["import_nonce"] += 1
+                    # Refresh the view to reflect the import
+                    time.sleep(0.3)
+                    st.rerun()
+                else:
+                    st.error(message)
+
     # Footer
     st.markdown("---")
     st.markdown("💡 **Tip:** Files will be saved to `slskd_docker_data/{ENV}/imported/`")
