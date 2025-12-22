@@ -1003,8 +1003,6 @@ def remove_download_from_slskd(username: str, slskd_uuid: str, max_retries: int 
     Returns:
         True if the download was successfully removed, False otherwise
     """
-    write_log.info("SLSKD_REMOVE_DOWNLOAD", "Removing download from slskd.",
-                  {"username": username, "slskd_uuid": slskd_uuid})
 
     for attempt in range(max_retries):
         try:
@@ -1028,7 +1026,7 @@ def remove_download_from_slskd(username: str, slskd_uuid: str, max_retries: int 
         except (requests.Timeout, requests.exceptions.ConnectionError) as e:
             if attempt < max_retries - 1:
                 wait_time = 2 ** attempt
-                write_log.debug("SLSKD_REMOVE_RETRY", "Network error removing download, retrying.",
+                write_log.warn("SLSKD_REMOVE_RETRY", "Network error removing download, retrying.",
                               {"attempt": attempt + 1, "max_retries": max_retries,
                                "wait_time": wait_time, "error": str(e)})
                 time.sleep(wait_time)

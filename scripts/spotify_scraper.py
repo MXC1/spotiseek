@@ -119,7 +119,7 @@ def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, st
         raise ValueError("Invalid playlist URL. Expected format: https://open.spotify.com/playlist/...")
 
     playlist_id = match.group(1)
-    write_log.info("SPOTIFY_FETCH", "Fetching playlist metadata and tracks.", {"playlist_id": playlist_id})
+    write_log.debug("SPOTIFY_FETCH", "Fetching playlist metadata and tracks.", {"playlist_id": playlist_id})
 
     # Fetch playlist metadata and initial batch of tracks
     try:
