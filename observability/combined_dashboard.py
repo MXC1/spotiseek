@@ -95,8 +95,17 @@ os.makedirs(IMPORTED_DIR, exist_ok=True)
 os.makedirs(XML_DIR, exist_ok=True)
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
-# Initialize database
-track_db = TrackDB()
+# Check if database exists
+DB_EXISTS = os.path.exists(DB_PATH)
+
+# Initialize database (will create if doesn't exist)
+try:
+    track_db = TrackDB()
+    if not DB_EXISTS and os.path.exists(DB_PATH):
+        write_log.info("DASHBOARD_DB_CREATED", "Database file was created during initialization.", {"db_path": DB_PATH})
+except Exception as e:
+    write_log.error("DASHBOARD_DB_INIT_FAIL", "Failed to initialize database.", {"db_path": DB_PATH, "error": str(e)})
+    track_db = None
 
 
 # ============================================================================
@@ -120,6 +129,8 @@ def get_extension_bitrate_breakdown(db_path):
     Extension and bitrate breakdowns only include tracks with local_file_path.
     Handles both NULL and empty string as 'Not Downloaded'.
     """
+    if not os.path.exists(db_path):
+        return None, None, None, "Database file does not exist"
     try:
         conn = sqlite3.connect(db_path)
         # Extension breakdown - only tracks with local_file_path
@@ -520,6 +531,10 @@ def _get_non_completed_tracks_cached(db_path: str) -> Dict[str, List[dict]]:
     """
     write_log.info("IMPORT_UI_QUERY", "Querying tracks missing local_file_path grouped by playlist.")
     
+    if not os.path.exists(db_path):
+        write_log.warning("IMPORT_UI_DB_NOT_FOUND", "Database file does not exist.", {"db_path": db_path})
+        return {}
+    
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
@@ -590,6 +605,8 @@ def _get_playlists_with_incomplete_counts_cached(db_path: str) -> pd.DataFrame:
 
     Columns: playlist_name, playlist_url, incomplete_count
     """
+    if not os.path.exists(db_path):
+        return pd.DataFrame(columns=['playlist_name', 'playlist_url', 'incomplete_count'])
     conn = sqlite3.connect(db_path)
     query = """
         SELECT 
@@ -625,6 +642,8 @@ def _get_incomplete_tracks_for_playlist_cached(
     cache_nonce is used to bust cache after imports without clearing global cache.
     """
     _ = cache_nonce  # used only to vary cache key
+    if not os.path.exists(db_path):
+        return [], 0
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
@@ -804,6 +823,12 @@ def render_manual_import_section():
     """Render the complete manual import interface with pagination and single-uploader flow."""
     st.subheader("Manual Import Tool")
     st.markdown(f"**Environment:** `{ENV}`")
+
+    # Check if database exists
+    if not os.path.exists(DB_PATH):
+        st.error(f"❌ Database file not found: `{DB_PATH}`")
+        st.info("💡 The database will be created when the workflow runs for the first time. Please run the workflow first.")
+        return
 
     # Lightweight cache-busting nonce for manual-import-only queries
     if "import_nonce" not in st.session_state:
