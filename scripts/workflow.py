@@ -692,6 +692,23 @@ def _remux_lossless_to_wav(local_file_path: str, spotify_id: str, extension: str
             f"{extension.upper()} remuxed to WAV.",
             {"spotify_id": spotify_id, "wav_path": wav_path, "ffmpeg_log_file": ffmpeg_log_file}
         )
+        
+        # Remove original file to free up disk space
+        try:
+            if os.path.exists(local_file_path) and local_file_path != wav_path:
+                os.remove(local_file_path)
+                write_log.debug(
+                    "ORIGINAL_FILE_REMOVED",
+                    f"Deleted original {extension.upper()} file after remuxing to WAV.",
+                    {"spotify_id": spotify_id, "removed_file": local_file_path}
+                )
+        except Exception as e:
+            write_log.warn(
+                "ORIGINAL_FILE_DELETE_FAILED",
+                f"Failed to delete original {extension.upper()} file after remuxing.",
+                {"spotify_id": spotify_id, "file_path": local_file_path, "error": str(e)}
+            )
+        
         return wav_path
     except Exception as e:
         write_log.error("REMUX_FAIL", f"Failed to remux {extension.upper()} to WAV.", {"spotify_id": spotify_id, "error": str(e)})
@@ -760,6 +777,23 @@ def _remux_lossy_to_mp3(local_file_path: str, spotify_id: str, extension: str) -
             f"{extension.upper()} remuxed to MP3 320kbps.",
             {"spotify_id": spotify_id, "mp3_path": mp3_path, "ffmpeg_log_file": ffmpeg_log_file}
         )
+        
+        # Remove original file to free up disk space
+        try:
+            if os.path.exists(local_file_path) and local_file_path != mp3_path:
+                os.remove(local_file_path)
+                write_log.debug(
+                    "ORIGINAL_FILE_REMOVED",
+                    f"Deleted original {extension.upper()} file after remuxing to MP3.",
+                    {"spotify_id": spotify_id, "removed_file": local_file_path}
+                )
+        except Exception as e:
+            write_log.warn(
+                "ORIGINAL_FILE_DELETE_FAILED",
+                f"Failed to delete original {extension.upper()} file after remuxing.",
+                {"spotify_id": spotify_id, "file_path": local_file_path, "error": str(e)}
+            )
+        
         return mp3_path
     except Exception as e:
         write_log.error("REMUX_FAIL", f"Failed to remux {extension.upper()} to MP3.", {"spotify_id": spotify_id, "error": str(e)})
