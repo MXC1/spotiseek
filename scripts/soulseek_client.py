@@ -885,24 +885,6 @@ def process_search_results(
         track_db.update_track_status(spotify_id, "failed", failed_reason=str(e))
 
 
-def download_track(artist: str, track: str, spotify_id: str) -> None:
-    """
-    Search for and initiate download of a track on the Soulseek network.
-
-    This is a legacy synchronous function maintained for backward compatibility.
-    For better performance, use initiate_track_search() + process_search_results().
-
-    Args:
-        artist: Artist name(s)
-        track: Track name
-        spotify_id: Spotify track identifier for database tracking
-    """
-    search_info = initiate_track_search(artist, track, spotify_id)
-    if search_info:
-        search_id, search_text, spotify_id = search_info
-        process_search_results(search_id, search_text, spotify_id)
-
-
 def download_tracks_async(tracks: list[tuple[str, str, str]]) -> None:
     """
     Initiate searches for multiple tracks without waiting for results.
@@ -1260,23 +1242,3 @@ def get_track_bitrate(spotify_id: str) -> int | None:
     except Exception:
         pass
     return None
-
-
-if __name__ == "__main__":
-    # Example usage for testing
-    test_tracks = [
-        ("5ms8IkagrFWObtzSOahVrx", "MASTER BOOT RECORD", "Skynet"),
-    ]
-
-    from logs_utils import setup_logging
-    setup_logging(log_name_prefix="slskd_test")
-
-    for spotify_id, artist, track_name in test_tracks:
-        track_db.add_track(TrackData(
-            spotify_id=spotify_id,
-            track_name=track_name,
-            artist=artist
-        ))
-        download_track(artist, track_name, spotify_id)
-
-    track_db.close()
