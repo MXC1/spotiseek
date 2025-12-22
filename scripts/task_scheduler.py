@@ -586,6 +586,7 @@ def _register_all_tasks(registry: TaskRegistry) -> None:
         task_mark_quality_upgrades,
         task_poll_search_results,
         task_process_upgrades,
+        task_remux_existing_files,
         task_scrape_playlists,
         task_sync_download_status,
     )
@@ -664,6 +665,17 @@ def _register_all_tasks(registry: TaskRegistry) -> None:
         function=task_export_library,
         interval_env_var="TASK_EXPORT_LIBRARY_INTERVAL",
         default_interval_minutes=1440,  # Once per day
+        dependencies=["sync_download_status"]
+    ))
+
+    # Task 8: Remux Existing Files
+    registry.register_task(TaskDefinition(
+        name="remux_existing_files",
+        display_name="Remux Existing Files",
+        description="Remux completed files to match current format preferences (lossless->WAV, lossy->MP3)",
+        function=task_remux_existing_files,
+        interval_env_var="TASK_REMUX_EXISTING_FILES_INTERVAL",
+        default_interval_minutes=360,  # Every 6 hours
         dependencies=["sync_download_status"]
     ))
 
