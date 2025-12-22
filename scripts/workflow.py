@@ -1112,6 +1112,155 @@ def task_export_library() -> bool:
         return False
 
 
+def task_remux_existing_files() -> bool:
+    """
+    Task: Remux existing files to match current format preferences.
+
+    This task addresses two scenarios:
+    1. Files that failed to remux during download (e.g., program crash)
+    2. Files that need conversion after user changes REMUX_ALL_TO_MP3 setting
+
+    The task:
+    1. Gets all completed tracks from database
+    2. Determines target format based on REMUX_ALL_TO_MP3:
+       - If True: All files should be MP3 320kbps
+       - If False: Lossless should be WAV, lossy should be MP3 320kbps
+    3. Remuxes files that don't match target format
+    4. Updates database with new paths and extensions
+    5. Updates M3U8 playlists with new file paths
+
+    This task is interruptible - it processes files one at a time and can be
+    safely stopped at any point.
+
+    Returns:
+        True if successful, False if failed
+    """
+    write_log.info("TASK_REMUX_EXISTING_START", "Starting existing files remux task.",
+                  {"remux_all_to_mp3": REMUX_ALL_TO_MP3})
+
+    try:
+        # Get all completed tracks
+        completed_tracks = track_db.get_tracks_by_status("completed")
+        
+        if not completed_tracks:
+            write_log.info("TASK_REMUX_NO_FILES", "No completed tracks to check.")
+            return True
+
+        write_log.info("TASK_REMUX_CHECKING", f"Checking {len(completed_tracks)} completed tracks.")
+
+        # Define format categories
+        lossless_formats = {'wav', 'flac', 'alac', 'ape'}
+        lossy_formats = {'mp3', 'ogg', 'm4a', 'aac', 'wma', 'opus'}
+        
+        remuxed_count = 0
+        skipped_count = 0
+        error_count = 0
+
+        for track_row in completed_tracks:
+            spotify_id = track_row[0]  # First column is spotify_id
+            
+            # Get current file path and extension
+            local_file_path = track_db.get_local_file_path(spotify_id)
+            if not local_file_path:
+                write_log.debug("TASK_REMUX_NO_PATH", "Track has no file path, skipping.",
+                              {"spotify_id": spotify_id})
+                skipped_count += 1
+                continue
+
+            # Check if file exists
+            if not os.path.exists(local_file_path):
+                write_log.warn("TASK_REMUX_FILE_NOT_FOUND", "File not found, skipping.",
+                             {"spotify_id": spotify_id, "path": local_file_path})
+                skipped_count += 1
+                continue
+
+            current_extension = track_db.get_track_extension(spotify_id)
+            if not current_extension:
+                # Try to extract from filename
+                if "." in local_file_path:
+                    current_extension = local_file_path.rsplit(".", 1)[-1].lower()
+                else:
+                    write_log.warn("TASK_REMUX_NO_EXTENSION", "Cannot determine file extension.",
+                                 {"spotify_id": spotify_id, "path": local_file_path})
+                    skipped_count += 1
+                    continue
+
+            # Determine if remuxing is needed based on current mode
+            needs_remux = False
+            target_format = None
+            
+            if REMUX_ALL_TO_MP3:
+                # Mode 1: All files should be MP3 320kbps
+                if current_extension != 'mp3':
+                    needs_remux = True
+                    target_format = 'mp3'
+            else:
+                # Mode 2: Lossless -> WAV, Lossy -> MP3 320kbps
+                if current_extension in lossless_formats and current_extension != 'wav':
+                    needs_remux = True
+                    target_format = 'wav'
+                elif current_extension in lossy_formats and current_extension != 'mp3':
+                    needs_remux = True
+                    target_format = 'mp3'
+
+            if not needs_remux:
+                skipped_count += 1
+                continue
+
+            # Perform remuxing
+            write_log.info("TASK_REMUX_FILE", "Remuxing file to target format.",
+                         {"spotify_id": spotify_id, "current_ext": current_extension,
+                          "target_format": target_format, "path": local_file_path})
+
+            try:
+                new_path = None
+                
+                if target_format == 'wav':
+                    # Remux lossless to WAV
+                    new_path = _remux_lossless_to_wav(local_file_path, spotify_id, current_extension)
+                elif target_format == 'mp3':
+                    # Remux to MP3 320kbps (handles both lossless and lossy sources)
+                    if current_extension in lossless_formats:
+                        # Lossless -> MP3 (when REMUX_ALL_TO_MP3=true)
+                        new_path = _remux_lossy_to_mp3(local_file_path, spotify_id, current_extension)
+                    else:
+                        # Lossy -> MP3 (standard conversion)
+                        new_path = _remux_lossy_to_mp3(local_file_path, spotify_id, current_extension)
+
+                if new_path and new_path != local_file_path:
+                    # Update database with new path
+                    track_db.update_local_file_path(spotify_id, new_path)
+                    
+                    # Update M3U8 files
+                    _update_m3u8_files_for_track(spotify_id, new_path)
+                    
+                    remuxed_count += 1
+                    write_log.info("TASK_REMUX_SUCCESS", "File remuxed successfully.",
+                                 {"spotify_id": spotify_id, "old_path": local_file_path,
+                                  "new_path": new_path})
+                else:
+                    # Remux failed or returned same path
+                    skipped_count += 1
+                    
+            except Exception as e:
+                error_count += 1
+                write_log.error("TASK_REMUX_FILE_ERROR", "Failed to remux file.",
+                              {"spotify_id": spotify_id, "path": local_file_path,
+                               "error": str(e)})
+
+        write_log.info("TASK_REMUX_EXISTING_COMPLETE",
+                      "Existing files remux task completed.",
+                      {"remuxed": remuxed_count, "skipped": skipped_count,
+                       "errors": error_count, "total": len(completed_tracks)})
+        return True
+
+    except Exception as e:
+        write_log.error("TASK_REMUX_EXISTING_FAILED",
+                       "Existing files remux task failed.",
+                       {"error": str(e)})
+        return False
+
+
 # Main Workflow Function
 
 def main(reset_db: bool = False) -> None:
