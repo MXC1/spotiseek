@@ -40,7 +40,7 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
-from scripts.database_management import TrackData, TrackDB
+from scripts.database_management import TrackDB
 from scripts.logs_utils import write_log
 
 load_dotenv()
@@ -221,12 +221,12 @@ def is_better_quality(file: dict[str, Any], current_extension: str, current_bitr
     # Define format categories (matching workflow.py remuxing logic)
     lossless_formats = {'wav', 'flac', 'alac', 'ape'}
     current_is_lossless = current_extension in lossless_formats
-    
+
     # Mode 1: All files remux to MP3 320kbps - no quality upgrades possible
     if REMUX_ALL_TO_MP3:
         # All files will end up as MP3 320kbps, so no quality difference
         return False
-    
+
     # Mode 2: Lossless -> WAV, Lossy -> MP3 320kbps
     # New file is lossless format (will become WAV)
     if ext in lossless_formats:
@@ -241,7 +241,7 @@ def is_better_quality(file: dict[str, Any], current_extension: str, current_bitr
     if current_is_lossless:
         # Never downgrade from lossless to lossy
         return False
-    
+
     # Both are lossy - compare bitrates
     if ext == "mp3" and current_extension == "mp3" and bitrate and current_bitrate and bitrate > current_bitrate:
         return True
@@ -249,7 +249,7 @@ def is_better_quality(file: dict[str, Any], current_extension: str, current_bitr
     # If current is a non-MP3 lossy format and new is MP3 320, that's an upgrade
     if ext == "mp3" and bitrate and bitrate >= MIN_BITRATE_KBPS and current_extension not in ("mp3", "wav", "flac", "alac", "ape"):
         return True
-    
+
     return False
 
 
@@ -278,7 +278,7 @@ def quality_sort_key(item: tuple[dict[str, Any], str]) -> tuple[int, int]:
     ext, bitrate = extract_file_quality(file)
 
     lossless_formats = {'wav', 'flac', 'alac', 'ape'}
-    
+
     if REMUX_ALL_TO_MP3:
         # Mode 1: All files remux to MP3 320kbps
         # Prioritize MP3 files (no conversion needed), then by bitrate
@@ -291,11 +291,11 @@ def quality_sort_key(item: tuple[dict[str, Any], str]) -> tuple[int, int]:
         # Lossless formats: WAV, FLAC, ALAC, APE (all will become WAV, priority 3)
         if ext in lossless_formats:
             return (3, 0)
-        
+
         # Lossy formats prioritized by bitrate (all will become MP3 320kbps, priority 1)
         if ext == "mp3":
             return (1, bitrate if bitrate is not None else 0)
-        
+
         # Other lossy formats (OGG, M4A, AAC, WMA, OPUS) - lower priority
         return (0, bitrate if bitrate is not None else 0)
 

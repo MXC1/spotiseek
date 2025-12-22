@@ -16,10 +16,8 @@ Public API:
 - clean_name(): Utility to normalize track/artist names
 """
 
-import argparse
 import os
 import re
-import sys
 
 import spotipy
 from dotenv import load_dotenv
@@ -169,25 +167,3 @@ def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, st
                   {"playlist_name": playlist_name, "track_count": len(cleaned_tracks)})
 
     return playlist_name, cleaned_tracks
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Extract track information from a Spotify playlist URL."
-    )
-    parser.add_argument(
-        "playlist_url",
-        help="Spotify playlist URL (e.g., https://open.spotify.com/playlist/...)"
-    )
-    args = parser.parse_args()
-
-    try:
-        playlist_name, tracks = get_tracks_from_playlist(args.playlist_url)
-        print(f"Playlist name: {playlist_name}")
-        print(f"Total tracks: {len(tracks)}")
-        print("\nTracks:")
-        for spotify_id, artists, track_name in tracks:
-            print(f"{spotify_id}\t{artists}\t{track_name}")
-    except Exception as e:
-        write_log.error("SPOTIFY_MAIN_ERROR", "Error in main execution.", {"error": str(e)})
-        sys.exit(1)

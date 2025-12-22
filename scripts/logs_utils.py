@@ -232,7 +232,7 @@ def prepare_log_summary(df_logs, warn_err_logs):
         sample_row = group_df.iloc[0]
         matching_df_index = group_df.index[0]
         list_position = index_to_position.get(matching_df_index, 0)
-        
+
         # Safely access context with bounds checking
         if list_position < len(warn_err_logs) and isinstance(warn_err_logs[list_position], dict):
             context_obj = warn_err_logs[list_position].get('context', {})
