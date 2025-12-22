@@ -201,10 +201,10 @@ def is_better_quality(file: dict[str, Any], current_extension: str, current_bitr
     Determine if a file has better quality than the current one.
 
     Quality hierarchy depends on REMUX_ALL_TO_MP3 mode:
-    
+
     Mode 1 (REMUX_ALL_TO_MP3=True): All formats -> MP3 320kbps
     - No quality upgrades possible (all end up as MP3 320kbps)
-    
+
     Mode 2 (REMUX_ALL_TO_MP3=False): Lossless -> WAV, Lossy -> MP3 320kbps
     - Lossless formats > Lossy formats
 
@@ -224,31 +224,19 @@ def is_better_quality(file: dict[str, Any], current_extension: str, current_bitr
 
     # Mode 1: All files remux to MP3 320kbps - no quality upgrades possible
     if REMUX_ALL_TO_MP3:
-        # All files will end up as MP3 320kbps, so no quality difference
         return False
 
     # Mode 2: Lossless -> WAV, Lossy -> MP3 320kbps
-    # New file is lossless format (will become WAV)
     if ext in lossless_formats:
-        # If current is already lossless, no upgrade needed
-        if current_is_lossless:
-            return False
-        # Lossless is always better than lossy
-        return True
+        return not current_is_lossless
 
-    # New file is lossy (will become MP3 320kbps)
-    # Only upgrade if current is also lossy but lower quality
     if current_is_lossless:
-        # Never downgrade from lossless to lossy
         return False
 
-    # Both are lossy - compare bitrates
-    if ext == "mp3" and current_extension == "mp3" and bitrate and current_bitrate and bitrate > current_bitrate:
-        return True
-
-    # If current is a non-MP3 lossy format and new is MP3 320, that's an upgrade
-    if ext == "mp3" and bitrate and bitrate >= MIN_BITRATE_KBPS and current_extension not in ("mp3", "wav", "flac", "alac", "ape"):
-        return True
+    if ext == "mp3":
+        if current_extension == "mp3" and bitrate and current_bitrate:
+            return bitrate > current_bitrate
+        return bool(bitrate and bitrate >= MIN_BITRATE_KBPS and current_extension not in ("mp3", *lossless_formats))
 
     return False
 
@@ -258,11 +246,11 @@ def quality_sort_key(item: tuple[dict[str, Any], str]) -> tuple[int, int]:
     Generate a sort key for file quality prioritization.
 
     Priority depends on REMUX_ALL_TO_MP3 mode:
-    
+
     Mode 1 (REMUX_ALL_TO_MP3=True): All formats -> MP3 320kbps
     - Prioritize MP3 files (already in target format)
     - Then other formats by bitrate
-    
+
     Mode 2 (REMUX_ALL_TO_MP3=False): Lossless -> WAV, Lossy -> MP3 320kbps
     - Prioritize lossless formats (will become WAV)
     - Then lossy formats by bitrate

@@ -482,6 +482,167 @@ def _update_file_status(file: dict, username: str | None = None) -> None:
             write_log.warn("DOWNLOAD_REMOVE_SKIP", "Cannot remove failed download - missing username or UUID.",
                             {"spotify_id": spotify_id, "slskd_uuid": slskd_uuid, "username": download_username})
 
+
+def _should_skip_completed_download(spotify_id: str) -> bool:
+    """
+    Check if a completed download should be skipped from processing.
+
+    Skips tracks that are either marked for redownload (quality upgrade pending)
+    or already fully processed to prevent redundant remuxing.
+
+    Args:
+        spotify_id: Spotify track identifier
+
+    Returns:
+        True if the download should be skipped, False otherwise
+    """
+    current_status = track_db.get_track_status(spotify_id)
+    if current_status == "redownload_pending":
+        write_log.debug("DOWNLOAD_SKIP_REDOWNLOAD", "Skipping status update for track marked for redownload.",
+                       {"spotify_id": spotify_id})
+        return True
+
+    if current_status == "completed":
+        write_log.debug("DOWNLOAD_ALREADY_PROCESSED", "Skipping already completed download.",
+                       {"spotify_id": spotify_id})
+        return True
+
+    return False
+
+
+def _compute_download_local_path(file: dict) -> str | None:
+    """
+    Compute the local file path for a downloaded file from slskd.
+
+    Extracts the last two path components (parent folder and filename) from
+    the slskd file path to create a cleaner local path structure.
+
+    Args:
+        file: File object from slskd API containing 'filename' key
+
+    Returns:
+        Absolute local file path, or None if filename is missing
+
+    Example:
+        >>> file = {"filename": "Collection\\Artist\\Album\\Track.mp3"}
+        >>> _compute_download_local_path(file)
+        "/downloads/Album/Track.mp3"
+    """
+    filename_rel = file.get("filename")
+    if not filename_rel:
+        return None
+
+    normalized_path = filename_rel.replace("\\", "/")
+    path_parts = normalized_path.split("/")
+
+    if len(path_parts) >= 2:  # noqa: PLR2004
+        relative_path = "/".join(path_parts[-2:])
+    elif len(path_parts) == 1:
+        relative_path = path_parts[0]
+    else:
+        relative_path = filename_rel
+
+    return os.path.join(config.downloads_root, relative_path)
+
+
+def _is_duplicate_record(spotify_id: str, local_file_path: str) -> bool:
+    """
+    Check if a download is a duplicate record (same file already tracked).
+
+    Prevents reprocessing old slskd records that appear after quality upgrade
+    resets or when slskd history contains already-processed downloads.
+
+    Args:
+        spotify_id: Spotify track identifier
+        local_file_path: Path to the newly downloaded file
+
+    Returns:
+        True if this file is already tracked in the database, False otherwise
+    """
+    existing_path = track_db.get_local_file_path(spotify_id)
+    if not existing_path:
+        return False
+
+    existing_normalized = existing_path.replace("\\", "/").lower()
+    new_normalized = local_file_path.replace("\\", "/").lower()
+    paths_match = (
+        existing_normalized == new_normalized
+        or os.path.basename(existing_normalized) == os.path.basename(new_normalized)
+    )
+    if paths_match:
+        write_log.debug("DOWNLOAD_DUPLICATE_RECORD", "Skipping old slskd record - file already tracked.",
+                       {"spotify_id": spotify_id, "existing_path": existing_path, "slskd_path": local_file_path})
+    return paths_match
+
+
+def _extract_extension_bitrate(file: dict, local_file_path: str) -> tuple[str | None, int | None]:
+    """
+    Extract file extension and bitrate from slskd file metadata.
+
+    Attempts to get extension from file metadata first, falling back to
+    extracting it from the filename if not available.
+
+    Args:
+        file: File object from slskd API
+        local_file_path: Local file path (used as fallback for extension)
+
+    Returns:
+        Tuple of (extension, bitrate). Extension is lowercase, bitrate in kbps.
+        Either value may be None if not determinable.
+    """
+    extension = None
+    if file.get("extension"):
+        extension = file["extension"].lower()
+    elif "." in local_file_path:
+        extension = local_file_path.rsplit(".", 1)[-1].lower()
+
+    bitrate = file.get("bitRate") or file.get("bitrate")
+    try:
+        bitrate = int(bitrate) if bitrate is not None else None
+    except (ValueError, TypeError):
+        bitrate = None
+
+    return extension, bitrate
+
+
+def _remux_completed_download(spotify_id: str, local_file_path: str, extension: str | None, bitrate: int | None) -> str:
+    """
+    Remux a completed download to the preferred format based on configuration.
+
+    Remuxing behavior depends on REMUX_ALL_TO_MP3 setting:
+    - If True: All formats are converted to MP3 320kbps
+    - If False: Lossless (FLAC/ALAC/APE) -> WAV, Lossy (OGG/M4A/etc) -> MP3 320kbps
+
+    MP3 and WAV files are already in preferred format and are not remuxed.
+
+    Args:
+        spotify_id: Spotify track identifier
+        local_file_path: Path to the downloaded file
+        extension: File extension (lowercase)
+        bitrate: File bitrate in kbps (for MP3 files)
+
+    Returns:
+        Final file path after remuxing (may be same as input if no remux needed)
+    """
+    lossless_formats = {'flac', 'alac', 'ape'}
+    lossy_formats = {'ogg', 'm4a', 'aac', 'wma', 'opus'}
+    final_path = local_file_path
+
+    if REMUX_ALL_TO_MP3:
+        if extension in lossless_formats or extension in lossy_formats or extension == 'wav':
+            final_path = _remux_lossy_to_mp3(local_file_path, spotify_id, extension) or local_file_path
+    elif extension in lossless_formats:
+        final_path = _remux_lossless_to_wav(local_file_path, spotify_id, extension) or local_file_path
+    elif extension in lossy_formats:
+        final_path = _remux_lossy_to_mp3(local_file_path, spotify_id, extension) or local_file_path
+    elif extension == "mp3":
+        track_db.update_extension_bitrate(spotify_id, extension="mp3", bitrate=bitrate)
+    elif extension == "wav":
+        track_db.update_extension_bitrate(spotify_id, extension="wav", bitrate=None)
+
+    return final_path
+
+
 def _handle_completed_download(file: dict, spotify_id: str) -> None:
     """
     Process a successfully completed download.
@@ -498,104 +659,21 @@ def _handle_completed_download(file: dict, spotify_id: str) -> None:
         file: File object from slskd API
         spotify_id: Spotify track identifier
     """
-    # Check current status - don't overwrite redownload_pending or reprocess completed tracks
-    current_status = track_db.get_track_status(spotify_id)
-    if current_status == "redownload_pending":
-        write_log.debug("DOWNLOAD_SKIP_REDOWNLOAD", "Skipping status update for track marked for redownload.",
-                       {"spotify_id": spotify_id})
+    if _should_skip_completed_download(spotify_id):
         return
 
-    # Skip if already processed to prevent redundant remuxing
-    if current_status == "completed":
-        write_log.debug("DOWNLOAD_ALREADY_PROCESSED", "Skipping already completed download.",
-                       {"spotify_id": spotify_id})
-        return
-
-    filename_rel = file.get("filename")
-
-    if not filename_rel:
+    local_file_path = _compute_download_local_path(file)
+    if not local_file_path:
         write_log.warn("DOWNLOAD_NO_FILENAME", "Completed download has no filename.",
                       {"spotify_id": spotify_id})
         track_db.update_track_status(spotify_id, "completed")
         return
 
-    # Extract only the last subfolder and filename for cleaner paths
-    # e.g., "Collection\Artist\Album\Track.mp3" -> "Album\Track.mp3"
-    normalized_path = filename_rel.replace("\\", "/")
-    path_parts = normalized_path.split("/")
+    if _is_duplicate_record(spotify_id, local_file_path):
+        return
 
-    if len(path_parts) >= 2:  # noqa: PLR2004
-        # Keep last two components: parent folder and filename
-        relative_path = "/".join(path_parts[-2:])
-    elif len(path_parts) == 1:
-        # Just the filename
-        relative_path = path_parts[0]
-    else:
-        relative_path = filename_rel
-
-    # Keep forward slashes for Linux/Docker environment
-    local_file_path = os.path.join(config.downloads_root, relative_path)
-
-    # Check if this is an old slskd record being reprocessed (e.g., after quality upgrade reset)
-    # This prevents double-counting when the same file is seen again from slskd history
-    existing_path = track_db.get_local_file_path(spotify_id)
-    if existing_path:
-        # Normalize paths for comparison
-        existing_normalized = existing_path.replace("\\", "/").lower()
-        new_normalized = local_file_path.replace("\\", "/").lower()
-        paths_match = (
-            existing_normalized == new_normalized
-            or os.path.basename(existing_normalized) == os.path.basename(new_normalized)
-        )
-        if paths_match:
-            write_log.debug("DOWNLOAD_DUPLICATE_RECORD", "Skipping old slskd record - file already tracked.",
-                           {"spotify_id": spotify_id, "existing_path": existing_path, "slskd_path": local_file_path})
-            return
-
-    # Determine file extension and bitrate from file metadata
-    extension = None
-    if file.get("extension"):
-        extension = file["extension"].lower()
-    elif "." in local_file_path:
-        extension = local_file_path.rsplit(".", 1)[-1].lower()
-
-    # Extract actual bitrate from file metadata
-    bitrate = file.get("bitRate") or file.get("bitrate")
-    try:
-        bitrate = int(bitrate) if bitrate is not None else None
-    except (ValueError, TypeError):
-        bitrate = None
-
-    # Define lossless and lossy format categories
-    lossless_formats = {'flac', 'alac', 'ape'}
-    lossy_formats = {'ogg', 'm4a', 'aac', 'wma', 'opus'}
-
-    final_path = local_file_path
-
-    # Remuxing logic depends on REMUX_ALL_TO_MP3 flag
-    if REMUX_ALL_TO_MP3:
-        # Mode 1: Remux ALL formats to MP3 320kbps (except MP3 itself)
-        if extension in lossless_formats:
-            # Remux lossless formats (FLAC, ALAC, APE) to MP3 320kbps
-            final_path = _remux_lossy_to_mp3(local_file_path, spotify_id, extension) or local_file_path
-        elif extension in lossy_formats:
-            # Remux lossy formats to MP3 320kbps (except MP3 itself)
-            final_path = _remux_lossy_to_mp3(local_file_path, spotify_id, extension) or local_file_path
-        elif extension == 'wav':
-            # Remux WAV to MP3 320kbps
-            final_path = _remux_lossy_to_mp3(local_file_path, spotify_id, extension) or local_file_path
-    # Mode 2: Remux lossless to WAV, lossy to MP3 320kbps (default)
-    elif extension in lossless_formats:
-        # Remux lossless formats to WAV (except WAV itself)
-        final_path = _remux_lossless_to_wav(local_file_path, spotify_id, extension) or local_file_path
-    elif extension in lossy_formats:
-        # Remux lossy formats to MP3 320kbps (except MP3 itself)
-        final_path = _remux_lossy_to_mp3(local_file_path, spotify_id, extension) or local_file_path
-    # MP3 and WAV files are already in preferred format, no remuxing needed
-    elif extension == "mp3":
-        track_db.update_extension_bitrate(spotify_id, extension="mp3", bitrate=bitrate)
-    elif extension == "wav":
-        track_db.update_extension_bitrate(spotify_id, extension="wav", bitrate=None)
+    extension, bitrate = _extract_extension_bitrate(file, local_file_path)
+    final_path = _remux_completed_download(spotify_id, local_file_path, extension, bitrate)
 
     existing_path = track_db.get_local_file_path(spotify_id)
     track_db.update_local_file_path(spotify_id, final_path)
@@ -710,7 +788,11 @@ def _remux_lossless_to_wav(local_file_path: str, spotify_id: str, extension: str
 
         return wav_path
     except Exception as e:
-        write_log.error("REMUX_FAIL", f"Failed to remux {extension.upper()} to WAV.", {"spotify_id": spotify_id, "error": str(e)})
+        write_log.error(
+            "REMUX_FAIL",
+            f"Failed to remux {extension.upper()} to WAV.",
+            {"spotify_id": spotify_id, "error": str(e)}
+        )
         track_db.update_extension_bitrate(spotify_id, extension=extension)
         return local_file_path
 
@@ -795,7 +877,11 @@ def _remux_lossy_to_mp3(local_file_path: str, spotify_id: str, extension: str) -
 
         return mp3_path
     except Exception as e:
-        write_log.error("REMUX_FAIL", f"Failed to remux {extension.upper()} to MP3.", {"spotify_id": spotify_id, "error": str(e)})
+        write_log.error(
+            "REMUX_FAIL",
+            f"Failed to remux {extension.upper()} to MP3.",
+            {"spotify_id": spotify_id, "error": str(e)}
+        )
         track_db.update_extension_bitrate(spotify_id, extension=extension)
         return local_file_path
 
@@ -1145,6 +1231,109 @@ def task_export_library() -> bool:
         return False
 
 
+def _determine_remux_target(
+    current_extension: str,
+    lossless_formats: set[str],
+    lossy_formats: set[str],
+) -> tuple[bool, str | None]:
+    """
+    Determine if a file needs remuxing and what the target format should be.
+
+    Decision logic based on REMUX_ALL_TO_MP3 setting:
+    - If True: All non-MP3 files should be converted to MP3
+    - If False: Lossless -> WAV, Lossy -> MP3
+
+    Args:
+        current_extension: Current file extension (lowercase)
+        lossless_formats: Set of lossless format extensions
+        lossy_formats: Set of lossy format extensions
+
+    Returns:
+        Tuple of (needs_remux, target_format). target_format is None if no remux needed.
+    """
+    if REMUX_ALL_TO_MP3:
+        return current_extension != "mp3", "mp3" if current_extension != "mp3" else None
+
+    if current_extension in lossless_formats:
+        return current_extension != "wav", "wav" if current_extension != "wav" else None
+
+    if current_extension in lossy_formats:
+        return current_extension != "mp3", "mp3" if current_extension != "mp3" else None
+
+    return False, None
+
+
+def _remux_single_track(spotify_id: str, lossless_formats: set[str], lossy_formats: set[str]) -> str:
+    """
+    Remux a single track to match current format preferences.
+
+    Handles the complete remux workflow for one track:
+    1. Validates file exists and has determinable extension
+    2. Determines if remuxing is needed based on current settings
+    3. Performs remux and updates database/M3U8 files
+
+    Args:
+        spotify_id: Spotify track identifier
+        lossless_formats: Set of lossless format extensions
+        lossy_formats: Set of lossy format extensions
+
+    Returns:
+        Status string: "remuxed", "skipped", or "error"
+    """
+    status = "skipped"
+    local_file_path = track_db.get_local_file_path(spotify_id)
+    if not local_file_path:
+        write_log.debug("TASK_REMUX_NO_PATH", "Track has no file path, skipping.",
+                        {"spotify_id": spotify_id})
+        return status
+
+    if not os.path.exists(local_file_path):
+        write_log.warn("TASK_REMUX_FILE_NOT_FOUND", "File not found, skipping.",
+                       {"spotify_id": spotify_id, "path": local_file_path})
+        return status
+
+    current_extension = track_db.get_track_extension(spotify_id)
+    if not current_extension and "." in local_file_path:
+        current_extension = local_file_path.rsplit(".", 1)[-1].lower()
+
+    if not current_extension:
+        write_log.warn("TASK_REMUX_NO_EXTENSION", "Cannot determine file extension.",
+                       {"spotify_id": spotify_id, "path": local_file_path})
+        return status
+
+    needs_remux, target_format = _determine_remux_target(current_extension, lossless_formats, lossy_formats)
+    if not needs_remux or not target_format:
+        return status
+
+    write_log.info("TASK_REMUX_FILE", "Remuxing file to target format.",
+                  {"spotify_id": spotify_id, "current_ext": current_extension,
+                   "target_format": target_format, "path": local_file_path})
+
+    try:
+        new_path: str | None = None
+
+        if target_format == "wav":
+            new_path = _remux_lossless_to_wav(local_file_path, spotify_id, current_extension)
+        elif target_format == "mp3":
+            new_path = _remux_lossy_to_mp3(local_file_path, spotify_id, current_extension)
+
+        if new_path and new_path != local_file_path:
+            track_db.update_local_file_path(spotify_id, new_path)
+            _update_m3u8_files_for_track(spotify_id, new_path)
+            write_log.info("TASK_REMUX_SUCCESS", "File remuxed successfully.",
+                          {"spotify_id": spotify_id, "old_path": local_file_path,
+                           "new_path": new_path})
+            status = "remuxed"
+
+    except Exception as e:
+        write_log.error("TASK_REMUX_FILE_ERROR", "Failed to remux file.",
+                        {"spotify_id": spotify_id, "path": local_file_path,
+                         "error": str(e)})
+        status = "error"
+
+    return status
+
+
 def task_remux_existing_files() -> bool:
     """
     Task: Remux existing files to match current format preferences.
@@ -1190,95 +1379,15 @@ def task_remux_existing_files() -> bool:
         error_count = 0
 
         for track_row in completed_tracks:
-            spotify_id = track_row[0]  # First column is spotify_id
+            spotify_id = track_row[0]
+            result = _remux_single_track(spotify_id, lossless_formats, lossy_formats)
 
-            # Get current file path and extension
-            local_file_path = track_db.get_local_file_path(spotify_id)
-            if not local_file_path:
-                write_log.debug("TASK_REMUX_NO_PATH", "Track has no file path, skipping.",
-                              {"spotify_id": spotify_id})
-                skipped_count += 1
-                continue
-
-            # Check if file exists
-            if not os.path.exists(local_file_path):
-                write_log.warn("TASK_REMUX_FILE_NOT_FOUND", "File not found, skipping.",
-                             {"spotify_id": spotify_id, "path": local_file_path})
-                skipped_count += 1
-                continue
-
-            current_extension = track_db.get_track_extension(spotify_id)
-            if not current_extension:
-                # Try to extract from filename
-                if "." in local_file_path:
-                    current_extension = local_file_path.rsplit(".", 1)[-1].lower()
-                else:
-                    write_log.warn("TASK_REMUX_NO_EXTENSION", "Cannot determine file extension.",
-                                 {"spotify_id": spotify_id, "path": local_file_path})
-                    skipped_count += 1
-                    continue
-
-            # Determine if remuxing is needed based on current mode
-            needs_remux = False
-            target_format = None
-
-            if REMUX_ALL_TO_MP3:
-                # Mode 1: All files should be MP3 320kbps
-                if current_extension != 'mp3':
-                    needs_remux = True
-                    target_format = 'mp3'
-            # Mode 2: Lossless -> WAV, Lossy -> MP3 320kbps
-            elif current_extension in lossless_formats and current_extension != 'wav':
-                needs_remux = True
-                target_format = 'wav'
-            elif current_extension in lossy_formats and current_extension != 'mp3':
-                needs_remux = True
-                target_format = 'mp3'
-
-            if not needs_remux:
-                skipped_count += 1
-                continue
-
-            # Perform remuxing
-            write_log.info("TASK_REMUX_FILE", "Remuxing file to target format.",
-                         {"spotify_id": spotify_id, "current_ext": current_extension,
-                          "target_format": target_format, "path": local_file_path})
-
-            try:
-                new_path = None
-
-                if target_format == 'wav':
-                    # Remux lossless to WAV
-                    new_path = _remux_lossless_to_wav(local_file_path, spotify_id, current_extension)
-                elif target_format == 'mp3':
-                    # Remux to MP3 320kbps (handles both lossless and lossy sources)
-                    if current_extension in lossless_formats:
-                        # Lossless -> MP3 (when REMUX_ALL_TO_MP3=true)
-                        new_path = _remux_lossy_to_mp3(local_file_path, spotify_id, current_extension)
-                    else:
-                        # Lossy -> MP3 (standard conversion)
-                        new_path = _remux_lossy_to_mp3(local_file_path, spotify_id, current_extension)
-
-                if new_path and new_path != local_file_path:
-                    # Update database with new path
-                    track_db.update_local_file_path(spotify_id, new_path)
-
-                    # Update M3U8 files
-                    _update_m3u8_files_for_track(spotify_id, new_path)
-
-                    remuxed_count += 1
-                    write_log.info("TASK_REMUX_SUCCESS", "File remuxed successfully.",
-                                 {"spotify_id": spotify_id, "old_path": local_file_path,
-                                  "new_path": new_path})
-                else:
-                    # Remux failed or returned same path
-                    skipped_count += 1
-
-            except Exception as e:
+            if result == "remuxed":
+                remuxed_count += 1
+            elif result == "error":
                 error_count += 1
-                write_log.error("TASK_REMUX_FILE_ERROR", "Failed to remux file.",
-                              {"spotify_id": spotify_id, "path": local_file_path,
-                               "error": str(e)})
+            else:
+                skipped_count += 1
 
         write_log.info("TASK_REMUX_EXISTING_COMPLETE",
                       "Existing files remux task completed.",
