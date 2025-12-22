@@ -344,9 +344,13 @@ def render_extension_bitrate_section():
         else:
             st.info("No extension data found.")
     with col2:
-        st.markdown("**Bitrate Breakdown**")
-        if br_df is not None and not br_df.empty:
-            st.dataframe(br_df)
+        st.markdown("**Bitrate Breakdown (Enhanced)**")
+        enhanced_df, enh_error = get_enhanced_bitrate_breakdown(DB_PATH)
+        if enh_error:
+            st.error(f"Error computing enhanced bitrate breakdown: {enh_error}")
+        elif enhanced_df is not None and not enhanced_df.empty:
+            st.dataframe(enhanced_df, hide_index=True)
+            st.caption("Known numeric bitrates, aggregated Lossless, and Unknown files with computed effective bitrate.")
         else:
             st.info("No bitrate data found.")
     with col3:
@@ -355,6 +359,87 @@ def render_extension_bitrate_section():
             st.dataframe(dl_df)
         else:
             st.info("No download status data found.")
+
+
+@st.cache_data(ttl=CACHE_TTL_SHORT)
+def get_enhanced_bitrate_breakdown(db_path):
+    """
+    Build an enhanced bitrate breakdown with the following categories:
+    - Known numeric bitrates (e.g., 320)
+    - Lossless (extensions: wav, flac, alac)
+    - Unknown (Effective) <kbps> for files without stored bitrate, computed from size/duration
+
+    Returns: (DataFrame, error_str)
+    DataFrame columns: bitrate, count
+    """
+    if not os.path.exists(db_path):
+        return pd.DataFrame(columns=["bitrate", "count"]), "Database file does not exist"
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT extension, bitrate, local_file_path
+            FROM tracks
+            WHERE local_file_path IS NOT NULL AND TRIM(local_file_path) != ''
+            """
+        )
+        rows = cursor.fetchall()
+        conn.close()
+
+        lossless_exts = {"wav", "flac", "alac"}
+        lossless_count = 0
+        known_counts = {}
+        unknown_effective_counts = {}
+        unknown_unmeasured = 0
+
+        for ext, br, path in rows:
+            ext_norm = (ext or "").lower()
+            if ext_norm in lossless_exts:
+                lossless_count += 1
+                continue
+
+            # Known stored bitrate
+            if br is not None and str(br).strip() != "":
+                try:
+                    br_int = int(br)
+                except Exception:
+                    # If non-integer stored, skip to effective computation
+                    br_int = None
+                if br_int is not None:
+                    known_counts[br_int] = known_counts.get(br_int, 0) + 1
+                    continue
+
+            # Unknown: try computing effective bitrate
+            eff = compute_effective_bitrate_kbps(path)
+            if eff is not None:
+                unknown_effective_counts[eff] = unknown_effective_counts.get(eff, 0) + 1
+            else:
+                unknown_unmeasured += 1
+
+        # Build display rows
+        display_rows = []
+
+        # Known bitrates, sorted by count desc then bitrate desc
+        for br_val, cnt in sorted(known_counts.items(), key=lambda x: (x[1], x[0]), reverse=True):
+            display_rows.append({"bitrate": str(br_val), "count": cnt})
+
+        # Lossless aggregate
+        if lossless_count > 0:
+            display_rows.append({"bitrate": "Lossless", "count": lossless_count})
+
+        # Unknown effective buckets, sorted by count desc then bitrate desc
+        for eff_val, cnt in sorted(unknown_effective_counts.items(), key=lambda x: (x[1], x[0]), reverse=True):
+            display_rows.append({"bitrate": f"Unknown (Effective) {eff_val}", "count": cnt})
+
+        # Unknown unmeasured bucket if any remain
+        if unknown_unmeasured > 0:
+            display_rows.append({"bitrate": "Unknown (Unmeasured)", "count": unknown_unmeasured})
+
+        df = pd.DataFrame(display_rows, columns=["bitrate", "count"])
+        return df, None
+    except Exception as e:
+        return pd.DataFrame(columns=["bitrate", "count"]), str(e)
 
 
 def render_failed_reason_section():
@@ -735,6 +820,29 @@ def extract_metadata_from_file(file_path: str) -> Dict[str, Optional[any]]:
                        {"file_path": file_path, "error": str(e)})
     
     return metadata
+
+
+def compute_effective_bitrate_kbps(file_path: str) -> Optional[int]:
+    """
+    Compute an effective bitrate (kbps) from file size and duration.
+    Returns None if duration cannot be determined.
+    """
+    try:
+        if not file_path or not os.path.exists(file_path):
+            return None
+        size_bytes = os.path.getsize(file_path)
+        audio = MutagenFile(file_path, easy=False)
+        duration = getattr(getattr(audio, "info", None), "length", None)
+        if not duration or duration <= 0:
+            return None
+        kbps = int(round((size_bytes * 8) / duration / 1000))
+        return kbps
+    except Exception as e:
+        write_log.debug("BITRATE_EFFECTIVE_FAIL", "Failed to compute effective bitrate.", {
+            "file_path": file_path,
+            "error": str(e)
+        })
+        return None
 
 
 def import_track(spotify_id: str, uploaded_file, track_info: dict) -> Tuple[bool, str]:
