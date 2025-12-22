@@ -14,4 +14,4 @@ shares:
     - \.DS_Store$
   cache:
     storage_mode: memory
-    retention: 10080  # Re-scan shares weekly
+    retention: 1440  # Re-scan shares daily

@@ -837,6 +837,8 @@ def process_search_results(
                 track_db.update_track_status(spotify_id, "completed")
             else:
                 track_db.update_track_status(spotify_id, "not_found")
+            remove_search_from_slskd(search_id, spotify_id)
+            track_db.set_search_uuid(spotify_id, None)
             return True
 
         # Select best file according to quality rules
@@ -850,6 +852,8 @@ def process_search_results(
                 track_db.update_track_status(spotify_id, "completed")
             else:
                 track_db.update_track_status(spotify_id, "no_suitable_file")
+            remove_search_from_slskd(search_id, spotify_id)
+            track_db.set_search_uuid(spotify_id, None)
             return True
 
         # If checking for quality upgrade, verify new file is actually better
@@ -862,6 +866,8 @@ def process_search_results(
                               {"spotify_id": spotify_id, "current_extension": current_extension,
                                "current_bitrate": current_bitrate})
                 track_db.update_track_status(spotify_id, "completed")
+                remove_search_from_slskd(search_id, spotify_id)
+                track_db.set_search_uuid(spotify_id, None)
                 return True
 
             write_log.info("SLSKD_REDOWNLOAD_PROCESS", "Found better quality file for upgrade.",
@@ -869,6 +875,8 @@ def process_search_results(
 
         # Enqueue download (will update status to pending/queued)
         enqueue_download(best_file, username, spotify_id)
+        remove_search_from_slskd(search_id, spotify_id)
+        track_db.set_search_uuid(spotify_id, None)
         return True
 
     except Exception as e:
@@ -986,6 +994,75 @@ def process_pending_searches() -> None:
 
     write_log.info("PENDING_SEARCHES_PROCESSED", "Finished checking pending searches.",
                   {"processed": processed_count, "still_searching": still_searching_count})
+
+
+def remove_search_from_slskd(search_id: str, spotify_id: str | None = None, max_retries: int = 3) -> bool:
+    """
+    Remove a completed search from slskd so it no longer appears in status queries.
+
+    Args:
+        search_id: slskd search UUID to remove
+        spotify_id: Optional Spotify track ID to clear local mapping
+        max_retries: Maximum retry attempts for transient failures
+
+    Returns:
+        True if the search was removed (or already absent), False otherwise
+    """
+    for attempt in range(max_retries):
+        try:
+            resp = requests.delete(
+                f"{SLSKD_URL}/searches/{search_id}",
+                headers={"X-API-Key": TOKEN},
+                timeout=10
+            )
+
+            if resp.status_code in (200, 204, 404):
+                write_log.info(
+                    "SLSKD_SEARCH_REMOVE_SUCCESS",
+                    "Search removed from slskd.",
+                    {"search_id": search_id, "spotify_id": spotify_id}
+                )
+                if spotify_id:
+                    track_db.set_search_uuid(spotify_id, None)
+                return True
+
+            resp.raise_for_status()
+
+        except (requests.Timeout, requests.exceptions.ConnectionError) as e:
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt
+                write_log.warn(
+                    "SLSKD_SEARCH_REMOVE_RETRY",
+                    "Network error removing search, retrying.",
+                    {"attempt": attempt + 1, "max_retries": max_retries, "wait_time": wait_time, "error": str(e)}
+                )
+                time.sleep(wait_time)
+            else:
+                write_log.warn(
+                    "SLSKD_SEARCH_REMOVE_FAIL",
+                    "Failed to remove search after retries.",
+                    {"search_id": search_id, "spotify_id": spotify_id, "error": str(e)}
+                )
+                return False
+
+        except requests.HTTPError as e:
+            write_log.warn(
+                "SLSKD_SEARCH_REMOVE_FAIL",
+                "HTTP error removing search.",
+                {"search_id": search_id, "spotify_id": spotify_id,
+                 "status_code": e.response.status_code if e.response else None, "error": str(e)}
+            )
+            return False
+
+        except requests.RequestException as e:
+            write_log.warn(
+                "SLSKD_SEARCH_REMOVE_FAIL",
+                "Failed to remove search.",
+                {"search_id": search_id, "spotify_id": spotify_id, "error": str(e)}
+            )
+            return False
+
+    return False
 
 
 def remove_download_from_slskd(username: str, slskd_uuid: str, max_retries: int = 3) -> bool:
