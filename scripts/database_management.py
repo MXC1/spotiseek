@@ -784,6 +784,83 @@ class TrackDB:
         cursor.execute("SELECT playlist_url FROM playlist_tracks WHERE spotify_id = ?", (spotify_id,))
         return [row[0] for row in cursor.fetchall()]
 
+    def get_all_playlist_urls(self) -> list[str]:
+        """Return all playlist URLs currently stored."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT playlist_url FROM playlists")
+        return [row[0] for row in cursor.fetchall()]
+
+    def get_track_ids_for_playlist(self, playlist_url: str) -> list[str]:
+        """Return spotify_ids linked to a playlist."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT spotify_id FROM playlist_tracks WHERE playlist_url = ?",
+            (playlist_url,)
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+    def unlink_track_from_playlist(self, spotify_id: str, playlist_url: str) -> None:
+        """Remove a track→playlist association."""
+        write_log.debug(
+            "TRACK_UNLINK_PLAYLIST",
+            "Unlinking track from playlist.",
+            {"spotify_id": spotify_id, "playlist_url": playlist_url}
+        )
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "DELETE FROM playlist_tracks WHERE playlist_url = ? AND spotify_id = ?",
+            (playlist_url, spotify_id)
+        )
+        self.conn.commit()
+
+    def delete_playlist(self, playlist_url: str) -> None:
+        """Delete a playlist and all its associations."""
+        write_log.info(
+            "PLAYLIST_DELETE",
+            "Deleting playlist and associations.",
+            {"playlist_url": playlist_url}
+        )
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM playlist_tracks WHERE playlist_url = ?", (playlist_url,))
+        cursor.execute("DELETE FROM playlists WHERE playlist_url = ?", (playlist_url,))
+        self.conn.commit()
+
+    def get_playlist_usage_count(self, spotify_id: str) -> int:
+        """Return how many playlists reference a track."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) FROM playlist_tracks WHERE spotify_id = ?",
+            (spotify_id,)
+        )
+        result = cursor.fetchone()
+        return int(result[0]) if result and result[0] is not None else 0
+
+    def delete_track(self, spotify_id: str) -> None:
+        """Delete a track and its playlist links."""
+        write_log.info(
+            "TRACK_DELETE",
+            "Deleting track and associations.",
+            {"spotify_id": spotify_id}
+        )
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM playlist_tracks WHERE spotify_id = ?", (spotify_id,))
+        cursor.execute("DELETE FROM tracks WHERE spotify_id = ?", (spotify_id,))
+        self.conn.commit()
+
+    def get_playlist_tracks_with_metadata(self, playlist_url: str) -> list[tuple[str, str, str, str | None]]:
+        """Return spotify_id, artist, track_name, local_file_path for tracks in a playlist."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT pt.spotify_id, t.artist, t.track_name, t.local_file_path
+            FROM playlist_tracks pt
+            JOIN tracks t ON pt.spotify_id = t.spotify_id
+            WHERE pt.playlist_url = ?
+            """,
+            (playlist_url,)
+        )
+        return cursor.fetchall()
+
     def get_m3u8_path_for_playlist(self, playlist_url: str) -> str:
         """
         Return the m3u8_path for a given playlist_url, or None if not found.

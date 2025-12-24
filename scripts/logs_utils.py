@@ -437,8 +437,10 @@ def _init_workflow_metrics(total_logs: int) -> dict:
         'errors': [],
         'warnings': [],
         'tracks_added': 0,
+        'tracks_removed': 0,
         'tracks_upgraded': 0,
         'playlists_added': 0,
+        'playlists_removed': 0,
         'downloads_completed': 0,
         'downloads_completed_new': 0,
         'downloads_completed_upgrade': 0,
@@ -467,6 +469,8 @@ def _update_metrics_for_event(metrics: dict, entry: dict) -> None:
         'PLAYLIST_ADD': 'playlists_added',
         'DOWNLOAD_FAILED': 'downloads_failed',
         'SLSKD_SEARCH_CREATE': 'searches_initiated',
+        'TRACK_DELETE': 'tracks_removed',
+        'PLAYLIST_DELETE': 'playlists_removed',
     }
 
     if event_id in event_counter_map:
@@ -482,6 +486,11 @@ def _update_metrics_for_event(metrics: dict, entry: dict) -> None:
         metrics['new_searches'] = context.get('total_tracks', 0)
     elif event_id == 'SLSKD_REDOWNLOAD_SEARCHES_INITIATED':
         metrics['upgrade_searches'] = context.get('initiated_count', 0)
+    elif event_id == 'PLAYLISTS_PRUNED':
+        metrics['playlists_removed'] += int(context.get('removed_count', 0) or 0)
+    elif event_id == 'PLAYLIST_TRACKS_PRUNED':
+        # Tracks removed here are only those actually deleted in DB (context should reflect that count)
+        metrics['tracks_removed'] += int(context.get('removed', 0) or 0)
 
 
 def _update_workflow_status(metrics: dict, event_id: str) -> None:

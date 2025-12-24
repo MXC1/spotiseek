@@ -540,28 +540,32 @@ def render_run_summary(run: dict, analysis: dict):
     
     # Key metrics in columns
     st.markdown("#### Summary Statistics")
-    col1, col2, col3, col4, col5 = st.columns(5)
-    
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+
     with col1:
         st.metric("Total Logs", analysis['total_logs'])
         st.metric("Errors", len(analysis['errors']))
-    
-    with col2:
         st.metric("Warnings", len(analysis['warnings']))
-        st.metric("Tracks Added", analysis['tracks_added'])
-    
-    with col3:
-        st.metric("Playlists Added", analysis['playlists_added'])
-        st.metric("Quality Upgrades", analysis['tracks_upgraded'])
-    
-    with col4:
+
+    with col2:
         st.metric("Searches (New)", analysis['new_searches'])
         st.metric("Searches (Upgrade)", analysis['upgrade_searches'])
-    
+
+    with col3:
+        st.metric("Playlists Added", analysis['playlists_added'])
+        st.metric("Playlists Removed", analysis.get('playlists_removed', 0))
+
+    with col4:
+        st.metric("Tracks Added", analysis['tracks_added'])
+        st.metric("Tracks Removed", analysis.get('tracks_removed', 0))
+
+    with col5:
+        st.metric("Quality Upgrades", analysis['tracks_upgraded'])
+
     # Split downloads completed into new vs upgrades
     downloads_new = analysis.get('downloads_completed_new', 0)
     downloads_upgrade = analysis.get('downloads_completed_upgrade', 0)
-    with col5:
+    with col6:
         st.metric("Downloads Completed (New)", downloads_new)
         st.metric("Downloads Completed (Upgrade)", downloads_upgrade)
         st.metric("Downloads Failed", analysis['downloads_failed'])
@@ -622,7 +626,6 @@ def _get_non_completed_tracks_cached(db_path: str) -> Dict[str, List[dict]]:
     
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    
     # Query tracks with their playlist associations, only those missing local_file_path
     query = """
         SELECT 

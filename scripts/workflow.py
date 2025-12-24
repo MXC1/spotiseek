@@ -219,6 +219,167 @@ def sanitize_playlist_name(playlist_name: str) -> str:
     return sanitized
 
 
+def _delete_local_file(local_file_path: str | None, spotify_id: str) -> None:
+    """Remove a local audio file if present."""
+    if not local_file_path:
+        return
+
+    try:
+        if os.path.exists(local_file_path):
+            os.remove(local_file_path)
+            write_log.info(
+                "AUDIO_FILE_DELETED",
+                "Deleted audio file for removed track.",
+                {"spotify_id": spotify_id, "file_path": local_file_path}
+            )
+        else:
+            write_log.debug(
+                "AUDIO_FILE_MISSING",
+                "Audio file already absent during deletion.",
+                {"spotify_id": spotify_id, "file_path": local_file_path}
+            )
+    except Exception as e:
+        write_log.warn(
+            "AUDIO_FILE_DELETE_FAIL",
+            "Failed to delete audio file.",
+            {"spotify_id": spotify_id, "file_path": local_file_path, "error": str(e)}
+        )
+
+
+def _remove_track_if_orphaned(spotify_id: str, local_file_path: str | None) -> None:
+    """Delete track row and file when no playlists reference it."""
+    remaining = track_db.get_playlist_usage_count(spotify_id)
+    if remaining > 0:
+        write_log.debug(
+            "TRACK_RETAINED_OTHER_PLAYLISTS",
+            "Track kept because other playlists still reference it.",
+            {"spotify_id": spotify_id, "remaining_playlists": remaining}
+        )
+        return
+
+    track_db.delete_track(spotify_id)
+    _delete_local_file(local_file_path, spotify_id)
+
+
+def _rewrite_playlist_m3u8_from_db(playlist_url: str, m3u8_path: str) -> None:
+    """Rewrite an M3U8 file to match current DB state for a playlist."""
+    if not m3u8_path:
+        return
+
+    tracks = track_db.get_playlist_tracks_with_metadata(playlist_url)
+
+    if not tracks:
+        if os.path.exists(m3u8_path):
+            try:
+                os.remove(m3u8_path)
+                write_log.info(
+                    "M3U8_DELETE_EMPTY_PLAYLIST",
+                    "Removed M3U8 file for empty playlist.",
+                    {"playlist_url": playlist_url, "m3u8_path": m3u8_path}
+                )
+            except Exception as e:
+                write_log.warn(
+                    "M3U8_DELETE_EMPTY_FAIL",
+                    "Failed to delete empty playlist M3U8 file.",
+                    {"playlist_url": playlist_url, "m3u8_path": m3u8_path, "error": str(e)}
+                )
+        return
+
+    try:
+        lines = ["#EXTM3U\n"]
+        for spotify_id, artist, track_name, local_file_path in tracks:
+            if local_file_path:
+                lines.append(f"{local_file_path}\n")
+            else:
+                artist_text = artist or ""
+                name_text = track_name or ""
+                lines.append(f"# {spotify_id} - {artist_text} - {name_text}\n")
+
+        with open(m3u8_path, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+
+        write_log.debug(
+            "M3U8_REWRITE_SUCCESS",
+            "Rewrote M3U8 file from DB state.",
+            {"playlist_url": playlist_url, "m3u8_path": m3u8_path, "track_count": len(tracks)}
+        )
+    except Exception as e:
+        write_log.error(
+            "M3U8_REWRITE_FAIL",
+            "Failed to rewrite M3U8 file from DB state.",
+            {"playlist_url": playlist_url, "m3u8_path": m3u8_path, "error": str(e)}
+        )
+
+
+def _prune_removed_tracks_for_playlist(
+    playlist_url: str,
+    playlist_name: str,
+    m3u8_path: str,
+    current_tracks: list[tuple[str, str, str]]
+) -> None:
+    """Remove tracks that are no longer present in the Spotify playlist."""
+    current_ids = {track[0] for track in current_tracks}
+    existing_ids = set(track_db.get_track_ids_for_playlist(playlist_url))
+    removed_ids = existing_ids - current_ids
+
+    if not removed_ids:
+        return
+
+    removed_count = 0
+    for spotify_id in removed_ids:
+        local_file_path = track_db.get_local_file_path(spotify_id)
+        track_db.unlink_track_from_playlist(spotify_id, playlist_url)
+        _remove_track_if_orphaned(spotify_id, local_file_path)
+        removed_count += 1
+
+    _rewrite_playlist_m3u8_from_db(playlist_url, m3u8_path)
+
+    write_log.info(
+        "PLAYLIST_TRACKS_PRUNED",
+        "Removed tracks no longer present in playlist input.",
+        {"playlist_url": playlist_url, "playlist_name": playlist_name, "removed": removed_count}
+    )
+
+
+def _prune_missing_playlists(input_playlist_urls: list[str]) -> None:
+    """Remove playlists absent from input CSV and clean up orphaned tracks/files."""
+    desired = set(input_playlist_urls)
+    existing = set(track_db.get_all_playlist_urls())
+    missing = existing - desired
+
+    if not missing:
+        return
+
+    for playlist_url in missing:
+        m3u8_path = track_db.get_m3u8_path_for_playlist(playlist_url)
+        tracks = track_db.get_playlist_tracks_with_metadata(playlist_url)
+        track_db.delete_playlist(playlist_url)
+
+        if m3u8_path and os.path.exists(m3u8_path):
+            try:
+                os.remove(m3u8_path)
+                write_log.info(
+                    "M3U8_DELETE_PLAYLIST_REMOVED",
+                    "Deleted M3U8 file for removed playlist.",
+                    {"playlist_url": playlist_url, "m3u8_path": m3u8_path}
+                )
+            except Exception as e:
+                write_log.warn(
+                    "M3U8_DELETE_PLAYLIST_FAIL",
+                    "Failed to delete M3U8 file for removed playlist.",
+                    {"playlist_url": playlist_url, "m3u8_path": m3u8_path, "error": str(e)}
+                )
+
+        for spotify_id, _, _, local_file_path in tracks:
+            _remove_track_if_orphaned(spotify_id, local_file_path)
+
+    write_log.info(
+        "PLAYLISTS_PRUNED",
+        "Pruned playlists not present in input CSV.",
+        {"removed_count": len(missing)}
+    )
+
+
 def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
     """
     Process a single playlist: fetch tracks and add to database.
@@ -268,6 +429,15 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
         write_log.error("PLAYLIST_DB_FAIL", "Failed to add playlist to database.",
                        {"playlist_url": playlist_url, "error": str(e)})
         return
+
+    try:
+        _prune_removed_tracks_for_playlist(playlist_url, playlist_name, m3u8_path, tracks)
+    except Exception as e:
+        write_log.error(
+            "PLAYLIST_PRUNE_FAIL",
+            "Failed to prune removed tracks for playlist.",
+            {"playlist_url": playlist_url, "error": str(e)}
+        )
 
     # Create M3U8 file with track metadata as comments (only if it doesn't exist)
     if not os.path.exists(m3u8_path):
@@ -320,6 +490,15 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
                     track_db.update_track_status(track[0], "failed", failed_reason=str(e))
                 except Exception:
                     pass  # If status update fails, continue anyway
+
+    try:
+        _rewrite_playlist_m3u8_from_db(playlist_url, m3u8_path)
+    except Exception as e:
+        write_log.error(
+            "M3U8_FINAL_REWRITE_FAIL",
+            "Failed to rewrite M3U8 after playlist processing.",
+            {"playlist_url": playlist_url, "error": str(e)}
+        )
 
     return tracks_to_download
 
@@ -992,6 +1171,8 @@ def task_scrape_playlists() -> bool:
             write_log.info("PLAYLISTS_LOADED_FALLBACK",
                           "Loaded playlists from fallback CSV.",
                           {"count": len(playlists)})
+
+        _prune_missing_playlists(playlists)
 
         # Process each playlist
         total_tracks = 0
