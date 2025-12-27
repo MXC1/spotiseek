@@ -429,6 +429,23 @@ _KEY_WORKFLOW_EVENTS = [
     'SLSKD_UNAVAILABLE', 'RESET_COMPLETE'
 ]
 
+# Event IDs that are critical for dashboard analysis
+# These events are always written to file regardless of log level
+_DASHBOARD_CRITICAL_EVENTS = {
+    # Metrics used for workflow analysis
+    'TRACK_ADD', 'TRACK_DELETE', 'TRACK_QUALITY_UPGRADE',
+    'PLAYLIST_ADD', 'PLAYLIST_DELETE',
+    'DOWNLOAD_FAILED', 'DOWNLOAD_COMPLETE',
+    'BATCH_SEARCH_START', 'SLSKD_REDOWNLOAD_SEARCHES_INITIATED',
+    'PLAYLISTS_PRUNED', 'PLAYLIST_TRACKS_PRUNED',
+    # Timeline events
+    'WORKFLOW_START', 'WORKFLOW_COMPLETE', 'WORKFLOW_ABORTED',
+    'WORKFLOW_INTERRUPTED', 'WORKFLOW_FATAL',
+    'PLAYLISTS_LOADED', 'BATCH_SEARCH_INITIATED',
+    'REDOWNLOAD_QUEUE_INITIATED', 'XML_EXPORT_SUCCESS',
+    'SLSKD_UNAVAILABLE', 'RESET_COMPLETE',
+}
+
 
 def _init_workflow_metrics(total_logs: int) -> dict:
     """Initialize the metrics dictionary for workflow analysis."""
@@ -578,6 +595,53 @@ def analyze_workflow_run(log_file: str) -> dict:
     return metrics
 
 
+class _DashboardAwareFilter(logging.Filter):
+    """
+    Custom filter that ensures dashboard-critical logs are always written to file,
+    while other logs respect the configured LOG_LEVEL.
+
+    This filter allows:
+    1. All WARNING and ERROR logs (for operational issues)
+    2. All logs with dashboard-critical event_ids (for dashboard metrics)
+    3. Other logs only if their level >= configured LOG_LEVEL
+
+    This ensures the dashboard never loses visibility of workflow metrics
+    even if the log level is set to WARNING or ERROR.
+    """
+
+    def __init__(self, configured_level: int):
+        """
+        Initialize filter with configured log level.
+
+        Args:
+            configured_level: Minimum level for non-critical logs (logging.DEBUG, INFO, etc.)
+        """
+        super().__init__()
+        self.configured_level = configured_level
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """
+        Determine if a log record should be written to file.
+
+        Args:
+            record: LogRecord to evaluate
+
+        Returns:
+            True if log should be written, False otherwise
+        """
+        # Always allow WARNING and ERROR logs
+        if record.levelno >= logging.WARNING:
+            return True
+
+        # Always allow logs with dashboard-critical event_ids
+        event_id = getattr(record, 'event_id', None)
+        if event_id in _DASHBOARD_CRITICAL_EVENTS:
+            return True
+
+        # For other logs, only allow if level >= configured level
+        return record.levelno >= self.configured_level
+
+
 def setup_logging(
     logs_dir: str | None = None,
     log_level: int = logging.INFO,
@@ -608,26 +672,47 @@ def setup_logging(
     Args:
         logs_dir: Base directory for log files. If None, uses
                  'observability/logs/{ENV}/' where ENV comes from APP_ENV.
-        log_level: Minimum severity for console output. File output captures all levels.
+        log_level: Minimum severity for console output. Can also be overridden by LOG_LEVEL env var.
+                   File output is affected by LOG_LEVEL, but dashboard-critical events are always written.
         log_name_prefix: Prefix for log filename (e.g., "workflow", "run").
         rotate_daily: If True, use daily log rotation for long-running daemon processes.
                      Logs rotate at midnight and are named with date suffix.
 
+    Environment Variables:
+        LOG_LEVEL: One of 'DEBUG', 'INFO', 'WARNING', 'ERROR' (default: 'INFO')
+                   Controls the minimum level written to file and console.
+                   Dashboard-critical events bypass this for file output.
+        APP_ENV: Environment name (test/stage/prod) for log directory organization.
+
     Example:
         >>> os.environ['APP_ENV'] = 'test'
-        >>> setup_logging(log_name_prefix="workflow", log_level=logging.DEBUG)
-        # Creates: observability/test_logs/2025/11/27/workflow_20251127_143025_123456.log
+        >>> os.environ['LOG_LEVEL'] = 'WARNING'
+        >>> setup_logging(log_name_prefix="workflow")
+        # File gets WARNING, ERROR, and dashboard events; console gets WARNING, ERROR
 
+        >>> os.environ['LOG_LEVEL'] = 'DEBUG'
         >>> setup_logging(log_name_prefix="task_scheduler", rotate_daily=True)
-        # Creates: observability/logs/test/task_scheduler.log (rotates daily)
+        # File and console both get all DEBUG and above
 
     Note:
         Must be called before any logging operations. Subsequent calls are no-ops.
+        Dashboard-critical logs are always written to file regardless of LOG_LEVEL.
     """
     global _LOGGING_INITIALIZED  # noqa: PLW0603
 
     if _LOGGING_INITIALIZED:
         return
+
+    # Get configured log level from environment, defaulting to INFO
+    log_level_str = os.getenv('LOG_LEVEL', 'INFO').upper()
+    try:
+        configured_level = getattr(logging, log_level_str, logging.INFO)
+    except AttributeError:
+        configured_level = logging.INFO
+
+    # Override function parameter with environment variable if set
+    if 'LOG_LEVEL' in os.environ:
+        log_level = configured_level
 
     # Determine environment-specific logs directory
     if logs_dir is None:
@@ -703,11 +788,19 @@ def setup_logging(
         # Standard file handler for short-lived processes
         file_handler = logging.FileHandler(log_path, encoding="utf-8")
 
+    # File handler captures all levels but applies dashboard-aware filtering
     file_handler.setLevel(logging.NOTSET)
     file_handler.setFormatter(JsonLogFormatter())
+    file_handler.addFilter(_DashboardAwareFilter(configured_level))
     logger.addHandler(file_handler)
 
-    write_log.info("LOG_INIT", "Logging initialized.", {"log_file": log_path, "rotate_daily": rotate_daily})
+    write_log.info("LOG_INIT", "Logging initialized.", {
+        "log_file": log_path,
+        "rotate_daily": rotate_daily,
+        "log_level": log_level_str,
+        "console_level": log_level_str,
+        "dashboard_events_always_logged": True
+    })
     _LOGGING_INITIALIZED = True
 
 # Public Logging API

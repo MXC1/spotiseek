@@ -157,7 +157,6 @@ class TaskRegistry:
         """)
 
         self.db.conn.commit()
-        write_log.debug("TASK_TABLES_ENSURED", "Task scheduler tables verified.")
 
     def register_task(self, task: TaskDefinition) -> None:
         """Register a task definition."""
@@ -170,9 +169,6 @@ class TaskRegistry:
             VALUES (?, ?)
         """, (task.name, 1 if task.enabled else 0))
         self.db.conn.commit()
-
-        write_log.debug("TASK_REGISTERED", f"Task registered: {task.name}",
-                       {"display_name": task.display_name})
 
     def get_task_interval(self, task_name: str) -> int:
         """
@@ -410,8 +406,9 @@ class TaskRegistry:
             self._record_run_complete(run_id, status, error_message)
             self._update_task_state(task_name, status)
 
-            write_log.info("TASK_COMPLETE", f"Task completed: {task.display_name}",
-                          {"task_name": task_name, "status": status.value})
+            if not result:
+                write_log.warn("TASK_FAILED", f"Task returned False: {task.display_name}",
+                              {"task_name": task_name})
 
             return True, f"Task {task_name} completed successfully"
 
@@ -441,20 +438,11 @@ class TaskRegistry:
         # Build dependency order (topological sort)
         ordered_tasks = self._get_dependency_order()
 
-        write_log.info("RUN_ALL_START", "Running all tasks in order",
-                      {"task_order": ordered_tasks})
-
         for task_name in ordered_tasks:
             task = self.tasks.get(task_name)
             if task and task.enabled:
                 success, message = self.run_task(task_name, force=True)
                 results[task_name] = (success, message)
-
-                # If a task fails, continue with others but log warning
-                if not success:
-                    write_log.warn("RUN_ALL_TASK_FAILED",
-                                  f"Task {task_name} failed during run_all",
-                                  {"message": message})
 
         return results
 
@@ -520,12 +508,9 @@ class TaskRegistry:
         self._shutdown_event.set()
         if self._scheduler_thread:
             self._scheduler_thread.join(timeout=10)
-        write_log.info("SCHEDULER_STOPPED", "Task scheduler stopped")
 
     def _scheduler_loop(self) -> None:
         """Main scheduler loop - runs in background thread."""
-        write_log.info("SCHEDULER_LOOP_START", "Scheduler loop started")
-
         # Initialize next_run_at for tasks that haven't run yet
         for task_name in self.tasks:
             state = self.get_task_state(task_name)
@@ -549,10 +534,6 @@ class TaskRegistry:
                         deps_met, unmet = self.check_dependencies(task_name)
                         if deps_met:
                             self.run_task(task_name)
-                        else:
-                            write_log.debug("TASK_DEPS_NOT_MET",
-                                          f"Skipping {task_name} - dependencies not met",
-                                          {"unmet": unmet})
 
                 # Sleep for a bit before checking again
                 self._shutdown_event.wait(timeout=30)

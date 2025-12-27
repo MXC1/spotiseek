@@ -110,13 +110,6 @@ def wait_for_slskd_ready(max_wait_seconds: int = 60, poll_interval: int = 2) -> 
                     is_connected = data.get("isConnected", False)
                     is_logged_in = data.get("isLoggedIn", False)
 
-                    write_log.debug("SLSKD_HEALTH_CHECK_STATUS",
-                                  "Received slskd server state.",
-                                  {"attempt": attempts,
-                                   "state": state,
-                                   "is_connected": is_connected,
-                                   "is_logged_in": is_logged_in})
-
                     # Check if both connected and logged in using boolean flags
                     if is_connected and is_logged_in:
                         write_log.info("SLSKD_READY",
@@ -126,32 +119,10 @@ def wait_for_slskd_ready(max_wait_seconds: int = 60, poll_interval: int = 2) -> 
                                       "wait_time": round(time.time() - start_time, 2)})
                         return True
 
-                    # Still connecting/authenticating
-                    write_log.debug("SLSKD_NOT_READY",
-                                  "slskd not yet ready.",
-                                  {"state": state,
-                                   "is_connected": is_connected,
-                                   "is_logged_in": is_logged_in,
-                                   "attempt": attempts})
-
-                except (ValueError, KeyError) as e:
-                    write_log.debug("SLSKD_PARSE_ERROR",
-                                  "Could not parse server response.",
-                                  {"error": str(e), "attempt": attempts})
-            else:
-                write_log.debug("SLSKD_UNEXPECTED_STATUS",
-                              "Unexpected status code from slskd.",
-                              {"status_code": resp.status_code, "attempt": attempts})
-
-        except requests.ConnectionError:
-            write_log.debug("SLSKD_CONNECTION_RETRY",
-                          "slskd not yet reachable, retrying.",
-                          {"attempt": attempts})
-
-        except requests.RequestException as e:
-            write_log.debug("SLSKD_HEALTH_CHECK_ERROR",
-                          "Error checking slskd status.",
-                          {"error": str(e), "attempt": attempts})
+                except (ValueError, KeyError):
+                    pass  # Silently retry on parse errors
+        except (requests.ConnectionError, requests.RequestException):
+            pass  # Silently retry on connection errors
 
         # Wait before next attempt
         time.sleep(poll_interval)
@@ -427,10 +398,7 @@ def select_best_file(responses: list[dict[str, Any]], search_text: str) -> tuple
             filename = file.get("filename", "")
 
             if slskd_uuid and track_db.is_slskd_blacklisted(slskd_uuid):
-                blacklisted_count += 1
-                write_log.debug("SLSKD_BLACKLIST_SKIP", "Skipping blacklisted file.",
-                               {"slskd_uuid": slskd_uuid, "filename": filename, "username": username})
-                continue
+                pass  # Blacklisted file skipped
 
             # Filter out non-audio files
             if not is_audio_file(file):
@@ -444,21 +412,12 @@ def select_best_file(responses: list[dict[str, Any]], search_text: str) -> tuple
 
             candidates.append((file, username))
 
-    write_log.debug("SLSKD_FILE_SELECTION_CANDIDATES", "Collected candidate files.",
-                   {"total_files": total_files, "candidates": len(candidates),
-                    "blacklisted": blacklisted_count, "non_audio": non_audio_count,
-                    "low_bitrate": low_bitrate_count})
-
     if not candidates:
-        write_log.debug("SLSKD_FILE_SELECTION_NO_CANDIDATES", "No candidates after blacklist filtering.",
-                       {"total_files": total_files, "blacklisted": blacklisted_count})
         return None, None
 
     # Filter by originality if not explicitly looking for alternatives
     if allow_alternatives:
         search_pool = candidates
-        write_log.debug("SLSKD_FILE_SELECTION_ALTERNATIVES", "Allowing all file versions.",
-                       {"pool_size": len(search_pool)})
     else:
         original_candidates = [
             (f, u) for f, u in candidates
@@ -468,25 +427,16 @@ def select_best_file(responses: list[dict[str, Any]], search_text: str) -> tuple
 
         if original_candidates:
             search_pool = original_candidates
-            write_log.debug("SLSKD_FILE_SELECTION_ORIGINALS", "Filtered to original versions only.",
-                           {"original_count": len(original_candidates), "filtered_out": filtered_count})
         else:
             search_pool = candidates
-            write_log.debug("SLSKD_FILE_SELECTION_FALLBACK", "No original versions found, using all candidates.",
-                           {"candidates": len(candidates)})
 
     # Sort by quality (best first)
     search_pool.sort(key=quality_sort_key, reverse=True)
 
     if search_pool:
         best_file, best_username = search_pool[0]
-        best_ext, best_bitrate = extract_file_quality(best_file)
-        write_log.debug("SLSKD_FILE_SELECTION_BEST", "Selected best quality file.",
-                       {"filename": best_file.get("filename"), "username": best_username,
-                        "extension": best_ext, "bitrate": best_bitrate, "pool_size": len(search_pool)})
         return search_pool[0]
 
-    write_log.debug("SLSKD_FILE_SELECTION_EMPTY_POOL", "No files in search pool after filtering.", {})
     return None, None
 
 
@@ -506,8 +456,6 @@ def create_search(search_text: str) -> str:
         requests.HTTPError: If the API request fails
     """
     search_id = str(uuid.uuid4())
-    write_log.debug("SLSKD_SEARCH_CREATE", "Creating Soulseek search.",
-                   {"search_id": search_id, "search_text": search_text})
 
     try:
         resp = requests.post(
@@ -576,29 +524,21 @@ def check_search_status(search_id: str) -> tuple[bool, list[dict[str, Any]]]:
             status_resp.raise_for_status()
             status_data = status_resp.json()
             is_complete = status_data.get("isComplete", False) or status_data.get("state") == "Completed"
-        except requests.RequestException as e:
-            write_log.debug("SLSKD_SEARCH_STATUS_CHECK_FAIL", "Could not check completion status.",
-                           {"error": str(e)})
+        except requests.RequestException:
+            pass  # Silently continue on error checking status
 
         # Return responses if any found
         if responses and isinstance(responses, list) and len(responses) > 0:
-            write_log.debug("SLSKD_SEARCH_HAS_RESULTS", "Search has results.",
-                          {"search_id": search_id, "response_count": len(responses), "is_complete": is_complete})
             return (True, responses)  # Consider search complete if it has results
 
         # Return completion status even if no results
         if is_complete:
-            write_log.debug("SLSKD_SEARCH_COMPLETE_NO_RESULTS", "Search complete with no results.",
-                           {"search_id": search_id})
             return (True, [])
 
         # Search still in progress
-        write_log.debug("SLSKD_SEARCH_IN_PROGRESS", "Search still in progress.", {"search_id": search_id})
         return (False, [])
 
-    except Exception as e:
-        write_log.debug("SLSKD_SEARCH_CHECK_ERROR", "Error checking search status.",
-                       {"search_id": search_id, "error": str(e)})
+    except Exception:
         return (False, [])
 
 def _make_download_request(
@@ -610,11 +550,6 @@ def _make_download_request(
         json=payload,
         headers={"X-API-Key": TOKEN},
         timeout=30
-    )
-    write_log.debug(
-        "SLSKD_DOWNLOAD_RESPONSE",
-        "Download POST response.",
-        {"status_code": resp.status_code, "response_preview": resp.text[:200], "attempt": attempt + 1}
     )
     resp.raise_for_status()
     return resp.json()
@@ -699,13 +634,10 @@ def enqueue_download(
             last_error = e
             if e.response.status_code >= HTTP_SERVER_ERROR and attempt < max_retries - 1:
                 wait_time = 2 ** attempt
-                write_log.info("SLSKD_ENQUEUE_RETRY", "Download enqueue failed with server error, retrying.",
-                              {"error": str(e), "status_code": e.response.status_code, "attempt": attempt + 1,
-                               "max_retries": max_retries, "wait_time": wait_time, "filename": filename})
                 time.sleep(wait_time)
             else:
                 write_log.warn("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download.",
-                               {"error": str(e), "filename": filename, "attempts": attempt + 1})
+                               {"error": str(e), "filename": filename})
                 track_db.update_track_status(spotify_id, "failed", failed_reason=str(e))
                 raise
 
@@ -750,13 +682,9 @@ def initiate_track_search(artist: str, track: str, spotify_id: str) -> tuple[str
     skip_statuses = {"completed", "queued", "downloading", "requested", "inprogress"}
 
     if current_status in skip_statuses:
-        write_log.debug("SLSKD_SKIP", "Skipping download (already in progress or completed).",
-                       {"artist": artist, "track": track, "current_status": current_status})
         return None
 
     search_text = f"{artist} {track}"
-    write_log.debug("SLSKD_SEARCH_INITIATE", "Initiating search for track.",
-                  {"search_text": search_text, "spotify_id": spotify_id})
 
     try:
         # Create search without waiting for results
@@ -887,11 +815,7 @@ def download_tracks_async(tracks: list[tuple[str, str, str]]) -> None:
         tracks: List of tuples containing (spotify_id, artist, track_name)
     """
     if not tracks:
-        write_log.info("ASYNC_DOWNLOAD_EMPTY", "No tracks to download.")
         return
-
-    write_log.info("ASYNC_DOWNLOAD_START", "Initiating searches for tracks.",
-                  {"track_count": len(tracks)})
 
     # Initiate all searches without waiting for results
     initiated_count = 0
@@ -900,8 +824,9 @@ def download_tracks_async(tracks: list[tuple[str, str, str]]) -> None:
         if search_info:
             initiated_count += 1
 
-    write_log.info("ASYNC_SEARCHES_INITIATED", "All searches initiated. They will continue in slskd.",
-                  {"initiated_count": initiated_count, "skipped_count": len(tracks) - initiated_count})
+    if initiated_count > 0:
+        write_log.info("ASYNC_DOWNLOAD_START", "Initiated searches for tracks.",
+                      {"initiated": initiated_count, "total": len(tracks)})
 
 
 def process_pending_searches() -> None:
@@ -921,10 +846,7 @@ def process_pending_searches() -> None:
     searching_tracks = track_db.get_tracks_by_status("searching")
 
     if not searching_tracks:
-        write_log.info("NO_PENDING_SEARCHES", "No tracks in searching status.")
         return
-
-    write_log.info("PENDING_SEARCHES_FOUND", f"Found {len(searching_tracks)} tracks in searching status.")
 
     # Process each track's search
     processed_count = 0
@@ -941,8 +863,6 @@ def process_pending_searches() -> None:
         slskd_uuid = track_db.get_search_uuid_by_spotify_id(spotify_id)
 
         if not slskd_uuid:
-            write_log.warn("SEARCH_UUID_MISSING", "No search UUID found for track in searching status.",
-                          {"spotify_id": spotify_id, "track_name": track_name})
             # No search UUID means search was never properly initiated
             track_db.update_track_status(spotify_id, "pending")
             continue
@@ -962,8 +882,9 @@ def process_pending_searches() -> None:
         else:
             still_searching_count += 1
 
-    write_log.info("PENDING_SEARCHES_PROCESSED", "Finished checking pending searches.",
-                  {"processed": processed_count, "still_searching": still_searching_count})
+    if processed_count > 0 or still_searching_count > 0:
+        write_log.info("PENDING_SEARCHES_PROCESSED", "Checked pending searches.",
+                      {"processed": processed_count, "still_searching": still_searching_count})
 
 
 def remove_search_from_slskd(search_id: str, spotify_id: str | None = None, max_retries: int = 3) -> bool:
@@ -1108,8 +1029,6 @@ def query_download_status(max_retries: int = 3) -> list[dict[str, Any]]:
         List of download status objects containing directories, files, and states.
         Returns empty list if the query fails.
     """
-    write_log.info("SLSKD_QUERY_STATUS", "Querying download status for all transfers.")
-
     for attempt in range(max_retries):
         try:
             resp = requests.get(
@@ -1123,43 +1042,30 @@ def query_download_status(max_retries: int = 3) -> list[dict[str, Any]]:
         except (requests.Timeout, requests.exceptions.ConnectionError) as e:
             if attempt < max_retries - 1:
                 backoff_time = 2 ** attempt
-                write_log.debug(
-                    "SLSKD_QUERY_STATUS_RETRY",
-                    "Network error querying download status, retrying.",
-                    {"attempt": attempt + 1, "max_retries": max_retries,
-                     "backoff_seconds": backoff_time, "error": str(e)}
-                )
                 time.sleep(backoff_time)
             else:
                 write_log.warn(
                     "SLSKD_QUERY_STATUS_FAIL",
-                    "Network error querying download status after all retries.",
-                    {"attempts": max_retries, "error": str(e)}
+                    "Failed to query download status after retries.",
+                    {"error": str(e)}
                 )
 
         except requests.HTTPError as e:
             if e.response and e.response.status_code >= HTTP_SERVER_ERROR:
                 if attempt < max_retries - 1:
                     backoff_time = 2 ** attempt
-                    write_log.debug(
-                        "SLSKD_QUERY_STATUS_RETRY",
-                        "Server error querying download status, retrying.",
-                        {"attempt": attempt + 1, "max_retries": max_retries,
-                         "status_code": e.response.status_code,
-                         "backoff_seconds": backoff_time, "error": str(e)}
-                    )
                     time.sleep(backoff_time)
                 else:
                     write_log.warn(
                         "SLSKD_QUERY_STATUS_FAIL",
-                        "Server error querying download status after all retries.",
-                        {"attempts": max_retries, "status_code": e.response.status_code, "error": str(e)}
+                        "Server error querying download status.",
+                        {"error": str(e)}
                     )
             else:
                 write_log.warn(
                     "SLSKD_QUERY_STATUS_FAIL",
                     "HTTP error querying download status.",
-                    {"status_code": e.response.status_code if e.response else None, "error": str(e)}
+                    {"error": str(e)}
                 )
                 return []
 
@@ -1182,16 +1088,11 @@ def process_redownload_queue() -> None:
     Note: Unlike new tracks, quality upgrades need special handling to compare
     file quality before downloading. This is done in process_pending_searches().
     """
-    write_log.info("SLSKD_REDOWNLOAD_QUEUE", "Processing redownload queue for quality upgrades.")
-
     # Get all tracks marked for redownload
     redownload_tracks = track_db.get_tracks_by_status("redownload_pending")
 
     if not redownload_tracks:
-        write_log.info("SLSKD_REDOWNLOAD_EMPTY", "No tracks in redownload queue.")
         return
-
-    write_log.info("SLSKD_REDOWNLOAD_COUNT", f"Found {len(redownload_tracks)} tracks for quality upgrade.")
 
     # Initiate all searches without waiting
     initiated_count = 0
@@ -1206,15 +1107,14 @@ def process_redownload_queue() -> None:
             track_db.set_search_uuid(spotify_id, search_id)
             track_db.update_track_status(spotify_id, "searching")
             initiated_count += 1
-            write_log.debug("SLSKD_REDOWNLOAD_SEARCH_INITIATED", "Initiated upgrade search.",
-                          {"spotify_id": spotify_id, "search_id": search_id})
         except Exception as e:
-            write_log.warn("SLSKD_REDOWNLOAD_SEARCH_FAIL", "Failed to create search for upgrade.",
-                          {"spotify_id": spotify_id, "error": str(e)})
+            write_log.warn("SLSKD_REDOWNLOAD_SEARCH_FAIL", "Failed to create upgrade search.",
+                          {"error": str(e)})
             track_db.update_track_status(spotify_id, "failed", failed_reason=str(e))
 
-    write_log.info("SLSKD_REDOWNLOAD_SEARCHES_INITIATED", "All upgrade searches initiated.",
-                  {"initiated_count": initiated_count})
+    if initiated_count > 0:
+        write_log.info("SLSKD_REDOWNLOAD_SEARCHES_INITIATED", "Initiated upgrade searches.",
+                      {"initiated": initiated_count})
 
 
 def get_track_bitrate(spotify_id: str) -> int | None:

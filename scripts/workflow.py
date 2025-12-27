@@ -253,11 +253,6 @@ def _remove_track_if_orphaned(spotify_id: str, local_file_path: str | None) -> N
     """Delete track row and file when no playlists reference it."""
     remaining = track_db.get_playlist_usage_count(spotify_id)
     if remaining > 0:
-        write_log.debug(
-            "TRACK_RETAINED_OTHER_PLAYLISTS",
-            "Track kept because other playlists still reference it.",
-            {"spotify_id": spotify_id, "remaining_playlists": remaining}
-        )
         return
 
     track_db.delete_track(spotify_id)
@@ -300,12 +295,6 @@ def _rewrite_playlist_m3u8_from_db(playlist_url: str, m3u8_path: str) -> None:
 
         with open(m3u8_path, "w", encoding="utf-8") as f:
             f.writelines(lines)
-
-        write_log.debug(
-            "M3U8_REWRITE_SUCCESS",
-            "Rewrote M3U8 file from DB state.",
-            {"playlist_url": playlist_url, "m3u8_path": m3u8_path, "track_count": len(tracks)}
-        )
     except Exception as e:
         write_log.error(
             "M3U8_REWRITE_FAIL",
@@ -479,9 +468,6 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
 
             if current_status not in skip_statuses:
                 tracks_to_download.append(track)
-            else:
-                write_log.debug("TRACK_SKIP_ALREADY_PROCESSING", "Skipping track already in progress.",
-                               {"spotify_id": spotify_id, "track_name": track_name, "status": current_status})
 
         except Exception as e:
             track_name = track[2] if len(track) > 2 else str(track)  # noqa: PLR2004
