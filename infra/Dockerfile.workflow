@@ -17,5 +17,8 @@ COPY . .
 # Set PYTHONPATH so 'scripts' is importable as a package
 ENV PYTHONPATH="/app"
 
+# Disable Python output buffering to ensure logs appear immediately in Docker
+ENV PYTHONUNBUFFERED=1
+
 # Run the task scheduler in daemon mode
 CMD ["python", "-m", "scripts.task_scheduler", "--daemon"]

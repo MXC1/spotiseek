@@ -770,6 +770,12 @@ def setup_logging(
     console_handler = logging.StreamHandler()
     console_handler.setLevel(log_level)
     console_handler.setFormatter(ConsoleFormatter("[%(levelname)s] %(message)s"))
+    # Add custom emit to flush immediately after every log (critical for Docker visibility)
+    original_emit = console_handler.emit
+    def emit_with_flush(record):
+        original_emit(record)
+        console_handler.flush()
+    console_handler.emit = emit_with_flush
     logger.addHandler(console_handler)
 
     # File handler with JSON formatting for structured parsing
@@ -792,6 +798,12 @@ def setup_logging(
     file_handler.setLevel(logging.NOTSET)
     file_handler.setFormatter(JsonLogFormatter())
     file_handler.addFilter(_DashboardAwareFilter(configured_level))
+    # Add custom emit to flush file handler immediately after every log for durability
+    original_file_emit = file_handler.emit
+    def file_emit_with_flush(record):
+        original_file_emit(record)
+        file_handler.flush()
+    file_handler.emit = file_emit_with_flush
     logger.addHandler(file_handler)
 
     write_log.info("LOG_INIT", "Logging initialized.", {
