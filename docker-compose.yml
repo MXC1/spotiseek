@@ -30,7 +30,7 @@ services:
       - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
       - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
     volumes:
-      - ./database:/app/database:rw
+      - ./output:/app/output:rw
       - ./slskd_docker_data/${APP_ENV}/imported:/app/slskd_docker_data/${APP_ENV}/imported:rw
       - ./slskd_docker_data/${APP_ENV}/downloads:/app/slskd_docker_data/${APP_ENV}/downloads:ro
       - ./observability:/app/observability:rw
@@ -53,7 +53,7 @@ services:
       - HOST_BASE_PATH=${HOST_BASE_PATH}
       - REMUX_ALL_TO_MP3=${REMUX_ALL_TO_MP3}
     volumes:
-      - ./database:/app/database:rw
+      - ./output:/app/output:rw
       - ./input_playlists:/app/input_playlists:rw
       - ./slskd_docker_data/${APP_ENV}:/app/slskd_docker_data/${APP_ENV}:rw
       - ./observability:/app/observability:rw

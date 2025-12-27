@@ -81,11 +81,13 @@ st.title(f"🎵 Spotiseek Dashboard - {ENV.upper()} Environment")
 # Environment-specific constants
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 LOGS_DIR = os.path.join(os.path.dirname(__file__), "logs", ENV)
-DB_PATH = os.path.join(BASE_DIR, 'database', ENV, f'database_{ENV}.db')
+# New unified output directory structure: output/{ENV}/
+OUTPUT_ENV_DIR = os.path.join(BASE_DIR, "output", ENV)
+DB_PATH = os.path.join(OUTPUT_ENV_DIR, f"database_{ENV}.db")
 IMPORTED_DIR = os.path.join(BASE_DIR, "slskd_docker_data", ENV, "imported")
 DOWNLOADS_ROOT = os.path.join(BASE_DIR, "slskd_docker_data", ENV, "downloads")
-XML_DIR = os.path.join(BASE_DIR, "database", "xml", ENV)
-M3U8_DIR = os.path.join(BASE_DIR, "database", "m3u8s", ENV)
+XML_DIR = OUTPUT_ENV_DIR  # XML exports live directly under output/{ENV}/
+M3U8_DIR = os.path.join(OUTPUT_ENV_DIR, "m3u8s")
 
 # Check if running in Docker
 IS_DOCKER = os.path.exists("/.dockerenv")
@@ -94,6 +96,7 @@ IS_DOCKER = os.path.exists("/.dockerenv")
 os.makedirs(IMPORTED_DIR, exist_ok=True)
 os.makedirs(XML_DIR, exist_ok=True)
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+os.makedirs(M3U8_DIR, exist_ok=True)
 
 # Check if database exists
 DB_EXISTS = os.path.exists(DB_PATH)
@@ -907,7 +910,8 @@ def import_track(spotify_id: str, uploaded_file, track_info: dict) -> Tuple[bool
                               {"m3u8_path": m3u8_path, "spotify_id": spotify_id})
         
         # Re-export iTunes XML
-        xml_path = os.path.join(XML_DIR, "spotiseek_library.xml")
+        # Export XML as library_{ENV}.xml under output/{ENV}/
+        xml_path = os.path.join(XML_DIR, f"library_{ENV}.xml")
         
         # Calculate music folder URL (handle Docker to host path conversion)
         downloads_path = DOWNLOADS_ROOT

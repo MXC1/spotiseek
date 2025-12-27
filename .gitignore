@@ -13,10 +13,10 @@ ENV/
 env.bak/
 venv.bak/
 
-# SQLite database
-database/*
-database/m3u8s/*
-!database/m3u8s/_init
+# Output artifacts (SQLite DB, XML, M3U8s)
+output/*
+output/m3u8s/*
+!output/m3u8s/_init
 
 # VS Code
 .vscode/

@@ -105,15 +105,18 @@ class WorkflowConfig:
         self.playlists_dir = os.path.abspath(os.path.join(self.base_dir, "input_playlists"))
         self.playlists_csv = os.path.join(self.playlists_dir, f"playlists_{env}.csv")
 
+        # Unified output structure: output/{ENV}/
+        output_env_dir = os.path.abspath(os.path.join(self.base_dir, "output", env))
+
         # Database configuration
-        self.database_dir = os.path.abspath(os.path.join(self.base_dir, "database", env))
+        self.database_dir = output_env_dir
         self.db_path = os.path.join(self.database_dir, f"database_{env}.db")
 
-        # M3U8 files configuration
-        self.m3u8_dir = os.path.abspath(os.path.join(self.base_dir, "database", "m3u8s", env))
+        # M3U8 files configuration (output/{ENV}/m3u8s)
+        self.m3u8_dir = os.path.abspath(os.path.join(output_env_dir, "m3u8s"))
 
-        # XML export configuration
-        self.xml_dir = os.path.abspath(os.path.join(self.base_dir, "database", "xml", env))
+        # XML export configuration (XML file lives directly in output/{ENV}/)
+        self.xml_dir = output_env_dir
 
         # Downloads configuration
         self.downloads_root = os.path.abspath(os.path.join(self.base_dir, "slskd_docker_data", env, "downloads"))
@@ -137,8 +140,8 @@ class WorkflowConfig:
             os.makedirs(directory, exist_ok=True)
 
     def get_xml_export_path(self) -> str:
-        """Get the path for iTunes XML library export."""
-        return os.path.join(self.xml_dir, "spotiseek_library.xml")
+        """Get the path for iTunes XML library export (library_{ENV}.xml)."""
+        return os.path.join(self.xml_dir, f"library_{self.env}.xml")
 
     def get_music_folder_url(self) -> str:
         """

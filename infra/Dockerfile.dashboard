@@ -17,7 +17,7 @@ COPY scripts/ /app/scripts/
 COPY observability/ /app/observability/
 
 # Create directories for volume mounts
-RUN mkdir -p /app/database /app/slskd_docker_data
+RUN mkdir -p /app/output /app/slskd_docker_data
 
 # Expose Streamlit port
 EXPOSE 8501

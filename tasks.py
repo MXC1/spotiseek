@@ -37,9 +37,8 @@ def nuke(c, env=None):
         targets = [
             Path('slskd_docker_data') / app_env,
             Path('observability') / 'logs' / app_env,
-            Path('database') / app_env,
-            Path('database') / 'xml' / app_env,
-            Path('database') / 'm3u8s' / app_env
+            Path('output') / app_env,
+            Path('output') / app_env / 'm3u8s'
         ]
         if app_env.lower() in ["prod", "stage"]:
             print(

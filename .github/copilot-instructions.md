@@ -25,11 +25,11 @@ scripts/
 
 ### Data Flow
 1. CSV playlist URLs (`input_playlists/playlists_{APP_ENV}.csv`) → Spotify API
-2. Track metadata → SQLite database (`database/{APP_ENV}/`)
+2. Track metadata → SQLite database (`output/{APP_ENV}/database_{APP_ENV}.db`)
 3. slskd search/download → `slskd_docker_data/{APP_ENV}/downloads/`
 4. Remux & import → `slskd_docker_data/{APP_ENV}/imported/`
-5. M3U8 playlists → `database/m3u8s/{APP_ENV}/`
-6. iTunes XML → `database/xml/{APP_ENV}/`
+5. M3U8 playlists → `output/{APP_ENV}/m3u8s/`
+6. iTunes XML → `output/{APP_ENV}/library_{APP_ENV}.xml`
 
 ## Environment Configuration
 
@@ -105,4 +105,4 @@ TaskDefinition(
 ## Ruff Linting
 Configured in `pyproject.toml` with Python 3.10+ target. Key rules:
 - Import sorting (I), Bugbear (B), Modern syntax (UP)
-- Excluded: `slskd_docker_data/`, `database/`, `observability/`
+- Excluded: `slskd_docker_data/`, `output/`, `observability/`

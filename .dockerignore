@@ -35,7 +35,7 @@ observability/*_logs/
 
 # Downloads and data directories (large files)
 slskd_docker_data/
-database/
+output/
 input_playlists/
 observability/logs/
 

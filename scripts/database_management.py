@@ -19,7 +19,7 @@ from scripts.logs_utils import write_log
 # Get environment configuration (used by TrackDB class)
 # Note: Avoid hard-binding to ENV/DB_PATH at import time for long-lived processes.
 _IMPORT_ENV = os.getenv("APP_ENV")
-_BASE_DB_DIR = os.path.join(os.path.dirname(__file__), '..', 'database')
+_BASE_DB_DIR = os.path.join(os.path.dirname(__file__), '..', 'output')
 _IMPORT_DB_PATH = (
     os.path.join(_BASE_DB_DIR, _IMPORT_ENV, f"database_{_IMPORT_ENV}.db")
     if _IMPORT_ENV else None
