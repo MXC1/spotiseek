@@ -76,7 +76,8 @@ def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, st
     Returns:
         Tuple containing:
             - playlist_name (str): The name of the playlist
-            - tracks (List[Tuple]): List of (spotify_id, artists, track_name) tuples.
+            - tracks (List[Tuple]): List of (track_id, artists, track_name) tuples.
+              Track ID is the Spotify track ID.
               Artist names are space-concatenated and cleaned.
 
     Raises:
@@ -151,8 +152,8 @@ def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, st
             write_log.warn("SPOTIFY_TRACK_MISSING", "Track data is null. Skipping.", {"index": idx})
             continue
 
-        spotify_id = track.get("id")
-        if not spotify_id:
+        track_id = track.get("id")
+        if not track_id:
             write_log.warn("SPOTIFY_ID_MISSING", "Track is missing Spotify ID. Skipping.",
                           {"index": idx, "track_name": track.get("name")})
             continue
@@ -161,7 +162,7 @@ def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, st
         artists = " ".join([clean_name(artist["name"]) for artist in track.get("artists", [])])
         track_name = clean_name(track.get("name", ""))
 
-        cleaned_tracks.append((spotify_id, artists, track_name))
+        cleaned_tracks.append((track_id, artists, track_name))
 
     write_log.info("SPOTIFY_FETCH_SUCCESS", "Successfully fetched and cleaned tracks.",
                   {"playlist_name": playlist_name, "track_count": len(cleaned_tracks)})

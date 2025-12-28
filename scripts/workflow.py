@@ -3,7 +3,7 @@ Workflow orchestrator for Spotiseek.
 
 This module coordinates the complete workflow of:
 1. Reading playlist URLs from CSV
-2. Fetching track metadata from Spotify
+2. Fetching track metadata via the unified playlist scraper (auto-detects Spotify vs SoundCloud)
 3. Initiating downloads via Soulseek
 4. Remuxing all downloads to preferred formats (lossless -> WAV, lossy -> MP3 320kbps)
 5. Tracking download status in the database
@@ -12,6 +12,7 @@ This module coordinates the complete workflow of:
 
 Key Features:
 - Environment-aware configuration (test/prod/stage)
+- Multi-platform playlist support (Spotify, SoundCloud)
 - Playlist and track processing with error isolation
 - Automatic format standardization (lossless -> WAV, lossy -> MP3 320kbps)
 - Download status synchronization
@@ -19,7 +20,7 @@ Key Features:
 - iTunes library export for music player integration
 
 Workflow Stages:
-1. Playlist Processing: Read CSV, fetch Spotify metadata, create M3U8 files
+1. Playlist Processing: Read CSV, fetch track metadata from Spotify/SoundCloud, create M3U8 files
 2. Track Processing: Add tracks to database, initiate Soulseek downloads
 3. Status Updates: Sync download status from slskd API, remux to preferred formats
 4. Quality Upgrades: Redownload non-WAV (lossy) tracks for lossless upgrades
@@ -53,6 +54,7 @@ from scripts.m3u8_manager import (  # noqa: E402
     update_track_in_m3u8,
     write_playlist_m3u8,
 )
+from scripts.playlist_scraper import get_tracks_from_playlist  # noqa: E402
 from scripts.soulseek_client import (  # noqa: E402
     download_tracks_async,
     process_pending_searches,
@@ -61,7 +63,6 @@ from scripts.soulseek_client import (  # noqa: E402
     remove_download_from_slskd,
     wait_for_slskd_ready,
 )
-from scripts.spotify_scraper import get_tracks_from_playlist  # noqa: E402
 from scripts.xml_exporter import export_itunes_xml  # noqa: E402
 
 # Initialize logging with environment-specific directory
@@ -222,7 +223,7 @@ def sanitize_playlist_name(playlist_name: str) -> str:
     return sanitized
 
 
-def _delete_local_file(local_file_path: str | None, spotify_id: str) -> None:
+def _delete_local_file(local_file_path: str | None, track_id: str) -> None:
     """Remove a local audio file if present."""
     if not local_file_path:
         return
@@ -233,30 +234,30 @@ def _delete_local_file(local_file_path: str | None, spotify_id: str) -> None:
             write_log.info(
                 "AUDIO_FILE_DELETED",
                 "Deleted audio file for removed track.",
-                {"spotify_id": spotify_id, "file_path": local_file_path}
+                {"track_id": track_id, "file_path": local_file_path}
             )
         else:
             write_log.debug(
                 "AUDIO_FILE_MISSING",
                 "Audio file already absent during deletion.",
-                {"spotify_id": spotify_id, "file_path": local_file_path}
+                {"track_id": track_id, "file_path": local_file_path}
             )
     except Exception as e:
         write_log.warn(
             "AUDIO_FILE_DELETE_FAIL",
             "Failed to delete audio file.",
-            {"spotify_id": spotify_id, "file_path": local_file_path, "error": str(e)}
+            {"track_id": track_id, "file_path": local_file_path, "error": str(e)}
         )
 
 
-def _remove_track_if_orphaned(spotify_id: str, local_file_path: str | None) -> None:
+def _remove_track_if_orphaned(track_id: str, local_file_path: str | None) -> None:
     """Delete track row and file when no playlists reference it."""
-    remaining = track_db.get_playlist_usage_count(spotify_id)
+    remaining = track_db.get_playlist_usage_count(track_id)
     if remaining > 0:
         return
 
-    track_db.delete_track(spotify_id)
-    _delete_local_file(local_file_path, spotify_id)
+    track_db.delete_track(track_id)
+    _delete_local_file(local_file_path, track_id)
 
 
 def _rewrite_playlist_m3u8_from_db(playlist_url: str, m3u8_path: str) -> None:
@@ -285,13 +286,13 @@ def _rewrite_playlist_m3u8_from_db(playlist_url: str, m3u8_path: str) -> None:
 
     try:
         lines = ["#EXTM3U\n"]
-        for spotify_id, artist, track_name, local_file_path in tracks:
+        for track_id, artist, track_name, local_file_path in tracks:
             if local_file_path:
                 lines.append(f"{local_file_path}\n")
             else:
                 artist_text = artist or ""
                 name_text = track_name or ""
-                lines.append(f"# {spotify_id} - {artist_text} - {name_text}\n")
+                lines.append(f"# {track_id} - {artist_text} - {name_text}\n")
 
         with open(m3u8_path, "w", encoding="utf-8") as f:
             f.writelines(lines)
@@ -318,10 +319,10 @@ def _prune_removed_tracks_for_playlist(
         return
 
     removed_count = 0
-    for spotify_id in removed_ids:
-        local_file_path = track_db.get_local_file_path(spotify_id)
-        track_db.unlink_track_from_playlist(spotify_id, playlist_url)
-        _remove_track_if_orphaned(spotify_id, local_file_path)
+    for track_id in removed_ids:
+        local_file_path = track_db.get_local_file_path(track_id)
+        track_db.unlink_track_from_playlist(track_id, playlist_url)
+        _remove_track_if_orphaned(track_id, local_file_path)
         removed_count += 1
 
     _rewrite_playlist_m3u8_from_db(playlist_url, m3u8_path)
@@ -362,8 +363,8 @@ def _prune_missing_playlists(input_playlist_urls: list[str]) -> None:
                     {"playlist_url": playlist_url, "m3u8_path": m3u8_path, "error": str(e)}
                 )
 
-        for spotify_id, _, _, local_file_path in tracks:
-            _remove_track_if_orphaned(spotify_id, local_file_path)
+        for track_id, _, _, local_file_path in tracks:
+            _remove_track_if_orphaned(track_id, local_file_path)
 
     write_log.info(
         "PLAYLISTS_PRUNED",
@@ -377,7 +378,7 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
     Process a single playlist: fetch tracks and add to database.
 
     This function:
-    1. Fetches playlist name and tracks from Spotify
+    1. Fetches playlist name and tracks from Spotify or SoundCloud
     2. Generates M3U8 file path
     3. Adds playlist to database
     4. Creates M3U8 file with track comments
@@ -385,10 +386,10 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
     6. Links tracks to playlist in database
 
     Args:
-        playlist_url: Spotify playlist URL
+        playlist_url: Playlist URL (Spotify or SoundCloud)
 
     Returns:
-        List of tracks to be downloaded: [(spotify_id, artist, track_name), ...]
+        List of tracks to be downloaded: [(track_id, artist, track_name), ...]
 
     Note:
         Errors are logged but don't stop processing. Individual track
@@ -396,13 +397,13 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
     """
     write_log.info("PLAYLIST_PROCESS", "Processing playlist.", {"playlist_url": playlist_url})
 
-    # Fetch playlist metadata and tracks from Spotify
+    # Fetch playlist metadata and tracks from the appropriate platform
     try:
-        playlist_name, tracks = get_tracks_from_playlist(playlist_url)
-        write_log.info("SPOTIFY_FETCH_SUCCESS", "Fetched tracks from Spotify playlist.",
-                      {"playlist_name": playlist_name, "track_count": len(tracks)})
+        playlist_name, tracks, source = get_tracks_from_playlist(playlist_url)
+        write_log.info("PLAYLIST_FETCH_SUCCESS", "Fetched tracks from playlist.",
+                      {"playlist_name": playlist_name, "track_count": len(tracks), "source": source})
     except Exception as e:
-        write_log.error("SPOTIFY_FETCH_FAIL", "Failed to get tracks for playlist.",
+        write_log.error("PLAYLIST_FETCH_FAIL", "Failed to get tracks for playlist.",
                        {"playlist_url": playlist_url, "error": str(e)})
         return
 
@@ -446,21 +447,22 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
     tracks_to_download = []
     for track in tracks:
         try:
-            spotify_id, artist, track_name = track
+            track_id, artist, track_name = track
 
             # Add track to database (INSERT OR IGNORE - won't duplicate)
             track_db.add_track(TrackData(
-                spotify_id=spotify_id,
+                track_id=track_id,
                 track_name=track_name,
-                artist=artist
+                artist=artist,
+                source=source
             ))
 
             # Link track to playlist in database
-            track_db.link_track_to_playlist(spotify_id, playlist_url)
+            track_db.link_track_to_playlist(track_id, playlist_url)
 
             # Only collect tracks that need to be searched for
             # Skip tracks that are already being processed or completed
-            current_status = track_db.get_track_status(spotify_id)
+            current_status = track_db.get_track_status(track_id)
             skip_statuses = {
                 "completed", "queued", "downloading", "searching",
                 "requested", "inprogress", "redownload_pending"
@@ -557,17 +559,17 @@ def mark_tracks_for_quality_upgrade() -> None:
     target_format = "mp3" if REMUX_ALL_TO_MP3 else "wav"
 
     for track_row in completed_tracks:
-        spotify_id = track_row[0]  # First column is spotify_id
+        track_id = track_row[0]  # First column is track_id
 
         # Get current file extension
-        current_extension = track_db.get_track_extension(spotify_id)
+        current_extension = track_db.get_track_extension(track_id)
 
         # Mark for upgrade if not target format (or if extension is unknown/null)
         if not current_extension or current_extension.lower() != target_format:
-            track_db.update_track_status(spotify_id, "redownload_pending")
+            track_db.update_track_status(track_id, "redownload_pending")
             upgrade_count += 1
             write_log.debug("QUALITY_UPGRADE_MARKED", "Marked track for quality upgrade.",
-                          {"spotify_id": spotify_id, "current_extension": current_extension or "unknown"})
+                          {"track_id": track_id, "current_extension": current_extension or "unknown"})
 
     if upgrade_count > 0:
         write_log.info("QUALITY_UPGRADE_MARKED_COMPLETE",
@@ -591,17 +593,17 @@ def _update_file_status(file: dict, username: str | None = None) -> None:
         username: Soulseek username the download is from (used for removing failed downloads)
     """
     slskd_uuid = file.get("id")
-    spotify_id = track_db.get_spotify_id_by_slskd_download_uuid(slskd_uuid)
+    track_id = track_db.get_track_id_by_slskd_download_uuid(slskd_uuid)
     download_username = username or track_db.get_username_by_slskd_uuid(slskd_uuid)
 
-    if not spotify_id:
-        write_log.debug("SLSKD_UUID_UNKNOWN", "No Spotify ID found for slskd UUID.",
+    if not track_id:
+        write_log.debug("SLSKD_UUID_UNKNOWN", "No track ID found for slskd UUID.",
                        {"slskd_uuid": slskd_uuid})
         return
 
     state = file.get("state")
     write_log.debug("FILE_STATUS_UPDATE", "Updating file status.",
-                   {"spotify_id": spotify_id, "state": state})
+                   {"track_id": track_id, "state": state})
 
     # Define failed states for comparison
     failed_states = (
@@ -611,7 +613,7 @@ def _update_file_status(file: dict, username: str | None = None) -> None:
 
     # Handle successful downloads
     if state == "Completed, Succeeded":
-        _handle_completed_download(file, spotify_id)
+        _handle_completed_download(file, track_id)
 
     # Handle failed downloads - remove from slskd to prevent duplicate logs
     elif state in failed_states:
@@ -621,37 +623,37 @@ def _update_file_status(file: dict, username: str | None = None) -> None:
             or file.get("message")
             or state
         )
-        track_db.update_track_status(spotify_id, "failed", failed_reason=failed_reason)
+        track_db.update_track_status(track_id, "failed", failed_reason=failed_reason)
         write_log.info(
             "DOWNLOAD_FAILED",
             "Download failed.",
-            {"spotify_id": spotify_id, "state": state, "failed_reason": failed_reason}
+            {"track_id": track_id, "state": state, "failed_reason": failed_reason}
         )
 
     # Handle queued downloads
     elif state == "Queued, Remotely":
-        track_db.update_track_status(spotify_id, "queued")
+        track_db.update_track_status(track_id, "queued")
 
     # Handle in-progress downloads
     elif state == "InProgress":
-        track_db.update_track_status(spotify_id, "downloading")
+        track_db.update_track_status(track_id, "downloading")
 
     # Handle unknown states
     else:
         normalized_state = state.lower().replace(" ", "_").replace(",", "")
-        track_db.update_track_status(spotify_id, normalized_state)
+        track_db.update_track_status(track_id, normalized_state)
         write_log.debug("DOWNLOAD_STATE_UNKNOWN", "Unknown download state encountered.",
-                       {"spotify_id": spotify_id, "state": state})
+                       {"track_id": track_id, "state": state})
 
     if state.startswith("Completed"):
         if download_username and slskd_uuid:
             remove_download_from_slskd(download_username, slskd_uuid)
         else:
             write_log.warn("DOWNLOAD_REMOVE_SKIP", "Cannot remove failed download - missing username or UUID.",
-                            {"spotify_id": spotify_id, "slskd_uuid": slskd_uuid, "username": download_username})
+                            {"track_id": track_id, "slskd_uuid": slskd_uuid, "username": download_username})
 
 
-def _should_skip_completed_download(spotify_id: str) -> bool:
+def _should_skip_completed_download(track_id: str) -> bool:
     """
     Check if a completed download should be skipped from processing.
 
@@ -659,20 +661,20 @@ def _should_skip_completed_download(spotify_id: str) -> bool:
     or already fully processed to prevent redundant remuxing.
 
     Args:
-        spotify_id: Spotify track identifier
+        track_id: Track identifier
 
     Returns:
         True if the download should be skipped, False otherwise
     """
-    current_status = track_db.get_track_status(spotify_id)
+    current_status = track_db.get_track_status(track_id)
     if current_status == "redownload_pending":
         write_log.debug("DOWNLOAD_SKIP_REDOWNLOAD", "Skipping status update for track marked for redownload.",
-                       {"spotify_id": spotify_id})
+                       {"track_id": track_id})
         return True
 
     if current_status == "completed":
         write_log.debug("DOWNLOAD_ALREADY_PROCESSED", "Skipping already completed download.",
-                       {"spotify_id": spotify_id})
+                       {"track_id": track_id})
         return True
 
     return False
@@ -713,7 +715,7 @@ def _compute_download_local_path(file: dict) -> str | None:
     return os.path.join(config.downloads_root, relative_path)
 
 
-def _is_duplicate_record(spotify_id: str, local_file_path: str) -> bool:
+def _is_duplicate_record(track_id: str, local_file_path: str) -> bool:
     """
     Check if a download is a duplicate record (same file already tracked).
 
@@ -721,13 +723,13 @@ def _is_duplicate_record(spotify_id: str, local_file_path: str) -> bool:
     resets or when slskd history contains already-processed downloads.
 
     Args:
-        spotify_id: Spotify track identifier
+        track_id: Track identifier
         local_file_path: Path to the newly downloaded file
 
     Returns:
         True if this file is already tracked in the database, False otherwise
     """
-    existing_path = track_db.get_local_file_path(spotify_id)
+    existing_path = track_db.get_local_file_path(track_id)
     if not existing_path:
         return False
 
@@ -739,7 +741,7 @@ def _is_duplicate_record(spotify_id: str, local_file_path: str) -> bool:
     )
     if paths_match:
         write_log.debug("DOWNLOAD_DUPLICATE_RECORD", "Skipping old slskd record - file already tracked.",
-                       {"spotify_id": spotify_id, "existing_path": existing_path, "slskd_path": local_file_path})
+                       {"track_id": track_id, "existing_path": existing_path, "slskd_path": local_file_path})
     return paths_match
 
 
@@ -773,7 +775,7 @@ def _extract_extension_bitrate(file: dict, local_file_path: str) -> tuple[str | 
     return extension, bitrate
 
 
-def _remux_completed_download(spotify_id: str, local_file_path: str, extension: str | None, bitrate: int | None) -> str:
+def _remux_completed_download(track_id: str, local_file_path: str, extension: str | None, bitrate: int | None) -> str:
     """
     Remux a completed download to the preferred format based on configuration.
 
@@ -784,7 +786,7 @@ def _remux_completed_download(spotify_id: str, local_file_path: str, extension: 
     MP3 and WAV files are already in preferred format and are not remuxed.
 
     Args:
-        spotify_id: Spotify track identifier
+        track_id: Track identifier
         local_file_path: Path to the downloaded file
         extension: File extension (lowercase)
         bitrate: File bitrate in kbps (for MP3 files)
@@ -798,20 +800,20 @@ def _remux_completed_download(spotify_id: str, local_file_path: str, extension: 
 
     if REMUX_ALL_TO_MP3:
         if extension in lossless_formats or extension in lossy_formats or extension == 'wav':
-            final_path = _remux_lossy_to_mp3(local_file_path, spotify_id, extension) or local_file_path
+            final_path = _remux_lossy_to_mp3(local_file_path, track_id, extension) or local_file_path
     elif extension in lossless_formats:
-        final_path = _remux_lossless_to_wav(local_file_path, spotify_id, extension) or local_file_path
+        final_path = _remux_lossless_to_wav(local_file_path, track_id, extension) or local_file_path
     elif extension in lossy_formats:
-        final_path = _remux_lossy_to_mp3(local_file_path, spotify_id, extension) or local_file_path
+        final_path = _remux_lossy_to_mp3(local_file_path, track_id, extension) or local_file_path
     elif extension == "mp3":
-        track_db.update_extension_bitrate(spotify_id, extension="mp3", bitrate=bitrate)
+        track_db.update_extension_bitrate(track_id, extension="mp3", bitrate=bitrate)
     elif extension == "wav":
-        track_db.update_extension_bitrate(spotify_id, extension="wav", bitrate=None)
+        track_db.update_extension_bitrate(track_id, extension="wav", bitrate=None)
 
     return final_path
 
 
-def _handle_completed_download(file: dict, spotify_id: str) -> None:
+def _handle_completed_download(file: dict, track_id: str) -> None:
     """
     Process a successfully completed download.
 
@@ -825,37 +827,37 @@ def _handle_completed_download(file: dict, spotify_id: str) -> None:
 
     Args:
         file: File object from slskd API
-        spotify_id: Spotify track identifier
+        track_id: Track identifier
     """
-    if _should_skip_completed_download(spotify_id):
+    if _should_skip_completed_download(track_id):
         return
 
     local_file_path = _compute_download_local_path(file)
     if not local_file_path:
         write_log.warn("DOWNLOAD_NO_FILENAME", "Completed download has no filename.",
-                      {"spotify_id": spotify_id})
-        track_db.update_track_status(spotify_id, "completed")
+                      {"track_id": track_id})
+        track_db.update_track_status(track_id, "completed")
         return
 
-    if _is_duplicate_record(spotify_id, local_file_path):
+    if _is_duplicate_record(track_id, local_file_path):
         return
 
     extension, bitrate = _extract_extension_bitrate(file, local_file_path)
-    final_path = _remux_completed_download(spotify_id, local_file_path, extension, bitrate)
+    final_path = _remux_completed_download(track_id, local_file_path, extension, bitrate)
 
-    existing_path = track_db.get_local_file_path(spotify_id)
-    track_db.update_local_file_path(spotify_id, final_path)
+    existing_path = track_db.get_local_file_path(track_id)
+    track_db.update_local_file_path(track_id, final_path)
     write_log.debug(
         "DOWNLOAD_COMPLETE",
         "Download completed successfully.",
         {
-            "spotify_id": spotify_id,
+            "track_id": track_id,
             "local_file_path": final_path,
             "is_new": not bool(existing_path)
         }
     )
-    _update_m3u8_files_for_track(spotify_id, final_path)
-    track_db.update_track_status(spotify_id, "completed")
+    _update_m3u8_files_for_track(track_id, final_path)
+    track_db.update_track_status(track_id, "completed")
 
 def _is_audio_valid(audio_path: str) -> bool:
     """
@@ -876,7 +878,7 @@ def _is_audio_valid(audio_path: str) -> bool:
         return False
 
 
-def _remux_lossless_to_wav(local_file_path: str, spotify_id: str, extension: str) -> str:
+def _remux_lossless_to_wav(local_file_path: str, track_id: str, extension: str) -> str:
     """
     Remux a lossless audio file (FLAC, ALAC, APE) to WAV.
     Update extension/bitrate in DB if successful.
@@ -892,10 +894,10 @@ def _remux_lossless_to_wav(local_file_path: str, spotify_id: str, extension: str
             write_log.warn(
                 "LOSSLESS_INVALID",
                 "Lossless file failed integrity check. Skipping remux.",
-                {"spotify_id": spotify_id, "file_path": ffmpeg_input, "extension": extension}
+                {"track_id": track_id, "file_path": ffmpeg_input, "extension": extension}
             )
-            track_db.update_track_status(spotify_id, "corrupt")
-            slskd_uuid_to_blacklist = track_db.get_download_uuid_by_spotify_id(spotify_id)
+            track_db.update_track_status(track_id, "corrupt")
+            slskd_uuid_to_blacklist = track_db.get_download_uuid_by_track_id(track_id)
             if slskd_uuid_to_blacklist:
                 track_db.add_slskd_blacklist(slskd_uuid_to_blacklist, reason=f"corrupt_{extension}")
             return local_file_path
@@ -928,14 +930,14 @@ def _remux_lossless_to_wav(local_file_path: str, spotify_id: str, extension: str
         with open(ffmpeg_log_file, "a", encoding="utf-8") as logf:
             logf.write(
                 f"\n--- Remux {now.strftime('%Y-%m-%d %H:%M:%S')} "
-                f"| Spotify ID: {spotify_id} | Input: {ffmpeg_input} | Output: {ffmpeg_output} ---\n"
+                f"| Track ID: {track_id} | Input: {ffmpeg_input} | Output: {ffmpeg_output} ---\n"
             )
             subprocess.run(ffmpeg_cmd, check=True, stdout=logf, stderr=subprocess.STDOUT)
-        track_db.update_extension_bitrate(spotify_id, extension="wav", bitrate=None)
+        track_db.update_extension_bitrate(track_id, extension="wav", bitrate=None)
         write_log.debug(
             "REMUX_SUCCESS",
             f"{extension.upper()} remuxed to WAV.",
-            {"spotify_id": spotify_id, "wav_path": wav_path, "ffmpeg_log_file": ffmpeg_log_file}
+            {"track_id": track_id, "wav_path": wav_path, "ffmpeg_log_file": ffmpeg_log_file}
         )
 
         # Remove original file to free up disk space
@@ -945,13 +947,13 @@ def _remux_lossless_to_wav(local_file_path: str, spotify_id: str, extension: str
                 write_log.debug(
                     "ORIGINAL_FILE_REMOVED",
                     f"Deleted original {extension.upper()} file after remuxing to WAV.",
-                    {"spotify_id": spotify_id, "removed_file": local_file_path}
+                    {"track_id": track_id, "removed_file": local_file_path}
                 )
         except Exception as e:
             write_log.warn(
                 "ORIGINAL_FILE_DELETE_FAILED",
                 f"Failed to delete original {extension.upper()} file after remuxing.",
-                {"spotify_id": spotify_id, "file_path": local_file_path, "error": str(e)}
+                {"track_id": track_id, "file_path": local_file_path, "error": str(e)}
             )
 
         return wav_path
@@ -959,13 +961,13 @@ def _remux_lossless_to_wav(local_file_path: str, spotify_id: str, extension: str
         write_log.error(
             "REMUX_FAIL",
             f"Failed to remux {extension.upper()} to WAV.",
-            {"spotify_id": spotify_id, "error": str(e)}
+            {"track_id": track_id, "error": str(e)}
         )
-        track_db.update_extension_bitrate(spotify_id, extension=extension)
+        track_db.update_extension_bitrate(track_id, extension=extension)
         return local_file_path
 
 
-def _remux_lossy_to_mp3(local_file_path: str, spotify_id: str, extension: str) -> str:
+def _remux_lossy_to_mp3(local_file_path: str, track_id: str, extension: str) -> str:
     """
     Remux a lossy audio file (OGG, M4A, AAC, WMA, OPUS) to MP3 320kbps.
     Update extension/bitrate in DB if successful.
@@ -981,10 +983,10 @@ def _remux_lossy_to_mp3(local_file_path: str, spotify_id: str, extension: str) -
             write_log.warn(
                 "LOSSY_INVALID",
                 "Lossy file failed integrity check. Skipping remux.",
-                {"spotify_id": spotify_id, "file_path": ffmpeg_input, "extension": extension}
+                {"track_id": track_id, "file_path": ffmpeg_input, "extension": extension}
             )
-            track_db.update_track_status(spotify_id, "corrupt")
-            slskd_uuid_to_blacklist = track_db.get_download_uuid_by_spotify_id(spotify_id)
+            track_db.update_track_status(track_id, "corrupt")
+            slskd_uuid_to_blacklist = track_db.get_download_uuid_by_track_id(track_id)
             if slskd_uuid_to_blacklist:
                 track_db.add_slskd_blacklist(slskd_uuid_to_blacklist, reason=f"corrupt_{extension}")
             return local_file_path
@@ -1017,14 +1019,14 @@ def _remux_lossy_to_mp3(local_file_path: str, spotify_id: str, extension: str) -
         with open(ffmpeg_log_file, "a", encoding="utf-8") as logf:
             logf.write(
                 f"\n--- Remux {now.strftime('%Y-%m-%d %H:%M:%S')} "
-                f"| Spotify ID: {spotify_id} | Input: {ffmpeg_input} | Output: {ffmpeg_output} ---\n"
+                f"| Spotify ID: {track_id} | Input: {ffmpeg_input} | Output: {ffmpeg_output} ---\n"
             )
             subprocess.run(ffmpeg_cmd, check=True, stdout=logf, stderr=subprocess.STDOUT)
-        track_db.update_extension_bitrate(spotify_id, extension="mp3", bitrate=320)
+        track_db.update_extension_bitrate(track_id, extension="mp3", bitrate=320)
         write_log.info(
             "REMUX_SUCCESS",
             f"{extension.upper()} remuxed to MP3 320kbps.",
-            {"spotify_id": spotify_id, "mp3_path": mp3_path, "ffmpeg_log_file": ffmpeg_log_file}
+            {"track_id": track_id, "mp3_path": mp3_path, "ffmpeg_log_file": ffmpeg_log_file}
         )
 
         # Remove original file to free up disk space
@@ -1034,13 +1036,13 @@ def _remux_lossy_to_mp3(local_file_path: str, spotify_id: str, extension: str) -
                 write_log.debug(
                     "ORIGINAL_FILE_REMOVED",
                     f"Deleted original {extension.upper()} file after remuxing to MP3.",
-                    {"spotify_id": spotify_id, "removed_file": local_file_path}
+                    {"track_id": track_id, "removed_file": local_file_path}
                 )
         except Exception as e:
             write_log.warn(
                 "ORIGINAL_FILE_DELETE_FAILED",
                 f"Failed to delete original {extension.upper()} file after remuxing.",
-                {"spotify_id": spotify_id, "file_path": local_file_path, "error": str(e)}
+                {"track_id": track_id, "file_path": local_file_path, "error": str(e)}
             )
 
         return mp3_path
@@ -1048,12 +1050,12 @@ def _remux_lossy_to_mp3(local_file_path: str, spotify_id: str, extension: str) -
         write_log.error(
             "REMUX_FAIL",
             f"Failed to remux {extension.upper()} to MP3.",
-            {"spotify_id": spotify_id, "error": str(e)}
+            {"track_id": track_id, "error": str(e)}
         )
-        track_db.update_extension_bitrate(spotify_id, extension=extension)
+        track_db.update_extension_bitrate(track_id, extension=extension)
         return local_file_path
 
-def _update_m3u8_files_for_track(spotify_id: str, local_file_path: str) -> None:
+def _update_m3u8_files_for_track(track_id: str, local_file_path: str) -> None:
     """
     Update all M3U8 files that contain a specific track.
 
@@ -1061,16 +1063,16 @@ def _update_m3u8_files_for_track(spotify_id: str, local_file_path: str) -> None:
     playlists that contain this track.
 
     Args:
-        spotify_id: Spotify track identifier
+        track_id: Track identifier
         local_file_path: Absolute path to the downloaded file
     """
     try:
         # Get all playlists that contain this track
-        playlist_urls = track_db.get_playlists_for_track(spotify_id)
+        playlist_urls = track_db.get_playlists_for_track(track_id)
 
         if not playlist_urls:
             write_log.debug("TRACK_NO_PLAYLISTS", "Track not linked to any playlists.",
-                           {"spotify_id": spotify_id})
+                           {"track_id": track_id})
             return
 
         # Update M3U8 file for each playlist
@@ -1078,16 +1080,16 @@ def _update_m3u8_files_for_track(spotify_id: str, local_file_path: str) -> None:
             m3u8_path = track_db.get_m3u8_path_for_playlist(playlist_url)
 
             if m3u8_path:
-                update_track_in_m3u8(m3u8_path, spotify_id, local_file_path)
+                update_track_in_m3u8(m3u8_path, track_id, local_file_path)
                 write_log.debug("M3U8_TRACK_UPDATED", "Updated track in M3U8 file.",
-                              {"spotify_id": spotify_id, "m3u8_path": m3u8_path})
+                              {"track_id": track_id, "m3u8_path": m3u8_path})
             else:
                 write_log.warn("M3U8_PATH_MISSING", "No M3U8 path found for playlist.",
                               {"playlist_url": playlist_url})
 
     except Exception as e:
         write_log.error("M3U8_UPDATE_FAIL", "Failed to update M3U8 files for track.",
-                       {"spotify_id": spotify_id, "error": str(e)})
+                       {"track_id": track_id, "error": str(e)})
 
 
 # Database Reset Function
@@ -1209,18 +1211,18 @@ def task_initiate_searches() -> bool:
             rows = track_db.get_tracks_by_status(status)
             for track_row in rows:
                 # Skip if there is already an active search for this track
-                spotify_id = track_row[0]
-                current_status = track_db.get_track_status(spotify_id)
+                track_id = track_row[0]
+                current_status = track_db.get_track_status(track_id)
                 if current_status == "searching":
                     write_log.debug(
                         "TASK_INITIATE_SEARCH_SKIP_SEARCHING",
                         "Skipping track with active search.",
-                        {"spotify_id": spotify_id}
+                        {"track_id": track_id}
                     )
                     continue
                 track_name = track_row[1]
                 artist = track_row[2]
-                tracks_to_search.append((spotify_id, artist, track_name))
+                tracks_to_search.append((track_id, artist, track_name))
 
         if not tracks_to_search:
             write_log.info("TASK_INITIATE_SEARCHES_NO_TRACKS",
@@ -1433,7 +1435,7 @@ def _determine_remux_target(
     return False, None
 
 
-def _remux_single_track(spotify_id: str, lossless_formats: set[str], lossy_formats: set[str]) -> str:
+def _remux_single_track(track_id: str, lossless_formats: set[str], lossy_formats: set[str]) -> str:
     """
     Remux a single track to match current format preferences.
 
@@ -1443,7 +1445,7 @@ def _remux_single_track(spotify_id: str, lossless_formats: set[str], lossy_forma
     3. Performs remux and updates database/M3U8 files
 
     Args:
-        spotify_id: Spotify track identifier
+        track_id: Track identifier
         lossless_formats: Set of lossless format extensions
         lossy_formats: Set of lossy format extensions
 
@@ -1451,24 +1453,24 @@ def _remux_single_track(spotify_id: str, lossless_formats: set[str], lossy_forma
         Status string: "remuxed", "skipped", or "error"
     """
     status = "skipped"
-    local_file_path = track_db.get_local_file_path(spotify_id)
+    local_file_path = track_db.get_local_file_path(track_id)
     if not local_file_path:
         write_log.debug("TASK_REMUX_NO_PATH", "Track has no file path, skipping.",
-                        {"spotify_id": spotify_id})
+                        {"track_id": track_id})
         return status
 
     if not os.path.exists(local_file_path):
         write_log.warn("TASK_REMUX_FILE_NOT_FOUND", "File not found, skipping.",
-                       {"spotify_id": spotify_id, "path": local_file_path})
+                       {"track_id": track_id, "path": local_file_path})
         return status
 
-    current_extension = track_db.get_track_extension(spotify_id)
+    current_extension = track_db.get_track_extension(track_id)
     if not current_extension and "." in local_file_path:
         current_extension = local_file_path.rsplit(".", 1)[-1].lower()
 
     if not current_extension:
         write_log.warn("TASK_REMUX_NO_EXTENSION", "Cannot determine file extension.",
-                       {"spotify_id": spotify_id, "path": local_file_path})
+                       {"track_id": track_id, "path": local_file_path})
         return status
 
     needs_remux, target_format = _determine_remux_target(current_extension, lossless_formats, lossy_formats)
@@ -1476,28 +1478,28 @@ def _remux_single_track(spotify_id: str, lossless_formats: set[str], lossy_forma
         return status
 
     write_log.info("TASK_REMUX_FILE", "Remuxing file to target format.",
-                  {"spotify_id": spotify_id, "current_ext": current_extension,
+                  {"track_id": track_id, "current_ext": current_extension,
                    "target_format": target_format, "path": local_file_path})
 
     try:
         new_path: str | None = None
 
         if target_format == "wav":
-            new_path = _remux_lossless_to_wav(local_file_path, spotify_id, current_extension)
+            new_path = _remux_lossless_to_wav(local_file_path, track_id, current_extension)
         elif target_format == "mp3":
-            new_path = _remux_lossy_to_mp3(local_file_path, spotify_id, current_extension)
+            new_path = _remux_lossy_to_mp3(local_file_path, track_id, current_extension)
 
         if new_path and new_path != local_file_path:
-            track_db.update_local_file_path(spotify_id, new_path)
-            _update_m3u8_files_for_track(spotify_id, new_path)
+            track_db.update_local_file_path(track_id, new_path)
+            _update_m3u8_files_for_track(track_id, new_path)
             write_log.info("TASK_REMUX_SUCCESS", "File remuxed successfully.",
-                          {"spotify_id": spotify_id, "old_path": local_file_path,
+                          {"track_id": track_id, "old_path": local_file_path,
                            "new_path": new_path})
             status = "remuxed"
 
     except Exception as e:
         write_log.error("TASK_REMUX_FILE_ERROR", "Failed to remux file.",
-                        {"spotify_id": spotify_id, "path": local_file_path,
+                        {"track_id": track_id, "path": local_file_path,
                          "error": str(e)})
         status = "error"
 
@@ -1549,8 +1551,8 @@ def task_remux_existing_files() -> bool:
         error_count = 0
 
         for track_row in completed_tracks:
-            spotify_id = track_row[0]
-            result = _remux_single_track(spotify_id, lossless_formats, lossy_formats)
+            track_id = track_row[0]
+            result = _remux_single_track(track_id, lossless_formats, lossy_formats)
 
             if result == "remuxed":
                 remuxed_count += 1

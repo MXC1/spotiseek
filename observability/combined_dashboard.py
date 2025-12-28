@@ -634,12 +634,12 @@ def _get_non_completed_tracks_cached(db_path: str) -> Dict[str, List[dict]]:
         SELECT 
             p.playlist_name,
             p.playlist_url,
-            t.spotify_id,
+            t.track_id,
             t.track_name,
             t.artist,
             t.download_status
         FROM tracks t
-        JOIN playlist_tracks pt ON t.spotify_id = pt.spotify_id
+        JOIN playlist_tracks pt ON t.track_id = pt.track_id
         JOIN playlists p ON pt.playlist_url = p.playlist_url
         WHERE t.local_file_path IS NULL OR t.local_file_path = ''
         ORDER BY p.playlist_name, t.track_name
@@ -650,12 +650,12 @@ def _get_non_completed_tracks_cached(db_path: str) -> Dict[str, List[dict]]:
     
     # Group by playlist
     grouped_tracks = {}
-    for playlist_name, playlist_url, spotify_id, track_name, artist, status in rows:
+    for playlist_name, playlist_url, track_id, track_name, artist, status in rows:
         if playlist_name not in grouped_tracks:
             grouped_tracks[playlist_name] = []
         
         grouped_tracks[playlist_name].append({
-            'spotify_id': spotify_id,
+            'track_id': track_id,
             'track_name': track_name,
             'artist': artist,
             'status': status,
@@ -679,7 +679,7 @@ def get_non_completed_tracks_by_playlist() -> Dict[str, List[Tuple]]:
         {
             "Playlist Name": [
                 {
-                    'spotify_id': ..., 'track_name': ..., 'artist': ..., 'status': ..., 'playlist_url': ...
+                    'track_id': ..., 'track_name': ..., 'artist': ..., 'status': ..., 'playlist_url': ...
                 },
                 ...
             ],
@@ -706,7 +706,7 @@ def _get_playlists_with_incomplete_counts_cached(db_path: str) -> pd.DataFrame:
             COUNT(*) AS incomplete_count
         FROM playlists p
         JOIN playlist_tracks pt ON p.playlist_url = pt.playlist_url
-        JOIN tracks t ON t.spotify_id = pt.spotify_id
+        JOIN tracks t ON t.track_id = pt.track_id
         WHERE t.local_file_path IS NULL OR TRIM(t.local_file_path) = ''
         GROUP BY p.playlist_name, p.playlist_url
         ORDER BY incomplete_count DESC, p.playlist_name
@@ -729,7 +729,7 @@ def _get_incomplete_tracks_for_playlist_cached(
     Paginated query of tracks missing local_file_path for a given playlist.
 
     Returns: (rows, total_count)
-    Each row is a dict with keys: spotify_id, track_name, artist, status, playlist_url
+    Each row is a dict with keys: track_id, track_name, artist, status, playlist_url
     cache_nonce is used to bust cache after imports without clearing global cache.
     """
     _ = cache_nonce  # used only to vary cache key
@@ -750,7 +750,7 @@ def _get_incomplete_tracks_for_playlist_cached(
         """
         SELECT COUNT(*)
         FROM playlist_tracks pt
-        JOIN tracks t ON t.spotify_id = pt.spotify_id
+        JOIN tracks t ON t.track_id = pt.track_id
         WHERE pt.playlist_url = ?
           AND (t.local_file_path IS NULL OR TRIM(t.local_file_path) = '')
         """ + where_search
@@ -764,12 +764,12 @@ def _get_incomplete_tracks_for_playlist_cached(
         """
         SELECT 
             pt.playlist_url,
-            t.spotify_id,
+            t.track_id,
             t.track_name,
             t.artist,
             t.download_status
         FROM playlist_tracks pt
-        JOIN tracks t ON t.spotify_id = pt.spotify_id
+        JOIN tracks t ON t.track_id = pt.track_id
         WHERE pt.playlist_url = ?
           AND (t.local_file_path IS NULL OR TRIM(t.local_file_path) = '')
         """ + where_search + " ORDER BY t.track_name LIMIT ? OFFSET ?"
@@ -783,7 +783,7 @@ def _get_incomplete_tracks_for_playlist_cached(
     result = [
         {
             "playlist_url": r[0],
-            "spotify_id": r[1],
+            "track_id": r[1],
             "track_name": r[2],
             "artist": r[3],
             "status": r[4],
@@ -851,12 +851,12 @@ def compute_effective_bitrate_kbps(file_path: str) -> Optional[int]:
         return None
 
 
-def import_track(spotify_id: str, uploaded_file, track_info: dict) -> Tuple[bool, str]:
+def import_track(track_id: str, uploaded_file, track_info: dict) -> Tuple[bool, str]:
     """
     Import a track file and update the database.
     
     Args:
-        spotify_id: Spotify track identifier
+        track_id: Track identifier
         uploaded_file: Streamlit UploadedFile object
         track_info: Dictionary with track metadata
     
@@ -882,32 +882,32 @@ def import_track(spotify_id: str, uploaded_file, track_info: dict) -> Tuple[bool
             f.write(uploaded_file.getbuffer())
         
         write_log.info("IMPORT_FILE_SAVED", "Saved imported file.", 
-                      {"spotify_id": spotify_id, "destination": destination_path})
+                      {"track_id": track_id, "destination": destination_path})
         
         # Extract metadata
         metadata = extract_metadata_from_file(destination_path)
         
         # Update database
-        track_db.update_local_file_path(spotify_id, destination_path)
+        track_db.update_local_file_path(track_id, destination_path)
         track_db.update_extension_bitrate(
-            spotify_id, 
+            track_id, 
             extension=metadata['extension'], 
             bitrate=metadata['bitrate']
         )
-        track_db.update_track_status(spotify_id, "completed")
+        track_db.update_track_status(track_id, "completed")
         
         write_log.info("IMPORT_DB_UPDATED", "Updated database for imported track.", 
-                      {"spotify_id": spotify_id, "extension": metadata['extension'], 
+                      {"track_id": track_id, "extension": metadata['extension'], 
                        "bitrate": metadata['bitrate']})
         
         # Update M3U8 files
-        playlist_urls = track_db.get_playlists_for_track(spotify_id)
+        playlist_urls = track_db.get_playlists_for_track(track_id)
         for playlist_url in playlist_urls:
             m3u8_path = track_db.get_m3u8_path_for_playlist(playlist_url)
             if m3u8_path:
-                update_track_in_m3u8(m3u8_path, spotify_id, destination_path)
+                update_track_in_m3u8(m3u8_path, track_id, destination_path)
                 write_log.debug("IMPORT_M3U8_UPDATED", "Updated M3U8 file.", 
-                              {"m3u8_path": m3u8_path, "spotify_id": spotify_id})
+                              {"m3u8_path": m3u8_path, "track_id": track_id})
         
         # Re-export iTunes XML
         # Export XML as library_{ENV}.xml under output/{ENV}/
@@ -930,7 +930,7 @@ def import_track(spotify_id: str, uploaded_file, track_info: dict) -> Tuple[bool
     except Exception as e:
         error_msg = f"❌ Failed to import track: {str(e)}"
         write_log.error("IMPORT_TRACK_FAIL", "Failed to import track.", 
-                       {"spotify_id": spotify_id, "error": str(e)})
+                       {"track_id": track_id, "error": str(e)})
         return False, error_msg
 
 
@@ -1004,36 +1004,36 @@ def render_manual_import_section():
 
     # Table view (lightweight)
     if rows:
-        df = pd.DataFrame(rows)[["artist", "track_name", "status", "spotify_id"]]
+        df = pd.DataFrame(rows)[["artist", "track_name", "status", "track_id"]]
         st.dataframe(df, use_container_width=True, hide_index=True)
     else:
         st.info("No matching tracks on this page.")
 
     labels_by_id = {
-        r["spotify_id"]: f"{r['artist']} - {r['track_name']} • {r['status']} [{r['spotify_id']}]"
+        r["track_id"]: f"{r['artist']} - {r['track_name']} • {r['status']} [{r['track_id']}]"
         for r in rows
     }
-    tracks_by_id = {r["spotify_id"]: r for r in rows}
+    tracks_by_id = {r["track_id"]: r for r in rows}
     if labels_by_id:
-        selected_spotify_id = st.selectbox(
+        selected_track_id = st.selectbox(
             "Select a track to import:",
             options=list(labels_by_id.keys()),
-            format_func=lambda spotify_id: labels_by_id.get(spotify_id, str(spotify_id)),
+            format_func=lambda track_id: labels_by_id.get(track_id, str(track_id)),
         )
-        track = tracks_by_id[selected_spotify_id]
+        track = tracks_by_id[selected_track_id]
 
         uploaded_file = st.file_uploader(
             "Select audio file",
             type=["mp3", "flac", "wav", "m4a", "ogg", "wma"],
-            key=f"upload_{track['spotify_id']}",
+            key=f"upload_{track['track_id']}",
             help="Upload the audio file for this track",
         )
 
         if uploaded_file is not None:
             st.info(f"📁 Selected: `{uploaded_file.name}`")
-            if st.button("Import Track", key=f"import_{track['spotify_id']}", type="primary"):
+            if st.button("Import Track", key=f"import_{track['track_id']}", type="primary"):
                 with st.spinner("Importing..."):
-                    success, message = import_track(track["spotify_id"], uploaded_file, track)
+                    success, message = import_track(track["track_id"], uploaded_file, track)
                 if success:
                     st.success(message)
                     # Bust only manual-import caches

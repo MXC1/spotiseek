@@ -642,7 +642,7 @@ class _DashboardAwareFilter(logging.Filter):
         return record.levelno >= self.configured_level
 
 
-def setup_logging(
+def setup_logging(  # noqa: PLR0915
     logs_dir: str | None = None,
     log_level: int = logging.INFO,
     log_name_prefix: str = "run",

@@ -531,7 +531,7 @@ class TaskRegistry:
                         break
 
                     if self.should_run_task(task_name):
-                        deps_met, unmet = self.check_dependencies(task_name)
+                        deps_met, _unmet = self.check_dependencies(task_name)
                         if deps_met:
                             self.run_task(task_name)
 

@@ -287,7 +287,7 @@ def export_itunes_xml(xml_path: str, music_folder_url: str | None = None) -> Non
 
     # Fetch all tracks from database
     cursor.execute("""
-        SELECT spotify_id, track_name, artist, download_status,
+        SELECT track_id, track_name, artist, download_status,
                slskd_file_name, local_file_path, added_at
         FROM tracks
     """)
@@ -300,11 +300,11 @@ def export_itunes_xml(xml_path: str, music_folder_url: str | None = None) -> Non
     write_log.debug("XML_PLAYLISTS_FETCHED", "Fetched playlists from database.", {"count": len(playlists)})
 
     # Fetch playlist-track associations
-    cursor.execute("SELECT playlist_url, spotify_id FROM playlist_tracks")
+    cursor.execute("SELECT playlist_url, track_id FROM playlist_tracks")
     playlist_tracks_raw = cursor.fetchall()
     playlist_tracks = {}
-    for playlist_url, spotify_id in playlist_tracks_raw:
-        playlist_tracks.setdefault(playlist_url, []).append(spotify_id)
+    for playlist_url, track_id in playlist_tracks_raw:
+        playlist_tracks.setdefault(playlist_url, []).append(track_id)
     write_log.debug("XML_ASSOCIATIONS_FETCHED", "Fetched playlist-track associations.",
                    {"count": len(playlist_tracks_raw)})
 
@@ -323,19 +323,22 @@ def export_itunes_xml(xml_path: str, music_folder_url: str | None = None) -> Non
     ET.SubElement(dict_root, 'key').text = 'Tracks'
     tracks_dict = ET.SubElement(dict_root, 'dict')
 
-    # Map spotify_id to track integer ID (only for downloaded tracks)
-    spotify_id_to_track_id = {}
+    # Map track_id to track integer ID (only for downloaded tracks)
+    source_id_to_track_id = {}
     downloaded_tracks = [t for t in tracks if t[5]]  # Filter by local_file_path
     write_log.info("XML_DOWNLOADED_TRACKS", "Filtered downloaded tracks.",
                    {"total_tracks": len(tracks), "downloaded_tracks": len(downloaded_tracks)})
 
-    for idx, (spotify_id, track_name, artist, _, _, local_file_path, _) in enumerate(downloaded_tracks, 1):
+    for idx, (track_id, track_name, artist, _, _, local_file_path, _) in enumerate(downloaded_tracks, 1):
         try:
-            _add_track_to_xml(tracks_dict, idx, track_name, artist, spotify_id, local_file_path)
-            spotify_id_to_track_id[spotify_id] = idx
+            _add_track_to_xml(tracks_dict, idx, track_name, artist, track_id, local_file_path)
+            source_id_to_track_id[track_id] = idx
         except Exception as e:
-            write_log.error("XML_TRACK_ADD_FAIL", "Failed to add track to XML.",
-                           {"track_id": idx, "spotify_id": spotify_id, "error": str(e)})
+            write_log.error(
+                "XML_TRACK_ADD_FAIL",
+                "Failed to add track to XML.",
+                {"track_idx": idx, "track_id": track_id, "error": str(e)},
+            )
 
     # Build playlists array
     ET.SubElement(dict_root, 'key').text = 'Playlists'
@@ -347,7 +350,7 @@ def export_itunes_xml(xml_path: str, music_folder_url: str | None = None) -> Non
             playlist_idx,
             playlist_name or playlist_url,
             playlist_tracks.get(playlist_url, []),
-            spotify_id_to_track_id
+            source_id_to_track_id
         )
 
     # Write XML to file with proper formatting
@@ -378,19 +381,19 @@ def _add_xml_key_value(parent: ET.Element, key: str, value: str, value_type: str
 
 
 def _add_track_to_xml(  # noqa: PLR0913
-    tracks_dict: ET.Element, track_id: int, track_name: str,
-    artist: str, spotify_id: str, local_file_path: str
+    tracks_dict: ET.Element, track_idx: int, track_name: str,
+    artist: str, track_id: str, local_file_path: str
 ) -> None:
     """Add a track entry to the tracks dictionary with file metadata."""
     track_key = ET.SubElement(tracks_dict, 'key')
-    track_key.text = str(track_id)
+    track_key.text = str(track_idx)
     track_dict = ET.SubElement(tracks_dict, 'dict')
 
     # Extract metadata from the actual file
     file_metadata = extract_file_metadata(local_file_path)
 
     # Basic track information
-    _add_xml_key_value(track_dict, 'Track ID', str(track_id), 'integer')
+    _add_xml_key_value(track_dict, 'Track ID', str(track_idx), 'integer')
     _add_xml_key_value(track_dict, 'Name', track_name or '', 'string')
     _add_xml_key_value(track_dict, 'Artist', artist or '', 'string')
 
@@ -435,14 +438,14 @@ def _add_track_to_xml(  # noqa: PLR0913
         _add_xml_key_value(track_dict, 'Sample Rate', str(file_metadata['sample_rate']), 'integer')
 
     # Track identification
-    _add_xml_key_value(track_dict, 'Persistent ID', spotify_id or '', 'string')
+    _add_xml_key_value(track_dict, 'Persistent ID', track_id or '', 'string')
     _add_xml_key_value(track_dict, 'Track Type', 'File', 'string')
     _add_xml_key_value(track_dict, 'Location', format_file_location_url(local_file_path), 'string')
 
 
 def _add_playlist_to_xml(playlists_array: ET.Element, playlist_id: int,
-                        playlist_name: str, spotify_ids: list,
-                        spotify_id_to_track_id: dict) -> None:
+                        playlist_name: str, track_ids: list,
+                        source_id_to_track_id: dict) -> None:
     """Add a playlist entry to the playlists array."""
     playlist_dict = ET.SubElement(playlists_array, 'dict')
 
@@ -459,7 +462,7 @@ def _add_playlist_to_xml(playlists_array: ET.Element, playlist_id: int,
     ET.SubElement(playlist_dict, 'key').text = 'Playlist Items'
     items_array = ET.SubElement(playlist_dict, 'array')
 
-    for spotify_id in spotify_ids:
-        if spotify_id in spotify_id_to_track_id:
+    for track_id in track_ids:
+        if track_id in source_id_to_track_id:
             item_dict = ET.SubElement(items_array, 'dict')
-            _add_xml_key_value(item_dict, 'Track ID', str(spotify_id_to_track_id[spotify_id]), 'integer')
+            _add_xml_key_value(item_dict, 'Track ID', str(source_id_to_track_id[track_id]), 'integer')

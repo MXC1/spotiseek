@@ -12,10 +12,10 @@ Key Features:
 
 File Format:
     #EXTM3U
-    # spotify_id - artist - track_name
-    # spotify_id - artist - track_name
+    # track_id - artist - track_name
+    # track_id - artist - track_name
     E:\\path\to\\downloaded\file.mp3
-    # spotify_id - artist - track_name
+    # track_id - artist - track_name
     ...
 
 Public API:
@@ -35,13 +35,13 @@ def write_playlist_m3u8(m3u8_path: str, tracks: list[tuple[str, str, str]]) -> N
     Create a new M3U8 playlist file with commented track entries.
 
     Each track is written as a comment line in the format:
-    # spotify_id - artist - track_name
+    # track_id - artist - track_name
 
     These comments are later replaced with actual file paths as downloads complete.
 
     Args:
         m3u8_path: Absolute path where the M3U8 file should be created
-        tracks: List of tuples (spotify_id, artist, track_name)
+        tracks: List of tuples (track_id, artist, track_name)
 
     Example:
         >>> tracks = [("abc123", "Artist Name", "Track Title")]
@@ -56,8 +56,8 @@ def write_playlist_m3u8(m3u8_path: str, tracks: list[tuple[str, str, str]]) -> N
             m3u8_file.write('#EXTM3U\n')
 
             # Write each track as a comment
-            for spotify_id, artist, track_name in tracks:
-                comment = f"# {spotify_id} - {artist} - {track_name}\n"
+            for track_id, artist, track_name in tracks:
+                comment = f"# {track_id} - {artist} - {track_name}\n"
                 m3u8_file.write(comment)
 
         write_log.debug("M3U8_WRITE_SUCCESS", "M3U8 file written successfully.", {"m3u8_path": m3u8_path})
@@ -67,16 +67,16 @@ def write_playlist_m3u8(m3u8_path: str, tracks: list[tuple[str, str, str]]) -> N
         raise
 
 
-def update_track_in_m3u8(m3u8_path: str, spotify_id: str, local_file_path: str) -> None:
+def update_track_in_m3u8(m3u8_path: str, track_id: str, local_file_path: str) -> None:
     """
     Replace a track comment with the actual file path in an M3U8 file.
 
-    Searches for the comment line matching the spotify_id and replaces it with
+    Searches for the comment line matching the track_id and replaces it with
     the local file path. Only replaces the first matching comment.
 
     Args:
         m3u8_path: Path to the M3U8 file to update
-        spotify_id: Spotify track ID to search for
+        track_id: Track ID to search for
         local_file_path: Absolute path to the downloaded file
 
     Note:
@@ -91,7 +91,7 @@ def update_track_in_m3u8(m3u8_path: str, spotify_id: str, local_file_path: str) 
         return
 
     write_log.debug("M3U8_UPDATE", "Updating track in M3U8 file.",
-                   {"m3u8_path": m3u8_path, "spotify_id": spotify_id})
+                   {"m3u8_path": m3u8_path, "track_id": track_id})
 
     try:
         # Read all lines
@@ -99,7 +99,7 @@ def update_track_in_m3u8(m3u8_path: str, spotify_id: str, local_file_path: str) 
             lines = f.readlines()
 
         # Find and replace the matching comment
-        comment_prefix = f"# {spotify_id} - "
+        comment_prefix = f"# {track_id} - "
         new_lines = []
         replaced = False
 
@@ -115,10 +115,10 @@ def update_track_in_m3u8(m3u8_path: str, spotify_id: str, local_file_path: str) 
             with open(m3u8_path, 'w', encoding='utf-8') as f:
                 f.writelines(new_lines)
             write_log.debug("M3U8_UPDATE_SUCCESS", "Track updated in M3U8 file.",
-                           {"m3u8_path": m3u8_path, "spotify_id": spotify_id})
+                           {"m3u8_path": m3u8_path, "track_id": track_id})
         else:
             write_log.debug("M3U8_TRACK_NOT_FOUND", "Track comment not found in M3U8 file.",
-                           {"m3u8_path": m3u8_path, "spotify_id": spotify_id})
+                           {"m3u8_path": m3u8_path, "track_id": track_id})
 
     except Exception as e:
         write_log.error("M3U8_UPDATE_FAIL", "Failed to update M3U8 file.",

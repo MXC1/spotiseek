@@ -383,7 +383,6 @@ def select_best_file(responses: list[dict[str, Any]], search_text: str) -> tuple
 
     # Collect all candidate files, skipping blacklisted slskd_uuids
     candidates = []
-    blacklisted_count = 0
     non_audio_count = 0
     low_bitrate_count = 0
     total_files = 0
@@ -395,10 +394,9 @@ def select_best_file(responses: list[dict[str, Any]], search_text: str) -> tuple
 
         for file in files:
             slskd_uuid = file.get("id")
-            filename = file.get("filename", "")
 
             if slskd_uuid and track_db.is_slskd_blacklisted(slskd_uuid):
-                pass  # Blacklisted file skipped
+                continue  # Blacklisted file skipped
 
             # Filter out non-audio files
             if not is_audio_file(file):
@@ -423,18 +421,13 @@ def select_best_file(responses: list[dict[str, Any]], search_text: str) -> tuple
             (f, u) for f, u in candidates
             if is_original_version(f.get("filename", ""), allow_alternatives=False)
         ]
-        filtered_count = len(candidates) - len(original_candidates)
 
-        if original_candidates:
-            search_pool = original_candidates
-        else:
-            search_pool = candidates
+        search_pool = original_candidates or candidates
 
     # Sort by quality (best first)
     search_pool.sort(key=quality_sort_key, reverse=True)
 
     if search_pool:
-        best_file, best_username = search_pool[0]
         return search_pool[0]
 
     return None, None
@@ -542,7 +535,7 @@ def check_search_status(search_id: str) -> tuple[bool, list[dict[str, Any]]]:
         return (False, [])
 
 def _make_download_request(
-    url: str, payload: list[dict], attempt: int
+    url: str, payload: list[dict], attempt: int  # noqa: ARG001
 ) -> dict[str, Any]:
     """Make the download request to slskd API."""
     resp = requests.post(
@@ -569,7 +562,7 @@ def _validate_download_response(download_response: dict[str, Any]) -> str:
 
 
 def enqueue_download(
-    file: dict[str, Any], username: str, spotify_id: str, max_retries: int = 3
+    file: dict[str, Any], username: str, track_id: str, max_retries: int = 3
 ) -> dict[str, Any]:
     """
     Queue a file for download from a Soulseek user and track the mapping.
@@ -580,7 +573,7 @@ def enqueue_download(
     Args:
         file: File object containing 'filename' and 'size'
         username: Soulseek username to download from
-        spotify_id: Spotify track ID to associate with this download
+        track_id: Track ID to associate with this download
         max_retries: Maximum number of retry attempts (default: 3)
 
     Returns:
@@ -608,11 +601,11 @@ def enqueue_download(
 
             # Update database after successful download enqueue
             write_log.debug("SLSKD_ENQUEUE_SUCCESS", "Successfully enqueued download.",
-                          {"slskd_uuid": slskd_uuid, "spotify_id": spotify_id, "attempt": attempt + 1})
-            track_db.set_download_uuid(spotify_id, slskd_uuid, username)
-            track_db.update_track_status(spotify_id, "downloading")
-            track_db.update_slskd_file_name(spotify_id, filename)
-            track_db.update_extension_bitrate(spotify_id, extension, bitrate)
+                          {"slskd_uuid": slskd_uuid, "track_id": track_id, "attempt": attempt + 1})
+            track_db.set_download_uuid(track_id, slskd_uuid, username)
+            track_db.update_track_status(track_id, "downloading")
+            track_db.update_slskd_file_name(track_id, filename)
+            track_db.update_extension_bitrate(track_id, extension, bitrate)
 
             return download_response
 
@@ -627,7 +620,7 @@ def enqueue_download(
             else:
                 write_log.warn("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download after all retries.",
                                {"error": str(e), "filename": filename, "attempts": max_retries})
-                track_db.update_track_status(spotify_id, "failed", failed_reason=str(e))
+                track_db.update_track_status(track_id, "failed", failed_reason=str(e))
                 raise
 
         except requests.HTTPError as e:
@@ -638,20 +631,20 @@ def enqueue_download(
             else:
                 write_log.warn("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download.",
                                {"error": str(e), "filename": filename})
-                track_db.update_track_status(spotify_id, "failed", failed_reason=str(e))
+                track_db.update_track_status(track_id, "failed", failed_reason=str(e))
                 raise
 
         except requests.RequestException as e:
             last_error = e
             write_log.warn("SLSKD_ENQUEUE_FAIL", "Failed to enqueue download.",
                            {"error": str(e), "filename": filename})
-            track_db.update_track_status(spotify_id, "failed", failed_reason=str(e))
+            track_db.update_track_status(track_id, "failed", failed_reason=str(e))
             raise
 
         except ValueError as e:
             last_error = e
             write_log.warn("SLSKD_ENQUEUE_INVALID", "Invalid download response.", {"error": str(e)})
-            track_db.update_track_status(spotify_id, "failed", failed_reason=str(e))
+            track_db.update_track_status(track_id, "failed", failed_reason=str(e))
             raise
 
     # This should not be reached due to raise in the loop, but just in case
@@ -661,7 +654,7 @@ def enqueue_download(
 
 # Main Download Functions
 
-def initiate_track_search(artist: str, track: str, spotify_id: str) -> tuple[str, str, str] | None:
+def initiate_track_search(artist: str, track: str, track_id: str) -> tuple[str, str, str] | None:
     """
     Initiate an asynchronous search for a track on the Soulseek network.
 
@@ -671,14 +664,14 @@ def initiate_track_search(artist: str, track: str, spotify_id: str) -> tuple[str
     Args:
         artist: Artist name(s)
         track: Track name
-        spotify_id: Spotify track identifier for database tracking
+        track_id: Track identifier for database tracking
 
     Returns:
-        Tuple of (search_id, search_text, spotify_id) if search was initiated,
+        Tuple of (search_id, search_text, track_id) if search was initiated,
         None if track should be skipped
     """
     # Check current status
-    current_status = track_db.get_track_status(spotify_id)
+    current_status = track_db.get_track_status(track_id)
     skip_statuses = {"completed", "queued", "downloading", "requested", "inprogress"}
 
     if current_status in skip_statuses:
@@ -691,22 +684,22 @@ def initiate_track_search(artist: str, track: str, spotify_id: str) -> tuple[str
         search_id = create_search(search_text)
 
         # Store the search mapping immediately so we can find it later
-        track_db.set_search_uuid(spotify_id, search_id)
+        track_db.set_search_uuid(track_id, search_id)
 
         # Update status to searching after mapping is stored
-        track_db.update_track_status(spotify_id, "searching")
+        track_db.update_track_status(track_id, "searching")
 
-        return (search_id, search_text, spotify_id)
+        return (search_id, search_text, track_id)
 
     except Exception as e:
         write_log.warn("SLSKD_SEARCH_INITIATE_FAIL", "Failed to initiate search.",
                        {"artist": artist, "track": track, "error": str(e)})
-        track_db.update_track_status(spotify_id, "failed", failed_reason=str(e))
+        track_db.update_track_status(track_id, "failed", failed_reason=str(e))
         return None
 
 
 def process_search_results(
-    search_id: str, search_text: str, spotify_id: str, check_quality_upgrade: bool = False
+    search_id: str, search_text: str, track_id: str, check_quality_upgrade: bool = False
 ) -> bool:
     """
     Check search results once and enqueue download if suitable file is found.
@@ -717,14 +710,14 @@ def process_search_results(
     Args:
         search_id: UUID of the search to retrieve results for
         search_text: Original search query text
-        spotify_id: Spotify track identifier for database tracking
+        track_id: Track identifier for database tracking
         check_quality_upgrade: If True, only download if quality is better than current file
 
     Returns:
         True if search was completed and processed, False if still in progress
     """
     write_log.debug("SLSKD_SEARCH_PROCESS", "Processing search results.",
-                  {"search_id": search_id, "spotify_id": spotify_id, "search_text": search_text,
+                  {"search_id": search_id, "track_id": track_id, "search_text": search_text,
                    "check_quality": check_quality_upgrade})
 
     try:
@@ -734,10 +727,10 @@ def process_search_results(
         # If search UUID not found in slskd (data wiped), reset track status
         if is_complete is None:
             write_log.warn("SLSKD_SEARCH_UUID_LOST", "Search UUID not found in slskd, resetting track.",
-                          {"search_id": search_id, "spotify_id": spotify_id})
+                          {"search_id": search_id, "track_id": track_id})
             # Clear the slskd_search_uuid and reset status to allow re-searching
-            track_db.set_search_uuid(spotify_id, None)
-            track_db.update_track_status(spotify_id, "not_found")
+            track_db.set_search_uuid(track_id, None)
+            track_db.update_track_status(track_id, "not_found")
             return True
 
         # If search is not complete, leave status as 'searching'
@@ -747,14 +740,14 @@ def process_search_results(
         # Search is complete but no results
         if not responses:
             write_log.info("SLSKD_NO_RESULTS", "No search results found.",
-                          {"search_text": search_text, "spotify_id": spotify_id})
+                          {"search_text": search_text, "track_id": track_id})
             # If this was a quality upgrade attempt, revert to completed status
             if check_quality_upgrade:
-                track_db.update_track_status(spotify_id, "completed")
+                track_db.update_track_status(track_id, "completed")
             else:
-                track_db.update_track_status(spotify_id, "not_found")
-            remove_search_from_slskd(search_id, spotify_id)
-            track_db.set_search_uuid(spotify_id, None)
+                track_db.update_track_status(track_id, "not_found")
+            remove_search_from_slskd(search_id, track_id)
+            track_db.set_search_uuid(track_id, None)
             return True
 
         # Select best file according to quality rules
@@ -762,43 +755,43 @@ def process_search_results(
 
         if not best_file:
             write_log.info("SLSKD_NO_SUITABLE_FILE", "No suitable file found in results.",
-                          {"search_text": search_text, "spotify_id": spotify_id})
+                          {"search_text": search_text, "track_id": track_id})
             # If this was a quality upgrade attempt, revert to completed status
             if check_quality_upgrade:
-                track_db.update_track_status(spotify_id, "completed")
+                track_db.update_track_status(track_id, "completed")
             else:
-                track_db.update_track_status(spotify_id, "no_suitable_file")
-            remove_search_from_slskd(search_id, spotify_id)
-            track_db.set_search_uuid(spotify_id, None)
+                track_db.update_track_status(track_id, "no_suitable_file")
+            remove_search_from_slskd(search_id, track_id)
+            track_db.set_search_uuid(track_id, None)
             return True
 
         # If checking for quality upgrade, verify new file is actually better
         if check_quality_upgrade:
-            current_extension = track_db.get_track_extension(spotify_id)
-            current_bitrate = get_track_bitrate(spotify_id)
+            current_extension = track_db.get_track_extension(track_id)
+            current_bitrate = get_track_bitrate(track_id)
 
             if not is_better_quality(best_file, current_extension, current_bitrate):
                 write_log.info("SLSKD_REDOWNLOAD_SKIP", "No better quality file found for upgrade.",
-                              {"spotify_id": spotify_id, "current_extension": current_extension,
+                              {"track_id": track_id, "current_extension": current_extension,
                                "current_bitrate": current_bitrate})
-                track_db.update_track_status(spotify_id, "completed")
-                remove_search_from_slskd(search_id, spotify_id)
-                track_db.set_search_uuid(spotify_id, None)
+                track_db.update_track_status(track_id, "completed")
+                remove_search_from_slskd(search_id, track_id)
+                track_db.set_search_uuid(track_id, None)
                 return True
 
             write_log.info("SLSKD_REDOWNLOAD_PROCESS", "Found better quality file for upgrade.",
-                          {"spotify_id": spotify_id})
+                          {"track_id": track_id})
 
         # Enqueue download (will update status to pending/queued)
-        enqueue_download(best_file, username, spotify_id)
-        remove_search_from_slskd(search_id, spotify_id)
-        track_db.set_search_uuid(spotify_id, None)
+        enqueue_download(best_file, username, track_id)
+        remove_search_from_slskd(search_id, track_id)
+        track_db.set_search_uuid(track_id, None)
         return True
 
     except Exception as e:
         write_log.warn("SLSKD_SEARCH_PROCESS_FAIL", "Failed to process search results.",
-                       {"search_id": search_id, "spotify_id": spotify_id, "error": str(e)})
-        track_db.update_track_status(spotify_id, "failed", failed_reason=str(e))
+                       {"search_id": search_id, "track_id": track_id, "error": str(e)})
+        track_db.update_track_status(track_id, "failed", failed_reason=str(e))
 
 
 def download_tracks_async(tracks: list[tuple[str, str, str]]) -> None:
@@ -812,15 +805,15 @@ def download_tracks_async(tracks: list[tuple[str, str, str]]) -> None:
     To process completed searches, call process_pending_searches() later.
 
     Args:
-        tracks: List of tuples containing (spotify_id, artist, track_name)
+        tracks: List of tuples containing (track_id, artist, track_name)
     """
     if not tracks:
         return
 
     # Initiate all searches without waiting for results
     initiated_count = 0
-    for spotify_id, artist, track_name in tracks:
-        search_info = initiate_track_search(artist, track_name, spotify_id)
+    for track_id, artist, track_name in tracks:
+        search_info = initiate_track_search(artist, track_name, track_id)
         if search_info:
             initiated_count += 1
 
@@ -853,18 +846,18 @@ def process_pending_searches() -> None:
     still_searching_count = 0
 
     for track_row in searching_tracks:
-        spotify_id = track_row[0]  # First column is spotify_id
+        track_id = track_row[0]  # First column is track_id
         track_name = track_row[1]
         artist = track_row[2]
         # Column 6 is local_file_path
         local_file_path = track_row[6] if len(track_row) > 6 else None  # noqa: PLR2004
 
         # Try to get the slskd search UUID for this track
-        slskd_uuid = track_db.get_search_uuid_by_spotify_id(spotify_id)
+        slskd_uuid = track_db.get_search_uuid_by_track_id(track_id)
 
         if not slskd_uuid:
             # No search UUID means search was never properly initiated
-            track_db.update_track_status(spotify_id, "pending")
+            track_db.update_track_status(track_id, "pending")
             continue
 
         # Construct search text to pass to processor
@@ -874,7 +867,7 @@ def process_pending_searches() -> None:
         is_quality_upgrade = bool(local_file_path)
 
         # Process the search results (checks once, no polling)
-        was_completed = process_search_results(slskd_uuid, search_text, spotify_id,
+        was_completed = process_search_results(slskd_uuid, search_text, track_id,
                                                check_quality_upgrade=is_quality_upgrade)
 
         if was_completed:
@@ -887,13 +880,13 @@ def process_pending_searches() -> None:
                       {"processed": processed_count, "still_searching": still_searching_count})
 
 
-def remove_search_from_slskd(search_id: str, spotify_id: str | None = None, max_retries: int = 3) -> bool:
+def remove_search_from_slskd(search_id: str, track_id: str | None = None, max_retries: int = 3) -> bool:
     """
     Remove a completed search from slskd so it no longer appears in status queries.
 
     Args:
         search_id: slskd search UUID to remove
-        spotify_id: Optional Spotify track ID to clear local mapping
+        track_id: Optional Track ID to clear local mapping
         max_retries: Maximum retry attempts for transient failures
 
     Returns:
@@ -908,13 +901,13 @@ def remove_search_from_slskd(search_id: str, spotify_id: str | None = None, max_
             )
 
             if resp.status_code in (200, 204, 404):
-                write_log.info(
+                write_log.debug(
                     "SLSKD_SEARCH_REMOVE_SUCCESS",
                     "Search removed from slskd.",
-                    {"search_id": search_id, "spotify_id": spotify_id}
+                    {"search_id": search_id, "track_id": track_id}
                 )
-                if spotify_id:
-                    track_db.set_search_uuid(spotify_id, None)
+                if track_id:
+                    track_db.set_search_uuid(track_id, None)
                 return True
 
             resp.raise_for_status()
@@ -932,7 +925,7 @@ def remove_search_from_slskd(search_id: str, spotify_id: str | None = None, max_
                 write_log.warn(
                     "SLSKD_SEARCH_REMOVE_FAIL",
                     "Failed to remove search after retries.",
-                    {"search_id": search_id, "spotify_id": spotify_id, "error": str(e)}
+                    {"search_id": search_id, "track_id": track_id, "error": str(e)}
                 )
                 return False
 
@@ -940,7 +933,7 @@ def remove_search_from_slskd(search_id: str, spotify_id: str | None = None, max_
             write_log.warn(
                 "SLSKD_SEARCH_REMOVE_FAIL",
                 "HTTP error removing search.",
-                {"search_id": search_id, "spotify_id": spotify_id,
+                {"search_id": search_id, "track_id": track_id,
                  "status_code": e.response.status_code if e.response else None, "error": str(e)}
             )
             return False
@@ -949,7 +942,7 @@ def remove_search_from_slskd(search_id: str, spotify_id: str | None = None, max_
             write_log.warn(
                 "SLSKD_SEARCH_REMOVE_FAIL",
                 "Failed to remove search.",
-                {"search_id": search_id, "spotify_id": spotify_id, "error": str(e)}
+                {"search_id": search_id, "track_id": track_id, "error": str(e)}
             )
             return False
 
@@ -1098,35 +1091,31 @@ def process_redownload_queue() -> None:
     initiated_count = 0
 
     for track_row in redownload_tracks:
-        spotify_id, track_name, artist = track_row[0], track_row[1], track_row[2]
+        track_id, track_name, artist = track_row[0], track_row[1], track_row[2]
 
         # Create search and update status
         search_text = f"{artist} {track_name}"
         try:
             search_id = create_search(search_text)
-            track_db.set_search_uuid(spotify_id, search_id)
-            track_db.update_track_status(spotify_id, "searching")
+            track_db.set_search_uuid(track_id, search_id)
+            track_db.update_track_status(track_id, "searching")
             initiated_count += 1
         except Exception as e:
             write_log.warn("SLSKD_REDOWNLOAD_SEARCH_FAIL", "Failed to create upgrade search.",
                           {"error": str(e)})
-            track_db.update_track_status(spotify_id, "failed", failed_reason=str(e))
+            track_db.update_track_status(track_id, "failed", failed_reason=str(e))
 
     if initiated_count > 0:
         write_log.info("SLSKD_REDOWNLOAD_SEARCHES_INITIATED", "Initiated upgrade searches.",
                       {"initiated": initiated_count})
 
 
-def get_track_bitrate(spotify_id: str) -> int | None:
+def get_track_bitrate(track_id: str) -> int | None:
     """
-    Helper to get the bitrate for a track using TrackDB, not inline SQL.
+    Helper to get the bitrate for a track using the TrackDB abstraction layer.
     """
     try:
-        cursor = track_db.conn.cursor()
-        cursor.execute("SELECT bitrate FROM tracks WHERE spotify_id = ?", (spotify_id,))
-        result = cursor.fetchone()
-        if result and result[0] is not None:
-            return int(result[0])
+        return track_db.get_track_bitrate(track_id)
     except Exception:
-        pass
-    return None
+        # Preserve existing behavior of returning None on any error
+        return None

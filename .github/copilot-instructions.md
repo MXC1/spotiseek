@@ -1,7 +1,7 @@
 # Spotiseek - AI Coding Guidelines
 
 ## Project Overview
-Spotiseek automates downloading Spotify playlists via Soulseek. It scrapes Spotify for track metadata, searches/downloads through the slskd API, remuxes files to preferred formats (lossless→WAV, lossy→MP3 320kbps), and exports iTunes-compatible XML libraries.
+Spotiseek automates downloading playlists from **Spotify and SoundCloud** via Soulseek. It scrapes playlist metadata, searches/downloads through the slskd API, remuxes files to preferred formats (lossless→WAV, lossy→MP3 320kbps), and exports iTunes-compatible XML libraries.
 
 ## Architecture
 
@@ -9,8 +9,10 @@ Spotiseek automates downloading Spotify playlists via Soulseek. It scrapes Spoti
 ```
 scripts/
 ├── workflow.py          # Main orchestrator - playlist processing, downloads, exports
-├── task_scheduler.py    # Radarr-style task scheduler with intervals and dependencies  
+├── task_scheduler.py    # Radarr-style task scheduler with intervals and dependencies
+├── playlist_scraper.py  # Unified abstraction for multi-platform playlist scraping
 ├── spotify_scraper.py   # Spotify API integration (spotipy client credentials flow)
+├── soundcloud_scraper.py # SoundCloud scraping (no API key required)
 ├── soulseek_client.py   # slskd API client - search, download, quality selection
 ├── database_management.py # Thread-safe singleton SQLite (TrackDB class)
 ├── m3u8_manager.py      # M3U8 playlist files with comment→path replacement
@@ -24,12 +26,34 @@ scripts/
 - **dashboard**: Streamlit UI for monitoring/manual imports
 
 ### Data Flow
-1. CSV playlist URLs (`input_playlists/playlists_{APP_ENV}.csv`) → Spotify API
+1. CSV playlist URLs (`input_playlists/playlists_{APP_ENV}.csv`) → Spotify API or SoundCloud scraper
 2. Track metadata → SQLite database (`output/{APP_ENV}/database_{APP_ENV}.db`)
 3. slskd search/download → `slskd_docker_data/{APP_ENV}/downloads/`
 4. Remux & import → `slskd_docker_data/{APP_ENV}/imported/`
 5. M3U8 playlists → `output/{APP_ENV}/m3u8s/`
 6. iTunes XML → `output/{APP_ENV}/library_{APP_ENV}.xml`
+
+## Supported Platforms
+
+### Spotify
+- Uses official Spotify API via spotipy (client credentials flow)
+- Requires `SPOTIPY_CLIENT_ID` and `SPOTIPY_CLIENT_SECRET` in `.env`
+- Track ID format: Alphanumeric ID (e.g., `5ms8IkagrFWObtzSOahVrx`)
+
+### SoundCloud
+- **No API key required** - scrapes public data
+- Extracts `__sc_hydration` JSON from HTML for initial metadata
+- Dynamically discovers `client_id` from SoundCloud JS bundles for API calls
+- Uses SoundCloud API v2 to fetch full details for stub tracks
+- Track ID format: URL slug (e.g., `lobsta-b/7th-element-vip`)
+
+### Adding Playlists to CSV
+Mix Spotify and SoundCloud URLs in the same CSV file:
+```csv
+https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M
+https://soundcloud.com/courtjester-uk/sets/donk-and-bits
+https://open.spotify.com/playlist/0vvXsWCC9xrXsKd4FyS8kM
+```
 
 ## Environment Configuration
 
@@ -73,8 +97,13 @@ Use `TrackDB` singleton - never create direct SQLite connections:
 ```python
 from scripts.database_management import TrackDB, TrackData
 track_db = TrackDB()  # Returns same instance per db_path
-track_db.add_track(TrackData(spotify_id="...", track_name="...", artist="..."))
+track_db.add_track(TrackData(track_id="...", track_name="...", artist="...", source="spotify"))
 ```
+
+**Database Schema Notes:**
+- `track_id`: Primary key - Spotify alphanumeric ID or SoundCloud URL slug
+- `source`: Platform identifier (`'spotify'` or `'soundcloud'`)
+- All track lookups use `track_id`, not platform-specific IDs
 
 ### Environment Imports Pattern
 All scripts follow this pattern for environment loading:
