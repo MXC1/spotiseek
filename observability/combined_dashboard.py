@@ -463,6 +463,23 @@ def render_failed_reason_section():
     if df is None or df.empty:
         st.info("All tracks have local files!")
         return
+    # Normalize noisy 500 error reasons (collapse per-URL variants)
+    try:
+        def _normalize_failed_reason(reason: str) -> str:
+            if isinstance(reason, str) and reason.startswith("500 Server Error: Internal Server Error"):
+                return "500 Server Error: Internal Server Error"
+            return reason
+
+        df["failed_reason"] = df["failed_reason"].apply(_normalize_failed_reason)
+
+        # Re-aggregate after normalization to combine duplicates
+        df = (
+            df.groupby(["download_status", "failed_reason"], as_index=False)["count"].sum()
+              .sort_values("count", ascending=False)
+        )
+    except Exception:
+        # If normalization fails for any reason, show original df
+        pass
 
     st.dataframe(df, hide_index=True)
 
