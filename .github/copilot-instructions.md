@@ -37,7 +37,7 @@ scripts/
 
 ### Spotify
 - Uses official Spotify API via spotipy (client credentials flow)
-- Requires `SPOTIPY_CLIENT_ID` and `SPOTIPY_CLIENT_SECRET` in `.env`
+- Requires `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` in `.env`
 - Track ID format: Alphanumeric ID (e.g., `5ms8IkagrFWObtzSOahVrx`)
 
 ### SoundCloud

@@ -13,13 +13,14 @@ Task System Features:
 - Real-time status updates
 
 Available Tasks:
-1. scrape_playlists     - Fetch track metadata from Spotify playlists
-2. initiate_searches    - Queue new tracks for Soulseek search
-3. poll_search_results  - Process completed searches from slskd
-4. sync_download_status - Update download status from slskd API
+1. scrape_playlists      - Fetch track metadata from Spotify/SoundCloud playlists
+2. initiate_searches     - Queue new tracks for Soulseek search
+3. poll_search_results   - Process completed searches from slskd
+4. sync_download_status  - Update download status from slskd API
 5. mark_quality_upgrades - Identify non-WAV tracks for upgrade
-6. process_upgrades     - Initiate quality upgrade searches
-7. export_library       - Generate iTunes-compatible XML
+6. process_upgrades      - Initiate quality upgrade searches
+7. export_library        - Generate iTunes-compatible XML
+8. remux_existing_files  - Remux completed files to match format preferences
 
 Usage:
     # Start the scheduler (runs continuously)
@@ -572,11 +573,11 @@ def _register_all_tasks(registry: TaskRegistry) -> None:
         task_sync_download_status,
     )
 
-    # Task 1: Scrape Spotify Playlists
+    # Task 1: Scrape Playlists
     registry.register_task(TaskDefinition(
         name="scrape_playlists",
-        display_name="Scrape Spotify Playlists",
-        description="Fetch track metadata from Spotify playlists defined in CSV",
+        display_name="Scrape Playlists",
+        description="Fetch track metadata from Spotify/SoundCloud playlists defined in CSV",
         function=task_scrape_playlists,
         interval_env_var="TASK_SCRAPE_PLAYLISTS_INTERVAL",
         default_interval_minutes=1440,  # Once per day
