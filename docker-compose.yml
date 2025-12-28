@@ -51,7 +51,7 @@ services:
       - TOKEN=${TOKEN}
       - SLSKD_BASE_URL=http://slskd:5030
       - HOST_BASE_PATH=${HOST_BASE_PATH}
-      - REMUX_ALL_TO_MP3=${REMUX_ALL_TO_MP3}
+      - PREFER_MP3=${PREFER_MP3}
     volumes:
       - ./output:/app/output:rw
       - ./input_playlists:/app/input_playlists:rw

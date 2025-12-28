@@ -70,7 +70,7 @@ setup_logging(log_name_prefix="workflow")
 write_log.debug("ENV_LOAD", "Environment variables loaded.", {"dotenv_path": dotenv_path})
 
 # Remuxing mode configuration from environment
-REMUX_ALL_TO_MP3 = os.getenv("REMUX_ALL_TO_MP3", "false").lower() in ("true", "1", "yes")
+PREFER_MP3 = os.getenv("PREFER_MP3", "false").lower() in ("true", "1", "yes")
 
 # Validate environment configuration
 ENV = os.getenv("APP_ENV")
@@ -556,7 +556,7 @@ def mark_tracks_for_quality_upgrade() -> None:
     )
 
     upgrade_count = 0
-    target_format = "mp3" if REMUX_ALL_TO_MP3 else "wav"
+    target_format = "mp3" if PREFER_MP3 else "wav"
 
     for track_row in completed_tracks:
         track_id = track_row[0]  # First column is track_id
@@ -779,7 +779,7 @@ def _remux_completed_download(track_id: str, local_file_path: str, extension: st
     """
     Remux a completed download to the preferred format based on configuration.
 
-    Remuxing behavior depends on REMUX_ALL_TO_MP3 setting:
+    Remuxing behavior depends on PREFER_MP3 setting:
     - If True: All formats are converted to MP3 320kbps
     - If False: Lossless (FLAC/ALAC/APE) -> WAV, Lossy (OGG/M4A/etc) -> MP3 320kbps
 
@@ -798,7 +798,7 @@ def _remux_completed_download(track_id: str, local_file_path: str, extension: st
     lossy_formats = {'ogg', 'm4a', 'aac', 'wma', 'opus'}
     final_path = local_file_path
 
-    if REMUX_ALL_TO_MP3:
+    if PREFER_MP3:
         if extension in lossless_formats or extension in lossy_formats or extension == 'wav':
             final_path = _remux_lossy_to_mp3(local_file_path, track_id, extension) or local_file_path
     elif extension in lossless_formats:
@@ -1411,7 +1411,7 @@ def _determine_remux_target(
     """
     Determine if a file needs remuxing and what the target format should be.
 
-    Decision logic based on REMUX_ALL_TO_MP3 setting:
+    Decision logic based on PREFER_MP3 setting:
     - If True: All non-MP3 files should be converted to MP3
     - If False: Lossless -> WAV, Lossy -> MP3
 
@@ -1423,7 +1423,7 @@ def _determine_remux_target(
     Returns:
         Tuple of (needs_remux, target_format). target_format is None if no remux needed.
     """
-    if REMUX_ALL_TO_MP3:
+    if PREFER_MP3:
         return current_extension != "mp3", "mp3" if current_extension != "mp3" else None
 
     if current_extension in lossless_formats:
@@ -1512,11 +1512,11 @@ def task_remux_existing_files() -> bool:
 
     This task addresses two scenarios:
     1. Files that failed to remux during download (e.g., program crash)
-    2. Files that need conversion after user changes REMUX_ALL_TO_MP3 setting
+    2. Files that need conversion after user changes PREFER_MP3 setting
 
     The task:
     1. Gets all completed tracks from database
-    2. Determines target format based on REMUX_ALL_TO_MP3:
+    2. Determines target format based on PREFER_MP3:
        - If True: All files should be MP3 320kbps
        - If False: Lossless should be WAV, lossy should be MP3 320kbps
     3. Remuxes files that don't match target format
@@ -1530,7 +1530,7 @@ def task_remux_existing_files() -> bool:
         True if successful, False if failed
     """
     write_log.info("TASK_REMUX_EXISTING_START", "Starting existing files remux task.",
-                  {"remux_all_to_mp3": REMUX_ALL_TO_MP3})
+                  {"prefer_mp3": PREFER_MP3})
 
     try:
         # Get all completed tracks

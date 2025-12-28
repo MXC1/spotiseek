@@ -46,7 +46,7 @@ from scripts.logs_utils import write_log
 load_dotenv()
 
 # Remuxing mode configuration from environment
-REMUX_ALL_TO_MP3 = os.getenv("REMUX_ALL_TO_MP3", "false").lower() in ("true", "1", "yes")
+PREFER_MP3 = os.getenv("PREFER_MP3", "false").lower() in ("true", "1", "yes")
 
 # slskd API configuration
 SLSKD_BASE_URL = os.getenv("SLSKD_BASE_URL", "http://localhost:5030")
@@ -171,12 +171,12 @@ def is_better_quality(file: dict[str, Any], current_extension: str, current_bitr
     """
     Determine if a file has better quality than the current one.
 
-    Quality hierarchy depends on REMUX_ALL_TO_MP3 mode:
+    Quality hierarchy depends on PREFER_MP3 mode:
 
-    Mode 1 (REMUX_ALL_TO_MP3=True): All formats -> MP3 320kbps
+    Mode 1 (PREFER_MP3=True): All formats -> MP3 320kbps
     - No quality upgrades possible (all end up as MP3 320kbps)
 
-    Mode 2 (REMUX_ALL_TO_MP3=False): Lossless -> WAV, Lossy -> MP3 320kbps
+    Mode 2 (PREFER_MP3=False): Lossless -> WAV, Lossy -> MP3 320kbps
     - Lossless formats > Lossy formats
 
     Args:
@@ -194,7 +194,7 @@ def is_better_quality(file: dict[str, Any], current_extension: str, current_bitr
     current_is_lossless = current_extension in lossless_formats
 
     # Mode 1: All files remux to MP3 320kbps - no quality upgrades possible
-    if REMUX_ALL_TO_MP3:
+    if PREFER_MP3:
         return False
 
     # Mode 2: Lossless -> WAV, Lossy -> MP3 320kbps
@@ -216,13 +216,13 @@ def quality_sort_key(item: tuple[dict[str, Any], str]) -> tuple[int, int]:
     """
     Generate a sort key for file quality prioritization.
 
-    Priority depends on REMUX_ALL_TO_MP3 mode:
+    Priority depends on PREFER_MP3 mode:
 
-    Mode 1 (REMUX_ALL_TO_MP3=True): All formats -> MP3 320kbps
+    Mode 1 (PREFER_MP3=True): All formats -> MP3 320kbps
     - Prioritize MP3 files (already in target format)
     - Then other formats by bitrate
 
-    Mode 2 (REMUX_ALL_TO_MP3=False): Lossless -> WAV, Lossy -> MP3 320kbps
+    Mode 2 (PREFER_MP3=False): Lossless -> WAV, Lossy -> MP3 320kbps
     - Prioritize lossless formats (will become WAV)
     - Then lossy formats by bitrate
 
@@ -238,7 +238,7 @@ def quality_sort_key(item: tuple[dict[str, Any], str]) -> tuple[int, int]:
 
     lossless_formats = {'wav', 'flac', 'alac', 'ape'}
 
-    if REMUX_ALL_TO_MP3:
+    if PREFER_MP3:
         # Mode 1: All files remux to MP3 320kbps
         # Prioritize MP3 files (no conversion needed), then by bitrate
         if ext == "mp3":
