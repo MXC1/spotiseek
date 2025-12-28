@@ -793,6 +793,36 @@ def _get_incomplete_tracks_for_playlist_cached(
     return result, int(total)
 
 
+def is_quality_worse_than_mp3_320(file_path: str, extension: str, bitrate: Optional[int]) -> Tuple[bool, str]:
+    """
+    Check if an audio file is worse quality than MP3 320kbps.
+    
+    Args:
+        file_path: Path to the audio file
+        extension: File extension (e.g., 'mp3', 'flac', 'wav')
+        bitrate: Bitrate in kbps (None if unavailable)
+    
+    Returns:
+        Tuple of (is_worse_quality: bool, reason: str)
+    """
+    # Lossless formats are always considered acceptable quality
+    lossless_formats = {'flac', 'wav', 'aiff', 'alac', 'ape'}
+    if extension in lossless_formats:
+        return False, ""
+    
+    # For lossy formats, check bitrate
+    if bitrate is None:
+        return True, "Could not determine bitrate"
+    
+    # MP3 320kbps is the baseline
+    MP3_320_THRESHOLD = 320
+    
+    if bitrate < MP3_320_THRESHOLD:
+        return True, f"{extension.upper()} {bitrate}kbps is lower quality than MP3 320kbps"
+    
+    return False, ""
+
+
 def extract_metadata_from_file(file_path: str) -> Dict[str, Optional[any]]:
     """
     Extract extension and bitrate from an audio file using mutagen.
@@ -1031,6 +1061,40 @@ def render_manual_import_section():
 
         if uploaded_file is not None:
             st.info(f"📁 Selected: `{uploaded_file.name}`")
+            
+            # Check file quality and show warning if worse than MP3 320kbps
+            try:
+                # Save to temp file for metadata extraction
+                import tempfile
+                with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded_file.name).suffix) as tmp_file:
+                    tmp_file.write(uploaded_file.getbuffer())
+                    tmp_path = tmp_file.name
+                
+                # Reset file pointer for later use
+                uploaded_file.seek(0)
+                
+                # Extract metadata
+                temp_metadata = extract_metadata_from_file(tmp_path)
+                
+                # Clean up temp file
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+                
+                # Check quality
+                is_worse, reason = is_quality_worse_than_mp3_320(
+                    tmp_path,
+                    temp_metadata.get('extension', ''),
+                    temp_metadata.get('bitrate')
+                )
+                
+                if is_worse:
+                    st.warning(f"⚠️ **Quality Warning:** {reason}. Consider uploading a higher quality version for better audio fidelity.")
+            
+            except Exception as e:
+                write_log.debug("QUALITY_CHECK_FAIL", "Failed to check file quality.", {"error": str(e)})
+            
             if st.button("Import Track", key=f"import_{track['track_id']}", type="primary"):
                 with st.spinner("Importing..."):
                     success, message = import_track(track["track_id"], uploaded_file, track)
