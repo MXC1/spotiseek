@@ -956,22 +956,6 @@ def import_track(track_id: str, uploaded_file, track_info: dict) -> Tuple[bool, 
                 write_log.debug("IMPORT_M3U8_UPDATED", "Updated M3U8 file.", 
                               {"m3u8_path": m3u8_path, "track_id": track_id})
         
-        # Re-export iTunes XML
-        # Export XML as library_{ENV}.xml under output/{ENV}/
-        xml_path = os.path.join(XML_DIR, f"library_{ENV}.xml")
-        
-        # Calculate music folder URL (handle Docker to host path conversion)
-        downloads_path = DOWNLOADS_ROOT
-        if IS_DOCKER:
-            host_base_path = os.getenv("HOST_BASE_PATH")
-            if host_base_path and downloads_path.startswith("/app/"):
-                downloads_path = downloads_path.replace("/app/", f"{host_base_path}/", 1)
-        
-        music_folder_url = f"file://localhost/{downloads_path.replace(os.sep, '/')}/"
-        export_itunes_xml(xml_path, music_folder_url)
-        
-        write_log.info("IMPORT_XML_EXPORTED", "Re-exported iTunes XML.", {"xml_path": xml_path})
-        
         return True, f"✅ Successfully imported **{track_info['artist']} - {track_info['track_name']}**"
     
     except Exception as e:
@@ -979,6 +963,37 @@ def import_track(track_id: str, uploaded_file, track_info: dict) -> Tuple[bool, 
         write_log.error("IMPORT_TRACK_FAIL", "Failed to import track.", 
                        {"track_id": track_id, "error": str(e)})
         return False, error_msg
+
+
+def export_itunes_xml_for_manual_import() -> Tuple[bool, str]:
+    """
+    Export the iTunes XML library on demand from the manual import tab.
+    """
+    try:
+        xml_path = os.path.join(XML_DIR, f"library_{ENV}.xml")
+
+        downloads_path = DOWNLOADS_ROOT
+        if IS_DOCKER:
+            host_base_path = os.getenv("HOST_BASE_PATH")
+            if host_base_path and downloads_path.startswith("/app/"):
+                downloads_path = downloads_path.replace("/app/", f"{host_base_path}/", 1)
+
+        music_folder_url = f"file://localhost/{downloads_path.replace(os.sep, '/')}/"
+        export_itunes_xml(xml_path, music_folder_url)
+
+        write_log.info(
+            "MANUAL_IMPORT_XML_EXPORTED",
+            "Exported iTunes XML from manual import tab.",
+            {"xml_path": xml_path, "music_folder_url": music_folder_url},
+        )
+        return True, f"iTunes XML exported to {xml_path}"
+    except Exception as e:
+        write_log.error(
+            "MANUAL_IMPORT_XML_EXPORT_FAIL",
+            "Failed to export iTunes XML from manual import tab.",
+            {"error": str(e)},
+        )
+        return False, f"Failed to export iTunes XML: {e}"
 
 
 def render_manual_import_section():
@@ -1128,7 +1143,15 @@ def render_manual_import_section():
     # Footer
     st.markdown("---")
     st.markdown("💡 **Tip:** Files will be saved to `slskd_docker_data/{ENV}/imported/`")
-    st.markdown("🔄 After import, M3U8 playlists and iTunes XML are automatically updated.")
+    st.markdown("🔄 M3U8 playlists update automatically after import. Export iTunes XML manually when needed.")
+
+    if st.button("Export iTunes XML now", key="export_itunes_xml_manual", type="secondary"):
+        with st.spinner("Exporting iTunes XML..."):
+            success, message = export_itunes_xml_for_manual_import()
+        if success:
+            st.success(f"✅ {message}")
+        else:
+            st.error(f"❌ {message}")
 
 
 # ============================================================================
