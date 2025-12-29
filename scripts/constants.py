@@ -13,7 +13,7 @@ Quality Thresholds:
 """
 
 # Lossless audio formats (all will be remuxed to WAV when PREFER_MP3=False)
-LOSSLESS_FORMATS: frozenset[str] = frozenset({"wav", "flac", "alac", "ape"})
+LOSSLESS_FORMATS: frozenset[str] = frozenset({"wav", "flac", "alac", "ape", "aiff"})
 
 # Lossy audio formats (all will be remuxed to MP3 320kbps)
 LOSSY_FORMATS: frozenset[str] = frozenset({"ogg", "m4a", "aac", "wma", "opus"})
