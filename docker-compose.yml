@@ -34,6 +34,8 @@ services:
       - ./slskd_docker_data/${APP_ENV}/imported:/app/slskd_docker_data/${APP_ENV}/imported:rw
       - ./slskd_docker_data/${APP_ENV}/downloads:/app/slskd_docker_data/${APP_ENV}/downloads:ro
       - ./observability:/app/observability:rw
+      - ./docs:/app/docs:ro
+      - ./README.md:/app/README.md:ro
       - ./scripts:/app/scripts:ro
       - ./input_playlists:/app/input_playlists:ro
     depends_on:

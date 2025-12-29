@@ -10,6 +10,7 @@ Spotiseek automates downloading playlists from **Spotify** and **SoundCloud** vi
 - **Library Export**: Generates iTunes-compatible XML and M3U8 playlists
 - **Task Scheduler**: Radarr-style automation with configurable intervals
 - **Web Dashboard**: Streamlit UI for monitoring, manual imports, and task management
+- **Auto Import**: Fuzzy-match local audio files to missing tracks with bulk import
 - **Quality Upgrades**: Automatically identifies and upgrades lower-quality tracks
 
 ---
