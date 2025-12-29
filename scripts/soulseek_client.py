@@ -784,7 +784,6 @@ def process_search_results(
 
         # Enqueue download (will update status to pending/queued)
         enqueue_download(best_file, username, track_id)
-        remove_search_from_slskd(search_id, track_id)
         track_db.set_search_uuid(track_id, None)
         return True
 
@@ -792,6 +791,7 @@ def process_search_results(
         write_log.warn("SLSKD_SEARCH_PROCESS_FAIL", "Failed to process search results.",
                        {"search_id": search_id, "track_id": track_id, "error": str(e)})
         track_db.update_track_status(track_id, "failed", failed_reason=str(e))
+        remove_search_from_slskd(search_id, track_id)
 
 
 def download_tracks_async(tracks: list[tuple[str, str, str]]) -> None:
