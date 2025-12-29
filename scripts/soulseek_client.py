@@ -785,6 +785,7 @@ def process_search_results(
         # Enqueue download (will update status to pending/queued)
         enqueue_download(best_file, username, track_id)
         track_db.set_search_uuid(track_id, None)
+        remove_search_from_slskd(search_id, track_id)
         return True
 
     except Exception as e:
