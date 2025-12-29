@@ -174,7 +174,8 @@ def read_playlists_from_csv(csv_path: str) -> list[str]:
     """
     Read playlist URLs from a CSV file.
 
-    Each row should contain one playlist URL. Empty rows are skipped.
+    Each row should contain one playlist URL. Empty rows and comment lines (starting with #) are skipped.
+    Inline comments after URLs (using #) are also supported.
 
     Args:
         csv_path: Path to CSV file containing playlist URLs
@@ -192,9 +193,22 @@ def read_playlists_from_csv(csv_path: str) -> list[str]:
     """
     write_log.info("PLAYLISTS_READ", "Reading playlists from CSV.", {"csv_path": csv_path})
 
+    playlists = []
     with open(csv_path, newline="", encoding="utf-8") as csvfile:
-        reader = csv.reader(csvfile)
-        playlists = [row[0] for row in reader if row]
+        for line in csvfile:
+            # Strip whitespace
+            line = line.strip()
+            
+            # Skip empty lines or lines starting with #
+            if not line or line.startswith('#'):
+                continue
+            
+            # Remove inline comments (text after #)
+            url = line.split('#')[0].strip()
+            
+            # Add URL if it's not empty after removing comments
+            if url:
+                playlists.append(url)
 
     write_log.info("PLAYLISTS_READ_SUCCESS", "Successfully read playlists.", {"count": len(playlists)})
     return playlists
