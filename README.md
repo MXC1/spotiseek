@@ -25,7 +25,7 @@ Spotiseek automates downloading playlists from **Spotify** and **SoundCloud** vi
 ### 1. Clone and Configure
 
 ```bash
-git clone https://github.com/yourusername/spotiseek.git
+git clone https://github.com/MXC1/spotiseek.git
 cd spotiseek
 cp .env.example .env
 ```
