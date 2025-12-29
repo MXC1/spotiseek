@@ -1273,7 +1273,8 @@ def calculate_match_score(file_info: Dict, track: Dict) -> Dict:
     """
     Calculate fuzzy match score between a source file and a track from the database.
     
-    Uses multiple matching strategies and returns the best score.
+    Uses strict matching strategies that require BOTH title and artist to match independently.
+    Prevents false positives from artist-only or title-only matches.
     
     Args:
         file_info: Source file info dict
@@ -1286,52 +1287,79 @@ def calculate_match_score(file_info: Dict, track: Dict) -> Dict:
     track_artist = track.get('artist', '') or ''
     track_title = track.get('track_name', '') or ''
     
+    # Strict thresholds - BOTH title and artist must independently meet these
+    MIN_TITLE_SCORE = 80  # Increased from 75
+    MIN_ARTIST_SCORE = 70  # Increased from 65
+    
     scores = []
     
-    # Strategy 1: Match title to title, artist to artist (weighted average)
-    if file_title and file_artist:
+    # Strategy 1: Direct title+artist comparison (primary strategy)
+    # Both title and artist are compared independently and must both pass thresholds
+    if file_title and file_artist and track_artist:
         title_score = fuzz.token_sort_ratio(file_title.lower(), track_title.lower())
         artist_score = fuzz.token_sort_ratio(file_artist.lower(), track_artist.lower())
-        combined = (title_score * 0.6) + (artist_score * 0.4)  # Title weighted more
-        scores.append({
-            'score': combined,
-            'match_type': 'artist+title',
-            'title_score': title_score,
-            'artist_score': artist_score
-        })
+        
+        # BOTH must independently meet minimum thresholds
+        if title_score >= MIN_TITLE_SCORE and artist_score >= MIN_ARTIST_SCORE:
+            # Equal weighting - both are equally important
+            combined = (title_score * 0.5) + (artist_score * 0.5)
+            scores.append({
+                'score': combined,
+                'match_type': 'artist+title',
+                'title_score': title_score,
+                'artist_score': artist_score
+            })
     
-    # Strategy 2: Just title match (for files without artist info)
-    if file_title:
-        title_only_score = fuzz.token_sort_ratio(file_title.lower(), track_title.lower())
-        scores.append({
-            'score': title_only_score,
-            'match_type': 'title_only',
-            'title_score': title_only_score,
+    # Strategy 2: Combined string match with independent validation
+    # Must verify BOTH title and artist separately, not just the combined string
+    if file_artist and file_title and track_artist:
+        # Check title and artist independently FIRST
+        title_score = fuzz.token_sort_ratio(file_title.lower(), track_title.lower())
+        artist_score = fuzz.token_sort_ratio(file_artist.lower(), track_artist.lower())
+        
+        # Only proceed if both meet thresholds independently
+        if title_score >= MIN_TITLE_SCORE and artist_score >= MIN_ARTIST_SCORE:
+            file_combined = f"{file_artist} - {file_title}"
+            track_combined = f"{track_artist} - {track_title}"
+            combined_score = fuzz.token_sort_ratio(file_combined.lower(), track_combined.lower())
+            
+            scores.append({
+                'score': combined_score,
+                'match_type': 'combined_string',
+                'title_score': title_score,
+                'artist_score': artist_score
+            })
+    
+    # Strategy 3: Filename matching with independent validation
+    # Verify that filename contains good matches for BOTH artist and title
+    if track_artist and track_title:
+        filename_lower = file_info['filename'].lower()
+        
+        # Check if both artist and title appear in filename independently
+        title_in_filename = fuzz.partial_ratio(track_title.lower(), filename_lower)
+        artist_in_filename = fuzz.partial_ratio(track_artist.lower(), filename_lower)
+        
+        # Both must be present in the filename with good scores
+        if title_in_filename >= MIN_TITLE_SCORE and artist_in_filename >= MIN_ARTIST_SCORE:
+            # Also check overall filename match
+            track_combined = f"{track_artist} - {track_title}"
+            filename_score = fuzz.token_sort_ratio(filename_lower, track_combined.lower())
+            
+            scores.append({
+                'score': filename_score,
+                'match_type': 'filename',
+                'title_score': title_in_filename,
+                'artist_score': artist_in_filename
+            })
+    
+    # If no valid scores, return a very low score to indicate poor match
+    if not scores:
+        return {
+            'score': 0,
+            'match_type': 'no_match',
+            'title_score': 0,
             'artist_score': 0
-        })
-    
-    # Strategy 3: Combined string match ("Artist - Title" vs "Artist - Title")
-    file_combined = f"{file_artist} - {file_title}".strip(' -')
-    track_combined = f"{track_artist} - {track_title}"
-    combined_score = fuzz.token_sort_ratio(file_combined.lower(), track_combined.lower())
-    scores.append({
-        'score': combined_score,
-        'match_type': 'combined_string',
-        'title_score': 0,
-        'artist_score': 0
-    })
-    
-    # Strategy 4: Filename against combined track info
-    filename_score = fuzz.token_sort_ratio(
-        file_info['filename'].lower(), 
-        track_combined.lower()
-    )
-    scores.append({
-        'score': filename_score,
-        'match_type': 'filename',
-        'title_score': 0,
-        'artist_score': 0
-    })
+        }
     
     # Return best score
     best = max(scores, key=lambda x: x['score'])
@@ -1639,7 +1667,7 @@ def render_auto_import_section():
         # Filter controls
         col1, col2, col3 = st.columns([1, 1, 2])
         with col1:
-            min_score = st.slider("Minimum score:", 0, 100, 0, key="auto_min_score")
+            min_score = st.slider("Minimum score:", 0, 100, 70, key="auto_min_score")
         with col2:
             page_size = st.selectbox("Matches per page:", [25, 50, 100, 200], index=0, key="auto_page_size")
         with col3:
@@ -1687,12 +1715,12 @@ def render_auto_import_section():
         st.markdown("---")
         
         # Header row
-        header_cols = st.columns([0.5, 0.8, 2, 2, 2, 1.2, 1])
+        header_cols = st.columns([0.5, 0.8, 2.5, 2.5, 2, 1.2, 1])
         header_cols[0].markdown("**Select**")
         header_cols[1].markdown("**Score**")
-        header_cols[2].markdown("**Track (DB)**")
-        header_cols[3].markdown("**Artist (DB)**")
-        header_cols[4].markdown("**Source File**")
+        header_cols[2].markdown("**Track Name - Artist Name (DB)**")
+        header_cols[3].markdown("**Track Name - Artist Name (Candidate)**")
+        header_cols[4].markdown("**Filename (Candidate)**")
         header_cols[5].markdown("**Quality**")
         header_cols[6].markdown("**Match Type**")
         
@@ -1700,7 +1728,7 @@ def render_auto_import_section():
             match_key = f"{match['track_id']}::{match['file_path']}"
             idx = start_idx + i
             
-            cols = st.columns([0.5, 0.8, 2, 2, 2, 1.2, 1])
+            cols = st.columns([0.5, 0.8, 2.5, 2.5, 2, 1.2, 1])
             
             # Checkbox
             is_selected = cols[0].checkbox(
@@ -1720,12 +1748,18 @@ def render_auto_import_section():
             score_color = get_score_color(match['score'])
             cols[1].markdown(f"{score_color} **{match['score']:.0f}%**")
             
-            # Track info from DB
-            cols[2].markdown(match['track_name'][:40] + ('...' if len(match['track_name']) > 40 else ''))
-            cols[3].markdown(match['track_artist'][:30] + ('...' if len(match['track_artist']) > 30 else ''))
+            # Track Name - Artist Name (DB) - combined
+            db_combined = f"{match['track_name']} - {match['track_artist']}"
+            cols[2].markdown(db_combined)
             
-            # Source file info
-            cols[4].markdown(match['file_name'][:40] + ('...' if len(match['file_name']) > 40 else ''))
+            # Track Name - Artist Name (Candidate) - combined
+            file_artist = match.get('file_artist') or ''
+            file_title = match.get('file_title') or ''
+            candidate_combined = f"{file_title} - {file_artist}" if file_artist else file_title
+            cols[3].markdown(candidate_combined)
+            
+            # Filename (Candidate) - no truncation, use word wrap
+            cols[4].markdown(f"`{match['file_name']}`")
             
             # Quality info with warning indicator
             bitrate = match.get('file_bitrate')
