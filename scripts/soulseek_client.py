@@ -71,6 +71,29 @@ track_db = TrackDB()
 
 # Health Check Functions
 
+def wake_slskd() -> None:
+    """
+    Wake up slskd search processing by hitting critical endpoints.
+
+    When slskd starts, searches may not process until the web UI establishes
+    certain connections. This function replicates those initialization calls
+    to ensure searches run without requiring the web UI to be open.
+
+    This is called after wait_for_slskd_ready() confirms connectivity.
+    """
+    try:
+        # Hit the options endpoint (web UI calls this on load)
+        requests.get(
+            f"{SLSKD_URL}/options",
+            headers={"X-API-Key": TOKEN} if TOKEN else {},
+            timeout=5
+        )
+        write_log.info("SLSKD_WAKE", "Sent wake-up call to slskd options endpoint.")
+    except Exception as e:
+        write_log.warn("SLSKD_WAKE_FAIL", "Failed to wake slskd (non-critical).",
+                      {"error": str(e)})
+
+
 def wait_for_slskd_ready(max_wait_seconds: int = 60, poll_interval: int = 2) -> bool:
     """
     Wait for slskd to be connected and authenticated before proceeding.
@@ -78,6 +101,8 @@ def wait_for_slskd_ready(max_wait_seconds: int = 60, poll_interval: int = 2) -> 
     This function polls the slskd server connection state endpoint until it reports
     that the server is connected and logged in. This prevents connection errors when
     the workflow starts before slskd is fully initialized.
+
+    After slskd is ready, calls wake_slskd() to ensure search processing starts.
 
     Args:
         max_wait_seconds: Maximum time to wait for slskd (default: 60 seconds)
@@ -117,6 +142,10 @@ def wait_for_slskd_ready(max_wait_seconds: int = 60, poll_interval: int = 2) -> 
                                      {"attempts": attempts,
                                       "state": state,
                                       "wait_time": round(time.time() - start_time, 2)})
+
+                        # Wake up slskd to ensure searches process
+                        wake_slskd()
+
                         return True
 
                 except (ValueError, KeyError):
