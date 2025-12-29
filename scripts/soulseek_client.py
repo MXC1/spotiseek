@@ -1,5 +1,4 @@
-"""
-Soulseek download client module for interfacing with slskd API.
+"""Soulseek download client module for interfacing with slskd API.
 
 This module handles searching for tracks on the Soulseek network via the slskd
 daemon API and managing download requests. It integrates with the database to
@@ -25,21 +24,23 @@ Note: All downloads are automatically remuxed to preferred formats:
 
 Public API:
 - download_tracks_async(): Batch async downloads (recommended for multiple tracks)
-- download_track(): Single track download (legacy, uses async internally)
 - initiate_track_search(): Start search without waiting (for custom workflows)
-- process_search_results(): Complete a search initiated earlier
+- process_pending_searches(): Process completed searches and initiate downloads
 - query_download_status(): Poll slskd for active download states
 - process_redownload_queue(): Handle quality upgrade requests (async)
+- wait_for_slskd_ready(): Wait for slskd service to be available
 """
 
 import os
 import time
 import uuid
+from functools import wraps
 from typing import Any
 
 import requests
 from dotenv import load_dotenv
 
+from scripts.constants import LOSSLESS_FORMATS, MIN_BITRATE_KBPS, SUPPORTED_AUDIO_FORMATS
 from scripts.database_management import TrackDB
 from scripts.logs_utils import write_log
 
@@ -62,18 +63,102 @@ HTTP_OK = 200
 HTTP_NOT_FOUND = 404
 HTTP_SERVER_ERROR = 500
 
-# Quality thresholds
-MIN_BITRATE_KBPS = 320
-
 # Database instance
 track_db = TrackDB()
+
+
+# Retry Decorator
+
+def with_retry(
+    max_retries: int = 3,
+    retry_on: tuple[type[Exception], ...] = (requests.Timeout, requests.exceptions.ConnectionError),
+    retry_on_status: tuple[int, ...] = (),
+    backoff_base: int = 2,
+    operation_name: str = "operation",
+):
+    """Decorator that adds retry logic with exponential backoff to a function.
+
+    The decorated function should raise exceptions on failure. For HTTP operations,
+    the function can raise requests.HTTPError which will be checked against retry_on_status.
+
+    Args:
+        max_retries: Maximum number of retry attempts (default: 3)
+        retry_on: Tuple of exception types that trigger a retry
+        retry_on_status: HTTP status codes that trigger a retry (for HTTPError)
+        backoff_base: Base for exponential backoff calculation (default: 2)
+        operation_name: Name used in log messages for this operation
+
+    Returns:
+        Decorated function with retry logic
+
+    Example:
+        @with_retry(max_retries=3, retry_on_status=(500, 502, 503))
+        def fetch_data():
+            resp = requests.get(url)
+            resp.raise_for_status()
+            return resp.json()
+
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_error = None
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except retry_on as e:
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        wait_time = backoff_base ** attempt
+                        write_log.warn(
+                            f"{operation_name.upper()}_RETRY",
+                            f"{operation_name} failed, retrying.",
+                            {"attempt": attempt + 1, "max_retries": max_retries,
+                             "wait_time": wait_time, "error": str(e)},
+                        )
+                        time.sleep(wait_time)
+                    else:
+                        write_log.warn(
+                            f"{operation_name.upper()}_FAIL",
+                            f"{operation_name} failed after all retries.",
+                            {"error": str(e), "attempts": max_retries},
+                        )
+                        raise
+                except requests.HTTPError as e:
+                    last_error = e
+                    status_code = e.response.status_code if e.response is not None else None
+                    if status_code in retry_on_status and attempt < max_retries - 1:
+                        wait_time = backoff_base ** attempt
+                        write_log.warn(
+                            f"{operation_name.upper()}_RETRY",
+                            f"{operation_name} got retryable HTTP status.",
+                            {"attempt": attempt + 1, "status_code": status_code,
+                             "wait_time": wait_time},
+                        )
+                        time.sleep(wait_time)
+                    else:
+                        raise
+            # Should not reach here, but just in case
+            if last_error:
+                raise last_error
+        return wrapper
+    return decorator
+
+
+# Keywords indicating non-original versions (remix, edit, etc.)
+# Used to filter search results unless explicitly searching for alternatives
+EXCLUDED_VERSION_KEYWORDS: tuple[str, ...] = (
+    "remix", "edit", "bootleg", "mashup", "mix", "acapella",
+    "instrumental", "sped up", "slowed", "cover", "karaoke",
+    "tribute", "demo", "live", "acoustic", "version", "remaster",
+    "flip", "extended", "rework", "re-edit", "dub", "radio",
+)
 
 
 # Health Check Functions
 
 def wake_slskd() -> None:
-    """
-    Wake up slskd search processing by hitting critical endpoints.
+    """Wake up slskd search processing by hitting critical endpoints.
 
     When slskd starts, searches may not process until the web UI establishes
     certain connections. This function replicates those initialization calls
@@ -86,7 +171,7 @@ def wake_slskd() -> None:
         requests.get(
             f"{SLSKD_URL}/options",
             headers={"X-API-Key": TOKEN} if TOKEN else {},
-            timeout=5
+            timeout=5,
         )
         write_log.info("SLSKD_WAKE", "Sent wake-up call to slskd options endpoint.")
     except Exception as e:
@@ -95,8 +180,7 @@ def wake_slskd() -> None:
 
 
 def wait_for_slskd_ready(max_wait_seconds: int = 60, poll_interval: int = 2) -> bool:
-    """
-    Wait for slskd to be connected and authenticated before proceeding.
+    """Wait for slskd to be connected and authenticated before proceeding.
 
     This function polls the slskd server connection state endpoint until it reports
     that the server is connected and logged in. This prevents connection errors when
@@ -110,6 +194,7 @@ def wait_for_slskd_ready(max_wait_seconds: int = 60, poll_interval: int = 2) -> 
 
     Returns:
         True if slskd is ready, False if timeout reached
+
     """
     write_log.info("SLSKD_HEALTH_CHECK", "Waiting for slskd to be ready.",
                   {"max_wait": max_wait_seconds, "poll_interval": poll_interval})
@@ -125,7 +210,7 @@ def wait_for_slskd_ready(max_wait_seconds: int = 60, poll_interval: int = 2) -> 
             resp = requests.get(
                 f"{SLSKD_URL}/server",
                 headers={"X-API-Key": TOKEN} if TOKEN else {},
-                timeout=5
+                timeout=5,
             )
 
             if resp.status_code == HTTP_OK:
@@ -166,8 +251,7 @@ def wait_for_slskd_ready(max_wait_seconds: int = 60, poll_interval: int = 2) -> 
 # Quality Assessment Functions
 
 def extract_file_quality(file: dict[str, Any]) -> tuple[str, int | None]:
-    """
-    Extract file extension and bitrate from slskd file object.
+    """Extract file extension and bitrate from slskd file object.
 
     Args:
         file: File object from slskd API response
@@ -178,8 +262,9 @@ def extract_file_quality(file: dict[str, Any]) -> tuple[str, int | None]:
     Example:
         >>> extract_file_quality({"extension": "MP3", "bitRate": 320})
         ("mp3", 320)
+
     """
-    ext = (file.get("extension") or '').lower()
+    ext = (file.get("extension") or "").lower()
     filename = file.get("filename", "")
 
     # Fallback: extract extension from filename if not in metadata
@@ -197,8 +282,7 @@ def extract_file_quality(file: dict[str, Any]) -> tuple[str, int | None]:
 
 
 def is_better_quality(file: dict[str, Any], current_extension: str, current_bitrate: int | None) -> bool:
-    """
-    Determine if a file has better quality than the current one.
+    """Determine if a file has better quality than the current one.
 
     Quality hierarchy depends on PREFER_MP3 mode:
 
@@ -215,19 +299,19 @@ def is_better_quality(file: dict[str, Any], current_extension: str, current_bitr
 
     Returns:
         True if the new file is higher quality
+
     """
     ext, bitrate = extract_file_quality(file)
 
-    # Define format categories (matching workflow.py remuxing logic)
-    lossless_formats = {'wav', 'flac', 'alac', 'ape'}
-    current_is_lossless = current_extension in lossless_formats
+    # Use shared constants for format categories
+    current_is_lossless = current_extension in LOSSLESS_FORMATS
 
     # Mode 1: All files remux to MP3 320kbps - no quality upgrades possible
     if PREFER_MP3:
         return False
 
     # Mode 2: Lossless -> WAV, Lossy -> MP3 320kbps
-    if ext in lossless_formats:
+    if ext in LOSSLESS_FORMATS:
         return not current_is_lossless
 
     if current_is_lossless:
@@ -236,14 +320,13 @@ def is_better_quality(file: dict[str, Any], current_extension: str, current_bitr
     if ext == "mp3":
         if current_extension == "mp3" and bitrate and current_bitrate:
             return bitrate > current_bitrate
-        return bool(bitrate and bitrate >= MIN_BITRATE_KBPS and current_extension not in ("mp3", *lossless_formats))
+        return bool(bitrate and bitrate >= MIN_BITRATE_KBPS and current_extension not in ("mp3", *LOSSLESS_FORMATS))
 
     return False
 
 
 def quality_sort_key(item: tuple[dict[str, Any], str]) -> tuple[int, int]:
-    """
-    Generate a sort key for file quality prioritization.
+    """Generate a sort key for file quality prioritization.
 
     Priority depends on PREFER_MP3 mode:
 
@@ -261,11 +344,10 @@ def quality_sort_key(item: tuple[dict[str, Any], str]) -> tuple[int, int]:
     Returns:
         Tuple of (format_priority, bitrate) for sorting.
         Higher values = better quality.
+
     """
     file, _ = item
     ext, bitrate = extract_file_quality(file)
-
-    lossless_formats = {'wav', 'flac', 'alac', 'ape'}
 
     if PREFER_MP3:
         # Mode 1: All files remux to MP3 320kbps
@@ -274,25 +356,23 @@ def quality_sort_key(item: tuple[dict[str, Any], str]) -> tuple[int, int]:
             return (2, bitrate if bitrate is not None else 0)
         # Lossless and other lossy formats need conversion
         return (1, bitrate if bitrate is not None else 0)
-    else:
-        # Mode 2: Lossless -> WAV, Lossy -> MP3 320kbps
-        # Lossless formats: WAV, FLAC, ALAC, APE (all will become WAV, priority 3)
-        if ext in lossless_formats:
-            return (3, 0)
+    # Mode 2: Lossless -> WAV, Lossy -> MP3 320kbps
+    # Lossless formats: WAV, FLAC, ALAC, APE (all will become WAV, priority 3)
+    if ext in LOSSLESS_FORMATS:
+        return (3, 0)
 
-        # Lossy formats prioritized by bitrate (all will become MP3 320kbps, priority 1)
-        if ext == "mp3":
-            return (1, bitrate if bitrate is not None else 0)
+    # Lossy formats prioritized by bitrate (all will become MP3 320kbps, priority 1)
+    if ext == "mp3":
+        return (1, bitrate if bitrate is not None else 0)
 
-        # Other lossy formats (OGG, M4A, AAC, WMA, OPUS) - lower priority
-        return (0, bitrate if bitrate is not None else 0)
+    # Other lossy formats (OGG, M4A, AAC, WMA, OPUS) - lower priority
+    return (0, bitrate if bitrate is not None else 0)
 
 
 # File Selection Functions
 
 def is_audio_file(file: dict[str, Any]) -> bool:
-    """
-    Check if a file is a supported audio format.
+    """Check if a file is a supported audio format.
 
     Supported formats: WAV, FLAC, MP3, OGG, M4A, AAC, ALAC, APE, WMA, OPUS
 
@@ -301,23 +381,14 @@ def is_audio_file(file: dict[str, Any]) -> bool:
 
     Returns:
         True if file is a supported audio format
+
     """
     ext, _ = extract_file_quality(file)
-
-    # List of supported audio extensions
-    supported_audio_formats = {
-        'wav', 'flac', 'mp3', 'ogg', 'm4a', 'aac',
-        'alac', 'ape', 'wma', 'opus'
-    }
-
-    is_supported = ext in supported_audio_formats
-
-    return is_supported
+    return ext in SUPPORTED_AUDIO_FORMATS
 
 
 def meets_bitrate_requirements(file: dict[str, Any]) -> bool:
-    """
-    Check if a file meets minimum bitrate requirements.
+    """Check if a file meets minimum bitrate requirements.
 
     Requirements:
     - WAV: Always accepted (lossless)
@@ -330,32 +401,24 @@ def meets_bitrate_requirements(file: dict[str, Any]) -> bool:
 
     Returns:
         True if file meets bitrate requirements
+
     """
     ext, bitrate = extract_file_quality(file)
 
     # Lossless formats always meet requirements
-    lossless_formats = {'wav', 'flac', 'alac', 'ape'}
-    if ext in lossless_formats:
+    if ext in LOSSLESS_FORMATS:
         return True
 
-    # For lossy formats, require 320kbps minimum
-    minimum_bitrate = 320
-
+    # For lossy formats, require minimum bitrate
     if bitrate is None:
         # If bitrate is unknown, reject the file
         return False
 
-    meets_requirement = bitrate >= minimum_bitrate
-
-    if not meets_requirement:
-        file.get('filename', '')
-
-    return meets_requirement
+    return bitrate >= MIN_BITRATE_KBPS
 
 
 def is_original_version(filename: str, allow_alternatives: bool) -> bool:
-    """
-    Determine if a filename represents an original version (not remix/edit/etc).
+    """Determine if a filename represents an original version (not remix/edit/etc).
 
     Args:
         filename: Name of the file to check
@@ -363,24 +426,17 @@ def is_original_version(filename: str, allow_alternatives: bool) -> bool:
 
     Returns:
         True if file appears to be original version
+
     """
     if allow_alternatives:
         return True
 
-    excluded_keywords = [
-        'remix', 'edit', 'bootleg', 'mashup', 'mix', 'acapella',
-        'instrumental', 'sped up', 'slowed', 'cover', 'karaoke',
-        'tribute', 'demo', 'live', 'acoustic', 'version', 'remaster',
-        'flip', 'extended', 'rework', 're-edit', 'dub', 'radio'
-    ]
-
     filename_lower = filename.lower()
-    return all(keyword not in filename_lower for keyword in excluded_keywords)
+    return all(keyword not in filename_lower for keyword in EXCLUDED_VERSION_KEYWORDS)
 
 
 def select_best_file(responses: list[dict[str, Any]], search_text: str) -> tuple[dict[str, Any] | None, str | None]:
-    """
-    Select the best quality file from search responses.
+    """Select the best quality file from search responses.
 
     Selection process:
     1. Filter out blacklisted files
@@ -396,16 +452,11 @@ def select_best_file(responses: list[dict[str, Any]], search_text: str) -> tuple
 
     Returns:
         Tuple of (best_file_object, username) or (None, None) if no suitable files
+
     """
     # Determine if user is explicitly searching for alternatives
-    excluded_keywords = [
-        'remix', 'edit', 'bootleg', 'mashup', 'mix', 'acapella',
-        'instrumental', 'sped up', 'slowed', 'cover', 'karaoke',
-        'tribute', 'demo', 'live', 'acoustic', 'version', 'remaster',
-        'flip', 'extended', 'rework', 're-edit', 'dub', 'radio'
-    ]
     search_text_lower = search_text.lower()
-    allow_alternatives = any(keyword in search_text_lower for keyword in excluded_keywords)
+    allow_alternatives = any(keyword in search_text_lower for keyword in EXCLUDED_VERSION_KEYWORDS)
 
     write_log.debug("SLSKD_FILE_SELECTION_START", "Starting file selection process.",
                    {"response_count": len(responses), "allow_alternatives": allow_alternatives})
@@ -465,8 +516,7 @@ def select_best_file(responses: list[dict[str, Any]], search_text: str) -> tuple
 # API Communication Functions
 
 def create_search(search_text: str) -> str:
-    """
-    Initiate a search on the Soulseek network via slskd API.
+    """Initiate a search on the Soulseek network via slskd API.
 
     Args:
         search_text: Query string to search for (e.g., "Artist Track Name")
@@ -476,6 +526,7 @@ def create_search(search_text: str) -> str:
 
     Raises:
         requests.HTTPError: If the API request fails
+
     """
     search_id = str(uuid.uuid4())
 
@@ -484,7 +535,7 @@ def create_search(search_text: str) -> str:
             f"{SLSKD_URL}/searches",
             json={"id": search_id, "searchText": search_text},
             headers={"X-API-Key": TOKEN},
-            timeout=10
+            timeout=10,
         )
         write_log.debug("SLSKD_SEARCH_RESPONSE", "Search POST response.",
                        {"status_code": resp.status_code, "response_preview": resp.text[:200]})
@@ -498,8 +549,7 @@ def create_search(search_text: str) -> str:
 
 
 def check_search_status(search_id: str) -> tuple[bool, list[dict[str, Any]]]:
-    """
-    Check if a search is complete and retrieve its responses (single check, no polling).
+    """Check if a search is complete and retrieve its responses (single check, no polling).
 
     Args:
         search_id: UUID of the search to check
@@ -509,14 +559,14 @@ def check_search_status(search_id: str) -> tuple[bool, list[dict[str, Any]]]:
         - is_complete: True if search finished (with or without results)
         - responses: List of response objects if any found, empty list otherwise
         - is_complete: None if search UUID not found in slskd (e.g., data wiped)
-    """
 
+    """
     try:
         # Get search responses
         resp = requests.get(
             f"{SLSKD_URL}/searches/{search_id}/responses",
             headers={"X-API-Key": TOKEN},
-            timeout=10
+            timeout=10,
         )
 
         # If search UUID not found (HTTP_NOT_FOUND), return None to indicate missing search
@@ -534,7 +584,7 @@ def check_search_status(search_id: str) -> tuple[bool, list[dict[str, Any]]]:
             status_resp = requests.get(
                 f"{SLSKD_URL}/searches/{search_id}",
                 headers={"X-API-Key": TOKEN},
-                timeout=10
+                timeout=10,
             )
 
             # If search UUID not found (HTTP_NOT_FOUND), return None to indicate missing search
@@ -564,14 +614,14 @@ def check_search_status(search_id: str) -> tuple[bool, list[dict[str, Any]]]:
         return (False, [])
 
 def _make_download_request(
-    url: str, payload: list[dict], attempt: int  # noqa: ARG001
+    url: str, payload: list[dict], attempt: int,  # noqa: ARG001
 ) -> dict[str, Any]:
     """Make the download request to slskd API."""
     resp = requests.post(
         url,
         json=payload,
         headers={"X-API-Key": TOKEN},
-        timeout=30
+        timeout=30,
     )
     resp.raise_for_status()
     return resp.json()
@@ -591,10 +641,9 @@ def _validate_download_response(download_response: dict[str, Any]) -> str:
 
 
 def enqueue_download(
-    file: dict[str, Any], username: str, track_id: str, max_retries: int = 3
+    file: dict[str, Any], username: str, track_id: str, max_retries: int = 3,
 ) -> dict[str, Any]:
-    """
-    Queue a file for download from a Soulseek user and track the mapping.
+    """Queue a file for download from a Soulseek user and track the mapping.
 
     Implements retry logic with exponential backoff for handling temporary
     slskd server issues (500 errors, timeouts).
@@ -611,6 +660,7 @@ def enqueue_download(
     Raises:
         requests.HTTPError: If the API request fails after all retries
         ValueError: If response doesn't contain expected data
+
     """
     filename = file.get("filename")
     size = file.get("size")
@@ -684,8 +734,7 @@ def enqueue_download(
 # Main Download Functions
 
 def initiate_track_search(artist: str, track: str, track_id: str) -> tuple[str, str, str] | None:
-    """
-    Initiate an asynchronous search for a track on the Soulseek network.
+    """Initiate an asynchronous search for a track on the Soulseek network.
 
     This function only creates the search without waiting for results.
     Call process_search_results() later to complete the download process.
@@ -698,6 +747,7 @@ def initiate_track_search(artist: str, track: str, track_id: str) -> tuple[str, 
     Returns:
         Tuple of (search_id, search_text, track_id) if search was initiated,
         None if track should be skipped
+
     """
     # Check current status
     current_status = track_db.get_track_status(track_id)
@@ -728,10 +778,9 @@ def initiate_track_search(artist: str, track: str, track_id: str) -> tuple[str, 
 
 
 def process_search_results(
-    search_id: str, search_text: str, track_id: str, check_quality_upgrade: bool = False
+    search_id: str, search_text: str, track_id: str, check_quality_upgrade: bool = False,
 ) -> bool:
-    """
-    Check search results once and enqueue download if suitable file is found.
+    """Check search results once and enqueue download if suitable file is found.
 
     This function does NOT poll - it checks the search status exactly once.
     For fire-and-forget workflow, call this after searches have had time to complete.
@@ -744,6 +793,7 @@ def process_search_results(
 
     Returns:
         True if search was completed and processed, False if still in progress
+
     """
     write_log.debug("SLSKD_SEARCH_PROCESS", "Processing search results.",
                   {"search_id": search_id, "track_id": track_id, "search_text": search_text,
@@ -825,8 +875,7 @@ def process_search_results(
 
 
 def download_tracks_async(tracks: list[tuple[str, str, str]]) -> None:
-    """
-    Initiate searches for multiple tracks without waiting for results.
+    """Initiate searches for multiple tracks without waiting for results.
 
     This function uses a fire-and-forget approach: it creates all search requests
     in slskd but does NOT wait for them to complete. Searches will continue running
@@ -836,6 +885,7 @@ def download_tracks_async(tracks: list[tuple[str, str, str]]) -> None:
 
     Args:
         tracks: List of tuples containing (track_id, artist, track_name)
+
     """
     if not tracks:
         return
@@ -853,8 +903,7 @@ def download_tracks_async(tracks: list[tuple[str, str, str]]) -> None:
 
 
 def process_pending_searches() -> None:
-    """
-    Process all tracks with 'searching' status by checking their search results.
+    """Process all tracks with 'searching' status by checking their search results.
 
     This function should be called periodically or at workflow start to process
     searches that were initiated but not yet completed. It's restart-safe:
@@ -911,8 +960,7 @@ def process_pending_searches() -> None:
 
 
 def remove_search_from_slskd(search_id: str, track_id: str | None = None, max_retries: int = 3) -> bool:
-    """
-    Remove a completed search from slskd so it no longer appears in status queries.
+    """Remove a completed search from slskd so it no longer appears in status queries.
 
     Args:
         search_id: slskd search UUID to remove
@@ -921,20 +969,21 @@ def remove_search_from_slskd(search_id: str, track_id: str | None = None, max_re
 
     Returns:
         True if the search was removed (or already absent), False otherwise
+
     """
     for attempt in range(max_retries):
         try:
             resp = requests.delete(
                 f"{SLSKD_URL}/searches/{search_id}",
                 headers={"X-API-Key": TOKEN},
-                timeout=10
+                timeout=10,
             )
 
             if resp.status_code in (200, 204, 404):
                 write_log.debug(
                     "SLSKD_SEARCH_REMOVE_SUCCESS",
                     "Search removed from slskd.",
-                    {"search_id": search_id, "track_id": track_id}
+                    {"search_id": search_id, "track_id": track_id},
                 )
                 if track_id:
                     track_db.set_search_uuid(track_id, None)
@@ -948,14 +997,14 @@ def remove_search_from_slskd(search_id: str, track_id: str | None = None, max_re
                 write_log.warn(
                     "SLSKD_SEARCH_REMOVE_RETRY",
                     "Network error removing search, retrying.",
-                    {"attempt": attempt + 1, "max_retries": max_retries, "wait_time": wait_time, "error": str(e)}
+                    {"attempt": attempt + 1, "max_retries": max_retries, "wait_time": wait_time, "error": str(e)},
                 )
                 time.sleep(wait_time)
             else:
                 write_log.warn(
                     "SLSKD_SEARCH_REMOVE_FAIL",
                     "Failed to remove search after retries.",
-                    {"search_id": search_id, "track_id": track_id, "error": str(e)}
+                    {"search_id": search_id, "track_id": track_id, "error": str(e)},
                 )
                 return False
 
@@ -964,7 +1013,7 @@ def remove_search_from_slskd(search_id: str, track_id: str | None = None, max_re
                 "SLSKD_SEARCH_REMOVE_FAIL",
                 "HTTP error removing search.",
                 {"search_id": search_id, "track_id": track_id,
-                 "status_code": e.response.status_code if e.response else None, "error": str(e)}
+                 "status_code": e.response.status_code if e.response else None, "error": str(e)},
             )
             return False
 
@@ -972,7 +1021,7 @@ def remove_search_from_slskd(search_id: str, track_id: str | None = None, max_re
             write_log.warn(
                 "SLSKD_SEARCH_REMOVE_FAIL",
                 "Failed to remove search.",
-                {"search_id": search_id, "track_id": track_id, "error": str(e)}
+                {"search_id": search_id, "track_id": track_id, "error": str(e)},
             )
             return False
 
@@ -980,8 +1029,7 @@ def remove_search_from_slskd(search_id: str, track_id: str | None = None, max_re
 
 
 def remove_download_from_slskd(username: str, slskd_uuid: str, max_retries: int = 3) -> bool:
-    """
-    Remove a download from slskd to prevent it from appearing in future status queries.
+    """Remove a download from slskd to prevent it from appearing in future status queries.
 
     This is useful for cleaning up failed downloads so they don't produce duplicate
     log entries on subsequent workflow runs.
@@ -993,15 +1041,15 @@ def remove_download_from_slskd(username: str, slskd_uuid: str, max_retries: int 
 
     Returns:
         True if the download was successfully removed, False otherwise
-    """
 
+    """
     for attempt in range(max_retries):
         try:
             url = f"{SLSKD_URL}/transfers/downloads/{username}/{slskd_uuid}?remove=true"
             resp = requests.delete(
                 url,
                 headers={"X-API-Key": TOKEN},
-                timeout=10
+                timeout=10,
             )
 
             if resp.status_code in (200, 204, 404):
@@ -1041,68 +1089,42 @@ def remove_download_from_slskd(username: str, slskd_uuid: str, max_retries: int 
     return False
 
 
-def query_download_status(max_retries: int = 3) -> list[dict[str, Any]]:
-    """
-    Query the status of all active downloads from slskd API.
+def _fetch_download_status() -> list[dict[str, Any]]:
+    """Internal helper to fetch download status from slskd API."""
+    resp = requests.get(
+        f"{SLSKD_URL}/transfers/downloads",
+        headers={"X-API-Key": TOKEN},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()
 
-    Args:
-        max_retries: Maximum number of retry attempts (default: 3)
+
+def query_download_status() -> list[dict[str, Any]]:
+    """Query the status of all active downloads from slskd API.
+
+    Implements retry logic with exponential backoff for transient failures.
 
     Returns:
         List of download status objects containing directories, files, and states.
         Returns empty list if the query fails.
+
     """
-    for attempt in range(max_retries):
-        try:
-            resp = requests.get(
-                f"{SLSKD_URL}/transfers/downloads",
-                headers={"X-API-Key": TOKEN},
-                timeout=10
-            )
-            resp.raise_for_status()
-            return resp.json()
-
-        except (requests.Timeout, requests.exceptions.ConnectionError) as e:
-            if attempt < max_retries - 1:
-                backoff_time = 2 ** attempt
-                time.sleep(backoff_time)
-            else:
-                write_log.warn(
-                    "SLSKD_QUERY_STATUS_FAIL",
-                    "Failed to query download status after retries.",
-                    {"error": str(e)}
-                )
-
-        except requests.HTTPError as e:
-            if e.response and e.response.status_code >= HTTP_SERVER_ERROR:
-                if attempt < max_retries - 1:
-                    backoff_time = 2 ** attempt
-                    time.sleep(backoff_time)
-                else:
-                    write_log.warn(
-                        "SLSKD_QUERY_STATUS_FAIL",
-                        "Server error querying download status.",
-                        {"error": str(e)}
-                    )
-            else:
-                write_log.warn(
-                    "SLSKD_QUERY_STATUS_FAIL",
-                    "HTTP error querying download status.",
-                    {"error": str(e)}
-                )
-                return []
-
-        except requests.RequestException as e:
-            write_log.warn("SLSKD_QUERY_STATUS_FAIL", "Failed to query download status.", {"error": str(e)})
-            return []
-
-    # All retries exhausted
-    return []
+    try:
+        # Apply retry logic using the decorator pattern
+        fetch_with_retry = with_retry(
+            max_retries=3,
+            retry_on_status=(HTTP_SERVER_ERROR, 502, 503, 504),
+            operation_name="query_download_status",
+        )(_fetch_download_status)
+        return fetch_with_retry()
+    except (requests.RequestException, requests.HTTPError) as e:
+        write_log.warn("SLSKD_QUERY_STATUS_FAIL", "Failed to query download status.", {"error": str(e)})
+        return []
 
 
 def process_redownload_queue() -> None:
-    """
-    Initiate searches for tracks marked for redownload (quality upgrade).
+    """Initiate searches for tracks marked for redownload (quality upgrade).
 
     This function uses a fire-and-forget approach: it changes the status from
     'redownload_pending' to 'searching' and initiates searches without waiting.
@@ -1141,8 +1163,7 @@ def process_redownload_queue() -> None:
 
 
 def get_track_bitrate(track_id: str) -> int | None:
-    """
-    Helper to get the bitrate for a track using the TrackDB abstraction layer.
+    """Helper to get the bitrate for a track using the TrackDB abstraction layer.
     """
     try:
         return track_db.get_track_bitrate(track_id)

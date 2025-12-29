@@ -1,5 +1,4 @@
-"""
-Task-based scheduler for Spotiseek (Radarr-style).
+"""Task-based scheduler for Spotiseek (Radarr-style).
 
 This module implements a task-based scheduling system where each workflow step
 runs as an independent task with configurable intervals. Tasks can be triggered
@@ -64,12 +63,13 @@ setup_logging(log_name_prefix="task_scheduler", rotate_daily=True)
 ENV = os.getenv("APP_ENV")
 if not ENV:
     raise OSError(
-        "APP_ENV environment variable is not set. Task scheduler is disabled."
+        "APP_ENV environment variable is not set. Task scheduler is disabled.",
     )
 
 
 class TaskStatus(Enum):
     """Task execution status."""
+
     IDLE = "idle"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -80,6 +80,7 @@ class TaskStatus(Enum):
 @dataclass
 class TaskDefinition:
     """Definition of a scheduled task."""
+
     name: str
     display_name: str
     description: str
@@ -93,6 +94,7 @@ class TaskDefinition:
 @dataclass
 class TaskRun:
     """Record of a task execution."""
+
     task_name: str
     started_at: datetime
     completed_at: datetime | None = None
@@ -102,8 +104,7 @@ class TaskRun:
 
 
 class TaskRegistry:
-    """
-    Registry of all available tasks with their configurations.
+    """Registry of all available tasks with their configurations.
 
     This class manages task definitions, scheduling, and execution tracking.
     """
@@ -172,14 +173,14 @@ class TaskRegistry:
         self.db.conn.commit()
 
     def get_task_interval(self, task_name: str) -> int:
-        """
-        Get the interval in minutes for a task from environment variable.
+        """Get the interval in minutes for a task from environment variable.
 
         Args:
             task_name: Name of the task
 
         Returns:
             Interval in minutes
+
         """
         task = self.tasks.get(task_name)
         if not task:
@@ -213,7 +214,7 @@ class TaskRegistry:
                 "next_run_at": row[3],
                 "is_enabled": bool(row[4]),
                 "interval_minutes": self.get_task_interval(task_name),
-                "is_running": task_name in self.current_runs
+                "is_running": task_name in self.current_runs,
             }
 
         return {
@@ -223,7 +224,7 @@ class TaskRegistry:
             "next_run_at": None,
             "is_enabled": True,
             "interval_minutes": self.get_task_interval(task_name),
-            "is_running": False
+            "is_running": False,
         }
 
     def get_all_task_states(self) -> list[dict[str, Any]]:
@@ -257,7 +258,7 @@ class TaskRegistry:
                 "completed_at": row[3],
                 "status": row[4],
                 "error_message": row[5],
-                "tracks_processed": row[6]
+                "tracks_processed": row[6],
             }
             for row in cursor.fetchall()
         ]
@@ -282,7 +283,7 @@ class TaskRegistry:
                 "completed_at": row[3],
                 "status": row[4],
                 "error_message": row[5],
-                "tracks_processed": row[6]
+                "tracks_processed": row[6],
             }
             for row in cursor.fetchall()
         ]
@@ -332,11 +333,11 @@ class TaskRegistry:
         self.db.conn.commit()
 
     def check_dependencies(self, task_name: str) -> tuple[bool, list[str]]:
-        """
-        Check if all dependencies for a task have run recently.
+        """Check if all dependencies for a task have run recently.
 
         Returns:
             Tuple of (dependencies_met, list_of_unmet_dependencies)
+
         """
         task = self.tasks.get(task_name)
         if not task or not task.dependencies:
@@ -359,8 +360,7 @@ class TaskRegistry:
         return len(unmet) == 0, unmet
 
     def run_task(self, task_name: str, force: bool = False) -> tuple[bool, str]:
-        """
-        Execute a task.
+        """Execute a task.
 
         Args:
             task_name: Name of the task to run
@@ -368,6 +368,7 @@ class TaskRegistry:
 
         Returns:
             Tuple of (success, message)
+
         """
         task = self.tasks.get(task_name)
         if not task:
@@ -390,7 +391,7 @@ class TaskRegistry:
         with self._lock:
             self.current_runs[task_name] = TaskRun(
                 task_name=task_name,
-                started_at=datetime.now()
+                started_at=datetime.now(),
             )
 
         write_log.info("TASK_START", f"Starting task: {task.display_name}",
@@ -428,11 +429,11 @@ class TaskRegistry:
                 self.current_runs.pop(task_name, None)
 
     def run_all_tasks(self) -> dict[str, tuple[bool, str]]:
-        """
-        Run all tasks in dependency order.
+        """Run all tasks in dependency order.
 
         Returns:
             Dictionary of task_name -> (success, message)
+
         """
         results = {}
 
@@ -581,7 +582,7 @@ def _register_all_tasks(registry: TaskRegistry) -> None:
         function=task_scrape_playlists,
         interval_env_var="TASK_SCRAPE_PLAYLISTS_INTERVAL",
         default_interval_minutes=1440,  # Once per day
-        dependencies=[]
+        dependencies=[],
     ))
 
     # Task 2: Initiate Searches
@@ -592,7 +593,7 @@ def _register_all_tasks(registry: TaskRegistry) -> None:
         function=task_initiate_searches,
         interval_env_var="TASK_INITIATE_SEARCHES_INTERVAL",
         default_interval_minutes=60,  # Every hour
-        dependencies=["scrape_playlists"]
+        dependencies=["scrape_playlists"],
     ))
 
     # Task 3: Poll Search Results
@@ -603,7 +604,7 @@ def _register_all_tasks(registry: TaskRegistry) -> None:
         function=task_poll_search_results,
         interval_env_var="TASK_POLL_SEARCH_RESULTS_INTERVAL",
         default_interval_minutes=15,  # Every 15 minutes
-        dependencies=[]
+        dependencies=[],
     ))
 
     # Task 4: Sync Download Status
@@ -614,7 +615,7 @@ def _register_all_tasks(registry: TaskRegistry) -> None:
         function=task_sync_download_status,
         interval_env_var="TASK_SYNC_DOWNLOAD_STATUS_INTERVAL",
         default_interval_minutes=5,  # Every 5 minutes
-        dependencies=[]
+        dependencies=[],
     ))
 
     # Task 5: Mark Quality Upgrades
@@ -625,7 +626,7 @@ def _register_all_tasks(registry: TaskRegistry) -> None:
         function=task_mark_quality_upgrades,
         interval_env_var="TASK_MARK_QUALITY_UPGRADES_INTERVAL",
         default_interval_minutes=1440,  # Once per day
-        dependencies=["sync_download_status"]
+        dependencies=["sync_download_status"],
     ))
 
     # Task 6: Process Upgrades
@@ -636,7 +637,7 @@ def _register_all_tasks(registry: TaskRegistry) -> None:
         function=task_process_upgrades,
         interval_env_var="TASK_PROCESS_UPGRADES_INTERVAL",
         default_interval_minutes=60,  # Every hour
-        dependencies=["mark_quality_upgrades"]
+        dependencies=["mark_quality_upgrades"],
     ))
 
     # Task 7: Export Library
@@ -647,7 +648,7 @@ def _register_all_tasks(registry: TaskRegistry) -> None:
         function=task_export_library,
         interval_env_var="TASK_EXPORT_LIBRARY_INTERVAL",
         default_interval_minutes=1440,  # Once per day
-        dependencies=["sync_download_status"]
+        dependencies=["sync_download_status"],
     ))
 
     # Task 8: Remux Existing Files
@@ -658,7 +659,7 @@ def _register_all_tasks(registry: TaskRegistry) -> None:
         function=task_remux_existing_files,
         interval_env_var="TASK_REMUX_EXISTING_FILES_INTERVAL",
         default_interval_minutes=360,  # Every 6 hours
-        dependencies=["sync_download_status"]
+        dependencies=["sync_download_status"],
     ))
 
     write_log.info("TASKS_REGISTERED", "All tasks registered",
@@ -669,27 +670,27 @@ def main():
     """Main entry point for task scheduler."""
     parser = argparse.ArgumentParser(
         description="Spotiseek Task Scheduler",
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--run",
         type=str,
-        help="Run a specific task by name"
+        help="Run a specific task by name",
     )
     parser.add_argument(
         "--run-all",
         action="store_true",
-        help="Run all tasks in dependency order"
+        help="Run all tasks in dependency order",
     )
     parser.add_argument(
         "--list",
         action="store_true",
-        help="List all available tasks"
+        help="List all available tasks",
     )
     parser.add_argument(
         "--daemon",
         action="store_true",
-        help="Run as daemon (scheduler runs continuously)"
+        help="Run as daemon (scheduler runs continuously)",
     )
 
     args = parser.parse_args()
@@ -700,7 +701,7 @@ def main():
         print("\nAvailable Tasks:")
         print("-" * 60)
         for state in registry.get_all_task_states():
-            deps = f" (depends on: {', '.join(state['dependencies'])})" if state['dependencies'] else ""
+            deps = f" (depends on: {', '.join(state['dependencies'])})" if state["dependencies"] else ""
             print(f"  {state['task_name']}: {state['display_name']}")
             print(f"    {state['description']}")
             print(f"    Interval: {state['interval_minutes']} minutes{deps}")

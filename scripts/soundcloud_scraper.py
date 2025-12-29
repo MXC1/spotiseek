@@ -1,5 +1,4 @@
-"""
-SoundCloud playlist scraper module.
+"""SoundCloud playlist scraper module.
 
 This module provides functionality to extract track information from SoundCloud
 playlists by parsing the embedded hydration data in the page HTML and fetching
@@ -46,8 +45,7 @@ API_BATCH_SIZE = 50
 
 
 def _extract_client_id(html_content: str) -> str | None:
-    """
-    Extract the SoundCloud client_id from JavaScript bundles.
+    """Extract the SoundCloud client_id from JavaScript bundles.
 
     SoundCloud's client_id is embedded in their JS bundles. This function:
     1. Finds all JS bundle URLs in the page
@@ -59,6 +57,7 @@ def _extract_client_id(html_content: str) -> str | None:
 
     Returns:
         Client ID string, or None if not found
+
     """
     # Find all script URLs
     script_urls = re.findall(r'<script crossorigin src="([^"]+)"', html_content)
@@ -66,7 +65,7 @@ def _extract_client_id(html_content: str) -> str | None:
     if not script_urls:
         write_log.warn(
             "SOUNDCLOUD_NO_SCRIPTS",
-            "No script URLs found in SoundCloud page."
+            "No script URLs found in SoundCloud page.",
         )
         return None
 
@@ -86,7 +85,7 @@ def _extract_client_id(html_content: str) -> str | None:
                 write_log.debug(
                     "SOUNDCLOUD_CLIENT_ID_FOUND",
                     "Extracted client_id from JS bundle.",
-                    {"client_id": client_id[:8] + "..."}  # Log partial for security
+                    {"client_id": client_id[:8] + "..."},  # Log partial for security
                 )
                 return client_id
 
@@ -95,14 +94,13 @@ def _extract_client_id(html_content: str) -> str | None:
 
     write_log.warn(
         "SOUNDCLOUD_CLIENT_ID_NOT_FOUND",
-        "Could not extract client_id from any JS bundle."
+        "Could not extract client_id from any JS bundle.",
     )
     return None
 
 
 def _fetch_tracks_by_ids(track_ids: list[int], client_id: str) -> list[dict]:
-    """
-    Fetch full track details from SoundCloud API for given track IDs.
+    """Fetch full track details from SoundCloud API for given track IDs.
 
     Args:
         track_ids: List of SoundCloud track IDs (integers)
@@ -110,6 +108,7 @@ def _fetch_tracks_by_ids(track_ids: list[int], client_id: str) -> list[dict]:
 
     Returns:
         List of track data dictionaries with full details
+
     """
     if not track_ids or not client_id:
         return []
@@ -132,28 +131,27 @@ def _fetch_tracks_by_ids(track_ids: list[int], client_id: str) -> list[dict]:
                 write_log.debug(
                     "SOUNDCLOUD_API_FETCH",
                     "Fetched track batch from API.",
-                    {"batch_size": len(batch_ids), "fetched": len(tracks)}
+                    {"batch_size": len(batch_ids), "fetched": len(tracks)},
                 )
             else:
                 write_log.warn(
                     "SOUNDCLOUD_API_FAIL",
                     "API request failed for track batch.",
-                    {"status": response.status_code, "batch_start": i}
+                    {"status": response.status_code, "batch_start": i},
                 )
 
         except requests.RequestException as e:
             write_log.warn(
                 "SOUNDCLOUD_API_ERROR",
                 "Error fetching tracks from API.",
-                {"error": str(e), "batch_start": i}
+                {"error": str(e), "batch_start": i},
             )
 
     return all_tracks
 
 
 def _extract_track_slug(permalink_url: str) -> str:
-    """
-    Extract the track slug (user/track-name) from a SoundCloud permalink URL.
+    """Extract the track slug (user/track-name) from a SoundCloud permalink URL.
 
     Args:
         permalink_url: Full SoundCloud track URL
@@ -165,6 +163,7 @@ def _extract_track_slug(permalink_url: str) -> str:
     Example:
         >>> _extract_track_slug("https://soundcloud.com/lobsta-b/7th-element-vip")
         "lobsta-b/7th-element-vip"
+
     """
     # Remove the base URL and extract user/track path
     path = permalink_url.replace("https://soundcloud.com/", "")
@@ -174,15 +173,13 @@ def _extract_track_slug(permalink_url: str) -> str:
     parts = path.split("/")
     if len(parts) >= 2:  # noqa: PLR2004
         return f"{parts[0]}/{parts[1]}"
-    elif len(parts) == 1:
+    if len(parts) == 1:
         return parts[0]
-    else:
-        return path
+    return path
 
 
 def _parse_hydration_data(html_content: str) -> dict | None:
-    """
-    Extract and parse the __sc_hydration JSON data from HTML content.
+    """Extract and parse the __sc_hydration JSON data from HTML content.
 
     SoundCloud embeds playlist data as JSON in a script tag with the format:
     <script>window.__sc_hydration = [...JSON...];</script>
@@ -192,15 +189,16 @@ def _parse_hydration_data(html_content: str) -> dict | None:
 
     Returns:
         Parsed playlist data dict, or None if not found
+
     """
     # Pattern to match the hydration script
-    pattern = r'<script>window\.__sc_hydration = (.+?);</script>'
+    pattern = r"<script>window\.__sc_hydration = (.+?);</script>"
     match = re.search(pattern, html_content)
 
     if not match:
         write_log.error(
             "SOUNDCLOUD_HYDRATION_NOT_FOUND",
-            "Could not find __sc_hydration data in page."
+            "Could not find __sc_hydration data in page.",
         )
         return None
 
@@ -214,7 +212,7 @@ def _parse_hydration_data(html_content: str) -> dict | None:
 
         write_log.error(
             "SOUNDCLOUD_PLAYLIST_NOT_FOUND",
-            "Playlist hydratable not found in hydration data."
+            "Playlist hydratable not found in hydration data.",
         )
         return None
 
@@ -222,7 +220,7 @@ def _parse_hydration_data(html_content: str) -> dict | None:
         write_log.error(
             "SOUNDCLOUD_PARSE_FAIL",
             "Failed to parse hydration JSON.",
-            {"error": str(e)}
+            {"error": str(e)},
         )
         return None
 
@@ -230,8 +228,7 @@ def _parse_hydration_data(html_content: str) -> dict | None:
 def get_tracks_from_playlist(  # noqa: PLR0915
     playlist_url: str,
 ) -> tuple[str, list[tuple[str, str, str]]]:
-    """
-    Extract track information and playlist name from a SoundCloud playlist.
+    """Extract track information and playlist name from a SoundCloud playlist.
 
     This function:
     1. Fetches the playlist page HTML
@@ -263,11 +260,12 @@ def get_tracks_from_playlist(  # noqa: PLR0915
         "donk and hard dance edits"
         >>> print(tracks[0])
         ("lobsta-b/7th-element-vip", "LOBSTA B", "7TH ELEMENT VIP")
+
     """
     write_log.info(
         "SOUNDCLOUD_FETCH",
         "Fetching SoundCloud playlist.",
-        {"playlist_url": playlist_url}
+        {"playlist_url": playlist_url},
     )
 
     # Validate URL format
@@ -275,11 +273,11 @@ def get_tracks_from_playlist(  # noqa: PLR0915
         write_log.error(
             "SOUNDCLOUD_URL_INVALID",
             "Invalid SoundCloud playlist URL format.",
-            {"playlist_url": playlist_url}
+            {"playlist_url": playlist_url},
         )
         raise ValueError(
             "Invalid SoundCloud playlist URL. "
-            "Expected format: https://soundcloud.com/user/sets/playlist-name"
+            "Expected format: https://soundcloud.com/user/sets/playlist-name",
         )
 
     # Fetch the playlist page
@@ -291,7 +289,7 @@ def get_tracks_from_playlist(  # noqa: PLR0915
         write_log.error(
             "SOUNDCLOUD_REQUEST_FAIL",
             "Failed to fetch SoundCloud playlist page.",
-            {"playlist_url": playlist_url, "error": str(e)}
+            {"playlist_url": playlist_url, "error": str(e)},
         )
         raise
 
@@ -301,7 +299,7 @@ def get_tracks_from_playlist(  # noqa: PLR0915
     playlist_data = _parse_hydration_data(html_content)
     if not playlist_data:
         raise ValueError(
-            f"Could not parse playlist data from SoundCloud page: {playlist_url}"
+            f"Could not parse playlist data from SoundCloud page: {playlist_url}",
         )
 
     # Extract playlist metadata
@@ -315,8 +313,8 @@ def get_tracks_from_playlist(  # noqa: PLR0915
         {
             "playlist_name": playlist_name,
             "track_count": track_count,
-            "tracks_in_data": len(raw_tracks)
-        }
+            "tracks_in_data": len(raw_tracks),
+        },
     )
 
     # Separate full tracks from stubs
@@ -333,7 +331,7 @@ def get_tracks_from_playlist(  # noqa: PLR0915
     write_log.debug(
         "SOUNDCLOUD_TRACK_SPLIT",
         "Separated full tracks from stubs.",
-        {"full_tracks": len(full_tracks), "stub_tracks": len(stub_track_ids)}
+        {"full_tracks": len(full_tracks), "stub_tracks": len(stub_track_ids)},
     )
 
     # Fetch stub track details from API if needed
@@ -345,13 +343,13 @@ def get_tracks_from_playlist(  # noqa: PLR0915
             write_log.info(
                 "SOUNDCLOUD_STUBS_FETCHED",
                 "Fetched stub track details from API.",
-                {"requested": len(stub_track_ids), "received": len(api_tracks)}
+                {"requested": len(stub_track_ids), "received": len(api_tracks)},
             )
         else:
             write_log.warn(
                 "SOUNDCLOUD_NO_CLIENT_ID",
                 "Could not fetch stub tracks - no client_id available.",
-                {"stub_count": len(stub_track_ids)}
+                {"stub_count": len(stub_track_ids)},
             )
 
     # Process all tracks
@@ -371,7 +369,7 @@ def get_tracks_from_playlist(  # noqa: PLR0915
                 write_log.warn(
                     "SOUNDCLOUD_TRACK_NO_ID",
                     "Track missing permalink URL, skipping.",
-                    {"index": idx, "track_title": track_title}
+                    {"index": idx, "track_title": track_title},
                 )
                 continue
 
@@ -385,14 +383,14 @@ def get_tracks_from_playlist(  # noqa: PLR0915
             write_log.warn(
                 "SOUNDCLOUD_TRACK_PARSE_FAIL",
                 "Failed to parse track, skipping.",
-                {"index": idx, "error": str(e)}
+                {"index": idx, "error": str(e)},
             )
             continue
 
     write_log.info(
         "SOUNDCLOUD_FETCH_SUCCESS",
         "Successfully fetched and cleaned tracks from SoundCloud.",
-        {"playlist_name": playlist_name, "track_count": len(cleaned_tracks)}
+        {"playlist_name": playlist_name, "track_count": len(cleaned_tracks)},
     )
 
     return playlist_name, cleaned_tracks

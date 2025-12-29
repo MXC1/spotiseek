@@ -7,19 +7,19 @@ from invoke import task
 
 def get_app_env():
     """Read APP_ENV from .env file."""
-    env_path = Path(__file__).parent / '.env'
+    env_path = Path(__file__).parent / ".env"
     if not env_path.exists():
         print(".env file not found!")
         return None
     with open(env_path) as f:
         for line in f:
-            if line.strip().startswith('APP_ENV='):
-                return line.strip().split('=', 1)[1]
+            if line.strip().startswith("APP_ENV="):
+                return line.strip().split("=", 1)[1]
     print("APP_ENV not found in .env!")
     return None
 
 @task(help={
-    'env': "Optional environment name to override APP_ENV (e.g. test_new)"
+    "env": "Optional environment name to override APP_ENV (e.g. test_new)",
 })
 def nuke(c, env=None):
     """Stop containers, prune system, and delete environment directories.
@@ -35,15 +35,15 @@ def nuke(c, env=None):
     app_env = env if env else get_app_env()
     if app_env:
         targets = [
-            Path('slskd_docker_data') / app_env,
-            Path('observability') / 'logs' / app_env,
-            Path('output') / app_env,
-            Path('output') / app_env / 'm3u8s'
+            Path("slskd_docker_data") / app_env,
+            Path("observability") / "logs" / app_env,
+            Path("output") / app_env,
+            Path("output") / app_env / "m3u8s",
         ]
         if app_env.lower() in ["prod", "stage"]:
             print(
                 f"WARNING: You are about to delete directories for APP_ENV='{app_env}'. "
-                "This is a critical environment!"
+                "This is a critical environment!",
             )
             for t in targets:
                 print(f"  - {t}")
@@ -80,8 +80,7 @@ def nuke(c, env=None):
 
 @task
 def exec(c, service, command):
-    """
-    Execute a command inside a running Docker container.
+    """Execute a command inside a running Docker container.
     Usage: invoke exec --service <service_name> --command '<command>'
     """
     if not service or not command:
@@ -126,7 +125,7 @@ def prune(c):
 @task
 def clean(c):
     """Remove __pycache__ and *.pyc files recursively"""
-    c.run("powershell -Command \"Get-ChildItem -Recurse -Include __pycache__,*.pyc | Remove-Item -Recurse -Force\"")
+    c.run('powershell -Command "Get-ChildItem -Recurse -Include __pycache__,*.pyc | Remove-Item -Recurse -Force"')
 
 @task
 def test(c):
@@ -155,7 +154,7 @@ def lint_fix(c):
 @task
 def setenv(c, env):
     """Change the APP_ENV variable in .env file. Usage: invoke setenv <environment>"""
-    env_path = Path(__file__).parent / '.env'
+    env_path = Path(__file__).parent / ".env"
     if not env_path.exists():
         print(".env file not found!")
         return
@@ -167,16 +166,16 @@ def setenv(c, env):
     # Update or add APP_ENV
     found = False
     for i, line in enumerate(lines):
-        if line.strip().startswith('APP_ENV='):
-            lines[i] = f'APP_ENV={env}\n'
+        if line.strip().startswith("APP_ENV="):
+            lines[i] = f"APP_ENV={env}\n"
             found = True
             break
 
     if not found:
-        lines.append(f'APP_ENV={env}\n')
+        lines.append(f"APP_ENV={env}\n")
 
     # Write back to .env
-    with open(env_path, 'w') as f:
+    with open(env_path, "w") as f:
         f.writelines(lines)
 
     print(f"APP_ENV set to '{env}'")

@@ -1,5 +1,4 @@
-"""
-Unified playlist scraper module.
+"""Unified playlist scraper module.
 
 This module provides a unified interface for extracting track information from
 various music streaming platforms. It automatically dispatches to the appropriate
@@ -23,11 +22,11 @@ Public API:
 import re
 
 from scripts.logs_utils import write_log
+from scripts.spotify_scraper import clean_name as clean_name_base
 
 
 def detect_platform(playlist_url: str) -> str:
-    """
-    Detect the music platform from a playlist URL.
+    """Detect the music platform from a playlist URL.
 
     Args:
         playlist_url: Full playlist URL
@@ -40,22 +39,26 @@ def detect_platform(playlist_url: str) -> str:
         "spotify"
         >>> detect_platform("https://soundcloud.com/user/sets/playlist-name")
         "soundcloud"
+
     """
     if "open.spotify.com/playlist/" in playlist_url or "spotify.com/playlist/" in playlist_url:
         return "spotify"
-    elif "soundcloud.com/" in playlist_url and "/sets/" in playlist_url:
+    if "soundcloud.com/" in playlist_url and "/sets/" in playlist_url:
         return "soundcloud"
-    else:
-        return "unknown"
+    return "unknown"
 
 
 def clean_name(name: str) -> str:
-    """
-    Normalize track and artist names for improved search consistency.
+    """Normalize track and artist names for improved search consistency.
 
-    Removes common punctuation, promotional text, emojis, and normalizes
-    whitespace that may interfere with Soulseek search queries.
-    This improves match rates, especially for SoundCloud tracks.
+    Extends the base clean_name() with additional cleaning for SoundCloud tracks:
+    - Removes content in square brackets (promotional: [FREE D/L], [OUT NOW], etc.)
+    - Removes common promotional phrases
+    - Removes emojis and Unicode symbols
+    - Removes empty or junk-filled parentheses
+
+    Spotify tracks typically don't contain this promotional content, so the base
+    clean_name() is sufficient for them.
 
     Args:
         name: Original track or artist name
@@ -70,20 +73,21 @@ def clean_name(name: str) -> str:
         "Track Name"
         >>> clean_name("Song 👉 FREE DOWNLOAD 👈")
         "Song"
+
     """
     # Remove content in square brackets (often promotional: [FREE D/L], [OUT NOW], etc.)
-    name = re.sub(r'\[[^\]]*\]', '', name)
+    name = re.sub(r"\[[^\]]*\]", "", name)
 
     # Remove common promotional phrases (case-insensitive)
     promo_patterns = [
-        r'free\s*d/?l',
-        r'free\s*download',
-        r'out\s*now',
-        r'buy\s*=\s*free',
-        r'click\s*buy',
+        r"free\s*d/?l",
+        r"free\s*download",
+        r"out\s*now",
+        r"buy\s*=\s*free",
+        r"click\s*buy",
     ]
     for pattern in promo_patterns:
-        name = re.sub(pattern, '', name, flags=re.IGNORECASE)
+        name = re.sub(pattern, "", name, flags=re.IGNORECASE)
 
     # Remove emojis and other Unicode symbols
     # This pattern covers most emoji ranges
@@ -99,44 +103,36 @@ def clean_name(name: str) -> str:
         "\U0001FA00-\U0001FA6F"  # chess symbols
         "\U0001FA70-\U0001FAFF"  # symbols extended-A
         "]+",
-        flags=re.UNICODE
+        flags=re.UNICODE,
     )
-    name = emoji_pattern.sub('', name)
-
-    # Remove problematic punctuation that interferes with searches
-    name = name.replace(",", "")
-    name = name.replace(" - ", " ")
-    name = name.replace("&", "")
+    name = emoji_pattern.sub("", name)
 
     # Remove empty or whitespace-only parentheses left after other cleaning
-    name = re.sub(r'\(\s*\)', '', name)
+    name = re.sub(r"\(\s*\)", "", name)
     # Remove parentheses containing only short junk (1-3 words of non-meaningful content)
-    name = re.sub(r'\(\s*(\d+\s+years?\s+of\s+)?[\w\s]{0,30}\s*\)', _clean_parens, name)
+    name = re.sub(r"\(\s*(\d+\s+years?\s+of\s+)?[\w\s]{0,30}\s*\)", _clean_parens, name)
 
-    # Normalize whitespace (collapse multiple spaces)
-    name = " ".join(name.split())
-
-    return name
+    # Apply base cleaning (punctuation removal and whitespace normalization)
+    return clean_name_base(name)
 
 
 def _clean_parens(match: re.Match) -> str:
     """Helper to remove parentheses if they contain only junk words."""
     content = match.group(0)
-    inner = content.strip('()')
+    inner = content.strip("()")
     # Keep if it looks like meaningful info (remix, edit, mix, version, original, vip, etc.)
     meaningful_keywords = [
-        'remix', 'edit', 'mix', 'version', 'original', 'vip', 'flip',
-        'rework', 'dub', 'extended', 'radio', 'club', 'instrumental', 'bootleg'
+        "remix", "edit", "mix", "version", "original", "vip", "flip",
+        "rework", "dub", "extended", "radio", "club", "instrumental", "bootleg",
     ]
     if any(kw in inner.lower() for kw in meaningful_keywords):
         return content
     # Remove if it's just promotional junk
-    return ''
+    return ""
 
 
 def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, str, str]], str]:
-    """
-    Extract track information and playlist name from a playlist URL.
+    """Extract track information and playlist name from a playlist URL.
 
     This function automatically detects the platform and dispatches to the
     appropriate scraper. All scrapers return data in a consistent format.
@@ -162,13 +158,14 @@ def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, st
         ("5ms8IkagrFWObtzSOahVrx", "MASTER BOOT RECORD", "Skynet")
         >>> print(source)
         "spotify"
+
     """
     platform = detect_platform(playlist_url)
 
     write_log.info(
         "PLAYLIST_SCRAPE_START",
         "Starting playlist scrape.",
-        {"playlist_url": playlist_url, "platform": platform}
+        {"playlist_url": playlist_url, "platform": platform},
     )
 
     if platform == "spotify":
@@ -178,29 +175,27 @@ def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, st
         playlist_name, tracks = spotify_get_tracks(playlist_url)
         return playlist_name, tracks, "spotify"
 
-    elif platform == "soundcloud":
+    if platform == "soundcloud":
         from scripts.soundcloud_scraper import (  # noqa: PLC0415
             get_tracks_from_playlist as soundcloud_get_tracks,
         )
         playlist_name, tracks = soundcloud_get_tracks(playlist_url)
         return playlist_name, tracks, "soundcloud"
 
-    else:
-        write_log.error(
-            "PLAYLIST_UNKNOWN_PLATFORM",
-            "Unknown or unsupported playlist platform.",
-            {"playlist_url": playlist_url}
-        )
-        raise ValueError(
-            f"Unsupported playlist URL format: {playlist_url}. "
-            "Supported formats: Spotify (open.spotify.com/playlist/...), "
-            "SoundCloud (soundcloud.com/.../sets/...)"
-        )
+    write_log.error(
+        "PLAYLIST_UNKNOWN_PLATFORM",
+        "Unknown or unsupported playlist platform.",
+        {"playlist_url": playlist_url},
+    )
+    raise ValueError(
+        f"Unsupported playlist URL format: {playlist_url}. "
+        "Supported formats: Spotify (open.spotify.com/playlist/...), "
+        "SoundCloud (soundcloud.com/.../sets/...)",
+    )
 
 
 def generate_track_id(platform: str, identifier: str) -> str:  # noqa: ARG001
-    """
-    Generate a standardized track ID for a given platform.
+    """Generate a standardized track ID for a given platform.
 
     Args:
         platform: Platform identifier ('spotify', 'soundcloud')
@@ -218,6 +213,7 @@ def generate_track_id(platform: str, identifier: str) -> str:  # noqa: ARG001
         "5ms8IkagrFWObtzSOahVrx"
         >>> generate_track_id("soundcloud", "lobsta-b/7th-element-vip")
         "lobsta-b/7th-element-vip"
+
     """
     # Both platforms can use their native identifiers directly
     # Spotify IDs are alphanumeric, SoundCloud uses URL slugs

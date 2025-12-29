@@ -1,5 +1,4 @@
-"""
-Logging utility module for centralized logging configuration.
+"""Logging utility module for centralized logging configuration.
 
 This module provides a structured logging system with JSON file output and console formatting.
 It includes utilities for log file parsing, analysis, and DataFrame conversion for observability.
@@ -37,29 +36,28 @@ _LOGGING_INITIALIZED = False
 JSON_LOG_KEYS = ["timestamp", "level", "message", "event_id", "context"]
 
 class JsonLogFormatter(logging.Formatter):
-    """
-    Custom logging formatter that outputs structured JSON log entries.
+    """Custom logging formatter that outputs structured JSON log entries.
 
     Each log entry contains: timestamp, level, message, event_id, and context.
     Timestamps use microsecond precision for unique identification.
     """
 
     def format(self, record: logging.LogRecord) -> str:
-        """
-        Format a log record as a JSON string.
+        """Format a log record as a JSON string.
 
         Args:
             record: LogRecord instance from Python logging system
 
         Returns:
             JSON-formatted string with filtered keys
+
         """
         log_record: dict[str, Any] = {
             "timestamp": datetime.fromtimestamp(record.created).strftime("%Y%m%d_%H%M%S_%f"),
             "level": record.levelname,
             "message": record.getMessage(),
             "event_id": getattr(record, "event_id", None),
-            "context": getattr(record, "context", None)
+            "context": getattr(record, "context", None),
         }
 
         # Filter to only include defined keys
@@ -67,8 +65,7 @@ class JsonLogFormatter(logging.Formatter):
         return json.dumps(filtered, ensure_ascii=False)
 
 def get_log_files(logs_dir: str) -> list[str]:
-    """
-    Recursively find all .log files in the specified directory tree.
+    """Recursively find all .log files in the specified directory tree.
 
     Args:
         logs_dir: Root directory path to search for log files
@@ -79,13 +76,13 @@ def get_log_files(logs_dir: str) -> list[str]:
     Example:
         >>> get_log_files('observability/test_logs')
         ['observability/test_logs/2025/11/27/workflow_20251127_143025_123456.log', ...]
+
     """
-    pattern = os.path.join(logs_dir, '**', '*.log')
+    pattern = os.path.join(logs_dir, "**", "*.log")
     return glob.glob(pattern, recursive=True)
 
 def parse_logs(log_files: list[str]) -> list[dict]:
-    """
-    Parse JSON-formatted log files into structured entries.
+    """Parse JSON-formatted log files into structured entries.
 
     Each line in the log files is expected to be a valid JSON object.
     Malformed lines are silently skipped.
@@ -100,11 +97,12 @@ def parse_logs(log_files: list[str]) -> list[dict]:
         >>> entries = parse_logs(['logs/2025/11/27/run.log'])
         >>> entries[0]
         {'timestamp': '20251127_143025_123456', 'level': 'INFO', ...}
+
     """
     log_entries = []
     for file_path in log_files:
         try:
-            with open(file_path, encoding='utf-8', errors='replace') as f:
+            with open(file_path, encoding="utf-8", errors="replace") as f:
                 for line in f:
                     try:
                         entry = json.loads(line.strip())
@@ -118,8 +116,7 @@ def parse_logs(log_files: list[str]) -> list[dict]:
     return log_entries
 
 def filter_warning_error_logs(log_entries: list[dict]) -> list[dict]:
-    """
-    Filter log entries to only include WARNING and ERROR severity levels.
+    """Filter log entries to only include WARNING and ERROR severity levels.
 
     Useful for focusing on problematic logs during analysis and debugging.
 
@@ -134,12 +131,12 @@ def filter_warning_error_logs(log_entries: list[dict]) -> list[dict]:
         >>> errors = filter_warning_error_logs(all_logs)
         >>> len(errors)
         1
+
     """
-    return [entry for entry in log_entries if isinstance(entry, dict) and entry.get('level') in ('WARNING', 'ERROR')]
+    return [entry for entry in log_entries if isinstance(entry, dict) and entry.get("level") in ("WARNING", "ERROR")]
 
 def logs_to_dataframe(log_entries: list[dict]):
-    """
-    Convert parsed log entries into a pandas DataFrame for analysis.
+    """Convert parsed log entries into a pandas DataFrame for analysis.
 
     Extracts key fields (timestamp, level, event_id, message) and converts
     timestamp strings to datetime objects for proper sorting.
@@ -154,15 +151,16 @@ def logs_to_dataframe(log_entries: list[dict]):
     Note:
         Requires pandas to be installed. Import is deferred to avoid
         dependency at module load time.
+
     """
     import pandas as pd  # noqa: PLC0415
 
     rows = [
         {
-            'timestamp': entry.get('timestamp'),
-            'level': entry.get('level'),
-            'event_id': entry.get('event_id'),
-            'message': entry.get('message'),
+            "timestamp": entry.get("timestamp"),
+            "level": entry.get("level"),
+            "event_id": entry.get("event_id"),
+            "message": entry.get("message"),
         }
         for entry in log_entries
     ]
@@ -171,12 +169,12 @@ def logs_to_dataframe(log_entries: list[dict]):
 
     if not df.empty:
         try:
-            df['timestamp'] = pd.to_datetime(
-                df['timestamp'],
-                format='%Y%m%d_%H%M%S_%f',
-                errors='coerce'
+            df["timestamp"] = pd.to_datetime(
+                df["timestamp"],
+                format="%Y%m%d_%H%M%S_%f",
+                errors="coerce",
             )
-            df = df.sort_values('timestamp', ascending=False)
+            df = df.sort_values("timestamp", ascending=False)
         except Exception:
             # If timestamp parsing fails, return unsorted DataFrame
             pass
@@ -184,8 +182,7 @@ def logs_to_dataframe(log_entries: list[dict]):
     return df
 
 def prepare_log_summary(df_logs, warn_err_logs):
-    """
-    Aggregate and summarize logs grouped by level, event_id, and message.
+    """Aggregate and summarize logs grouped by level, event_id, and message.
 
     Generates a summary DataFrame with occurrence counts, latest timestamps,
     and sample log entries with full context for debugging.
@@ -206,26 +203,27 @@ def prepare_log_summary(df_logs, warn_err_logs):
     Note:
         Requires pandas. The warn_err_logs list is used to access full context
         objects that may not be in the DataFrame.
+
     """
     import pandas as pd  # noqa: PLC0415
 
     # Create a mapping from DataFrame index to list position for safe lookups
     index_to_position = {idx: pos for pos, idx in enumerate(df_logs.index)}
 
-    summary = df_logs.groupby(['level', 'event_id', 'message']).size().reset_index(name='count')
+    summary = df_logs.groupby(["level", "event_id", "message"]).size().reset_index(name="count")
     samples = []
     latest_times = []
 
     for _, row in summary.iterrows():
-        level = row['level']
-        event_id = row['event_id']
-        message = row['message']
+        level = row["level"]
+        event_id = row["event_id"]
+        message = row["message"]
 
         # Filter logs matching this group
         group_df = df_logs[
-            (df_logs['level'] == level) &
-            (df_logs['event_id'] == event_id) &
-            (df_logs['message'] == message)
+            (df_logs["level"] == level) &
+            (df_logs["event_id"] == event_id) &
+            (df_logs["message"] == message)
         ]
 
         # Extract latest occurrence for sample
@@ -235,7 +233,7 @@ def prepare_log_summary(df_logs, warn_err_logs):
 
         # Safely access context with bounds checking
         if list_position < len(warn_err_logs) and isinstance(warn_err_logs[list_position], dict):
-            context_obj = warn_err_logs[list_position].get('context', {})
+            context_obj = warn_err_logs[list_position].get("context", {})
         else:
             context_obj = {}
 
@@ -249,17 +247,17 @@ def prepare_log_summary(df_logs, warn_err_logs):
         samples.append(sample_str)
 
         # Format latest timestamp
-        latest_ts = group_df['timestamp'].max()
+        latest_ts = group_df["timestamp"].max()
         if pd.isnull(latest_ts):
             latest_times.append("")
         else:
-            latest_times.append(latest_ts.strftime('%a %d %B %Y %H:%M'))
+            latest_times.append(latest_ts.strftime("%a %d %B %Y %H:%M"))
 
-    summary['sample_log'] = samples
-    summary['latest'] = latest_times
+    summary["sample_log"] = samples
+    summary["latest"] = latest_times
 
     # Enforce column ordering for consistent presentation
-    desired_order = ['level', 'event_id', 'message', 'count', 'latest', 'sample_log']
+    desired_order = ["level", "event_id", "message", "count", "latest", "sample_log"]
     ordered_cols = [col for col in desired_order if col in summary.columns]
     extra_cols = [col for col in summary.columns if col not in ordered_cols]
 
@@ -267,8 +265,7 @@ def prepare_log_summary(df_logs, warn_err_logs):
 
 
 def get_task_scheduler_logs(logs_dir: str) -> list[dict]:
-    """
-    Extract task scheduler log files from directory.
+    """Extract task scheduler log files from directory.
 
     Handles both the current log file (task_scheduler.log) and rotated logs
     (task_scheduler.log.YYYY-MM-DD).
@@ -283,6 +280,7 @@ def get_task_scheduler_logs(logs_dir: str) -> list[dict]:
             - log_file: Full path to log file
             - display_name: Human-readable name for UI
             - is_current: Whether this is the current (non-rotated) log
+
     """
     import pandas as pd  # noqa: PLC0415
 
@@ -298,38 +296,37 @@ def get_task_scheduler_logs(logs_dir: str) -> list[dict]:
         if filename == "task_scheduler.log":
             # Current log file
             logs.append({
-                'log_id': 'task_scheduler_current',
-                'date': pd.Timestamp.now(),
-                'log_file': log_path,
-                'display_name': 'Current (Today)',
-                'is_current': True
+                "log_id": "task_scheduler_current",
+                "date": pd.Timestamp.now(),
+                "log_file": log_path,
+                "display_name": "Current (Today)",
+                "is_current": True,
             })
         elif filename.startswith("task_scheduler.log."):
             # Rotated log file (task_scheduler.log.YYYY-MM-DD)
             date_suffix = filename.replace("task_scheduler.log.", "")
             try:
-                log_date = pd.to_datetime(date_suffix, format='%Y-%m-%d')
-                display_name = log_date.strftime('%a %d %B %Y')
+                log_date = pd.to_datetime(date_suffix, format="%Y-%m-%d")
+                display_name = log_date.strftime("%a %d %B %Y")
                 logs.append({
-                    'log_id': f'task_scheduler_{date_suffix}',
-                    'date': log_date,
-                    'log_file': log_path,
-                    'display_name': display_name,
-                    'is_current': False
+                    "log_id": f"task_scheduler_{date_suffix}",
+                    "date": log_date,
+                    "log_file": log_path,
+                    "display_name": display_name,
+                    "is_current": False,
                 })
             except ValueError:
                 # Skip files with unexpected naming format
                 continue
 
     # Sort by date descending (newest first), with current log always first
-    logs.sort(key=lambda x: (not x['is_current'], -x['date'].timestamp() if x['date'] else 0))
+    logs.sort(key=lambda x: (not x["is_current"], -x["date"].timestamp() if x["date"] else 0))
 
     return logs
 
 
 def get_workflow_runs(logs_dir: str) -> list[dict]:
-    """
-    Extract unique workflow and task scheduler runs from log files in directory.
+    """Extract unique workflow and task scheduler runs from log files in directory.
 
     Includes both workflow_* files and task_scheduler log files (current and rotated).
 
@@ -351,6 +348,7 @@ def get_workflow_runs(logs_dir: str) -> list[dict]:
          'timestamp': datetime(...),
          'log_file': '...',
          'display_name': 'Tue 03 December 2025 14:30'}
+
     """
     import pandas as pd  # noqa: PLC0415
 
@@ -362,26 +360,26 @@ def get_workflow_runs(logs_dir: str) -> list[dict]:
         run_id = os.path.splitext(filename)[0]
 
         # Handle task_scheduler.log files (current and rotated)
-        if filename == 'task_scheduler.log':
+        if filename == "task_scheduler.log":
             # Current task scheduler log
             runs.append({
-                'run_id': 'task_scheduler_current',
-                'timestamp': pd.Timestamp.now(),
-                'log_file': log_path,
-                'display_name': 'Task Scheduler (Current)'
+                "run_id": "task_scheduler_current",
+                "timestamp": pd.Timestamp.now(),
+                "log_file": log_path,
+                "display_name": "Task Scheduler (Current)",
             })
             continue
-        elif filename.startswith('task_scheduler.log.'):
+        if filename.startswith("task_scheduler.log."):
             # Rotated task scheduler log (task_scheduler.log.YYYY-MM-DD)
-            date_suffix = filename.replace('task_scheduler.log.', '')
+            date_suffix = filename.replace("task_scheduler.log.", "")
             try:
-                log_date = pd.to_datetime(date_suffix, format='%Y-%m-%d')
+                log_date = pd.to_datetime(date_suffix, format="%Y-%m-%d")
                 display_name = f"Task Scheduler - {log_date.strftime('%a %d %B %Y')}"
                 runs.append({
-                    'run_id': f'task_scheduler_{date_suffix}',
-                    'timestamp': log_date,
-                    'log_file': log_path,
-                    'display_name': display_name
+                    "run_id": f"task_scheduler_{date_suffix}",
+                    "timestamp": log_date,
+                    "log_file": log_path,
+                    "display_name": display_name,
                 })
                 continue
             except ValueError:
@@ -389,159 +387,158 @@ def get_workflow_runs(logs_dir: str) -> list[dict]:
                 continue
 
         # Only include workflow runs (skip ffmpeg, etc.)
-        if not run_id.startswith('workflow_'):
+        if not run_id.startswith("workflow_"):
             continue
 
         # Extract timestamp from filename (format: prefix_YYYYMMdd_HHMMSS_ffffff)
-        parts = run_id.split('_')
+        parts = run_id.split("_")
         if len(parts) >= 3:  # noqa: PLR2004
             try:
                 # Combine date and time parts
                 date_str = parts[-3]  # YYYYMMdd
                 time_str = parts[-2]  # HHMMSS
                 timestamp_str = f"{date_str}_{time_str}"
-                timestamp = pd.to_datetime(timestamp_str, format='%Y%m%d_%H%M%S')
+                timestamp = pd.to_datetime(timestamp_str, format="%Y%m%d_%H%M%S")
 
                 display_name = f"Workflow - {timestamp.strftime('%a %d %B %Y %H:%M:%S')}"
 
                 runs.append({
-                    'run_id': run_id,
-                    'timestamp': timestamp,
-                    'log_file': log_path,
-                    'display_name': display_name
+                    "run_id": run_id,
+                    "timestamp": timestamp,
+                    "log_file": log_path,
+                    "display_name": display_name,
                 })
             except (ValueError, IndexError):
                 # Skip files with unexpected naming format
                 continue
 
     # Sort by timestamp descending (newest first)
-    runs.sort(key=lambda x: x['timestamp'], reverse=True)
+    runs.sort(key=lambda x: x["timestamp"], reverse=True)
 
     return runs
 
 
 # Event IDs that represent key workflow milestones for timeline tracking
 _KEY_WORKFLOW_EVENTS = [
-    'WORKFLOW_START', 'WORKFLOW_COMPLETE', 'WORKFLOW_ABORTED',
-    'WORKFLOW_INTERRUPTED', 'WORKFLOW_FATAL',
-    'PLAYLISTS_LOADED', 'BATCH_SEARCH_INITIATED',
-    'REDOWNLOAD_QUEUE_INITIATED', 'XML_EXPORT_SUCCESS',
-    'SLSKD_UNAVAILABLE', 'RESET_COMPLETE'
+    "WORKFLOW_START", "WORKFLOW_COMPLETE", "WORKFLOW_ABORTED",
+    "WORKFLOW_INTERRUPTED", "WORKFLOW_FATAL",
+    "PLAYLISTS_LOADED", "BATCH_SEARCH_INITIATED",
+    "REDOWNLOAD_QUEUE_INITIATED", "XML_EXPORT_SUCCESS",
+    "SLSKD_UNAVAILABLE", "RESET_COMPLETE",
 ]
 
 # Event IDs that are critical for dashboard analysis
 # These events are always written to file regardless of log level
 _DASHBOARD_CRITICAL_EVENTS = {
     # Metrics used for workflow analysis
-    'TRACK_ADD', 'TRACK_DELETE', 'TRACK_QUALITY_UPGRADE',
-    'PLAYLIST_ADD', 'PLAYLIST_DELETE',
-    'DOWNLOAD_FAILED', 'DOWNLOAD_COMPLETE',
-    'BATCH_SEARCH_START', 'SLSKD_REDOWNLOAD_SEARCHES_INITIATED',
-    'PLAYLISTS_PRUNED', 'PLAYLIST_TRACKS_PRUNED',
+    "TRACK_ADD", "TRACK_DELETE", "TRACK_QUALITY_UPGRADE",
+    "PLAYLIST_ADD", "PLAYLIST_DELETE",
+    "DOWNLOAD_FAILED", "DOWNLOAD_COMPLETE",
+    "BATCH_SEARCH_START", "SLSKD_REDOWNLOAD_SEARCHES_INITIATED",
+    "PLAYLISTS_PRUNED", "PLAYLIST_TRACKS_PRUNED",
     # Timeline events
-    'WORKFLOW_START', 'WORKFLOW_COMPLETE', 'WORKFLOW_ABORTED',
-    'WORKFLOW_INTERRUPTED', 'WORKFLOW_FATAL',
-    'PLAYLISTS_LOADED', 'BATCH_SEARCH_INITIATED',
-    'REDOWNLOAD_QUEUE_INITIATED', 'XML_EXPORT_SUCCESS',
-    'SLSKD_UNAVAILABLE', 'RESET_COMPLETE',
+    "WORKFLOW_START", "WORKFLOW_COMPLETE", "WORKFLOW_ABORTED",
+    "WORKFLOW_INTERRUPTED", "WORKFLOW_FATAL",
+    "PLAYLISTS_LOADED", "BATCH_SEARCH_INITIATED",
+    "REDOWNLOAD_QUEUE_INITIATED", "XML_EXPORT_SUCCESS",
+    "SLSKD_UNAVAILABLE", "RESET_COMPLETE",
 }
 
 
 def _init_workflow_metrics(total_logs: int) -> dict:
     """Initialize the metrics dictionary for workflow analysis."""
     return {
-        'total_logs': total_logs,
-        'errors': [],
-        'warnings': [],
-        'tracks_added': 0,
-        'tracks_removed': 0,
-        'tracks_upgraded': 0,
-        'playlists_added': 0,
-        'playlists_removed': 0,
-        'downloads_completed': 0,
-        'downloads_completed_new': 0,
-        'downloads_completed_upgrade': 0,
-        'downloads_failed': 0,
-        'searches_initiated': 0,
-        'new_searches': 0,
-        'upgrade_searches': 0,
-        'event_counts': {},
-        'timeline': [],
-        'workflow_status': 'unknown'
+        "total_logs": total_logs,
+        "errors": [],
+        "warnings": [],
+        "tracks_added": 0,
+        "tracks_removed": 0,
+        "tracks_upgraded": 0,
+        "playlists_added": 0,
+        "playlists_removed": 0,
+        "downloads_completed": 0,
+        "downloads_completed_new": 0,
+        "downloads_completed_upgrade": 0,
+        "downloads_failed": 0,
+        "searches_initiated": 0,
+        "new_searches": 0,
+        "upgrade_searches": 0,
+        "event_counts": {},
+        "timeline": [],
+        "workflow_status": "unknown",
     }
 
 
 def _update_metrics_for_event(metrics: dict, entry: dict) -> None:
     """Update metrics counters based on the log entry's event_id."""
-    event_id = entry.get('event_id', '')
-    context = entry.get('context', {})
+    event_id = entry.get("event_id", "")
+    context = entry.get("context", {})
 
     # Count events
-    metrics['event_counts'][event_id] = metrics['event_counts'].get(event_id, 0) + 1
+    metrics["event_counts"][event_id] = metrics["event_counts"].get(event_id, 0) + 1
 
     # Track specific metrics using a mapping
     event_counter_map = {
-        'TRACK_ADD': 'tracks_added',
-        'TRACK_QUALITY_UPGRADE': 'tracks_upgraded',
-        'PLAYLIST_ADD': 'playlists_added',
-        'DOWNLOAD_FAILED': 'downloads_failed',
-        'SLSKD_SEARCH_CREATE': 'searches_initiated',
-        'TRACK_DELETE': 'tracks_removed',
-        'PLAYLIST_DELETE': 'playlists_removed',
+        "TRACK_ADD": "tracks_added",
+        "TRACK_QUALITY_UPGRADE": "tracks_upgraded",
+        "PLAYLIST_ADD": "playlists_added",
+        "DOWNLOAD_FAILED": "downloads_failed",
+        "SLSKD_SEARCH_CREATE": "searches_initiated",
+        "TRACK_DELETE": "tracks_removed",
+        "PLAYLIST_DELETE": "playlists_removed",
     }
 
     if event_id in event_counter_map:
         metrics[event_counter_map[event_id]] += 1
-    elif event_id == 'DOWNLOAD_COMPLETE':
-        metrics['downloads_completed'] += 1
-        is_new = context.get('is_new', None)
+    elif event_id == "DOWNLOAD_COMPLETE":
+        metrics["downloads_completed"] += 1
+        is_new = context.get("is_new", None)
         if is_new is True:
-            metrics['downloads_completed_new'] += 1
+            metrics["downloads_completed_new"] += 1
         elif is_new is False:
-            metrics['downloads_completed_upgrade'] += 1
-    elif event_id == 'BATCH_SEARCH_START':
-        metrics['new_searches'] = context.get('total_tracks', 0)
-    elif event_id == 'SLSKD_REDOWNLOAD_SEARCHES_INITIATED':
-        metrics['upgrade_searches'] = context.get('initiated_count', 0)
-    elif event_id == 'PLAYLISTS_PRUNED':
-        metrics['playlists_removed'] += int(context.get('removed_count', 0) or 0)
-    elif event_id == 'PLAYLIST_TRACKS_PRUNED':
+            metrics["downloads_completed_upgrade"] += 1
+    elif event_id == "BATCH_SEARCH_START":
+        metrics["new_searches"] = context.get("total_tracks", 0)
+    elif event_id == "SLSKD_REDOWNLOAD_SEARCHES_INITIATED":
+        metrics["upgrade_searches"] = context.get("initiated_count", 0)
+    elif event_id == "PLAYLISTS_PRUNED":
+        metrics["playlists_removed"] += int(context.get("removed_count", 0) or 0)
+    elif event_id == "PLAYLIST_TRACKS_PRUNED":
         # Tracks removed here are only those actually deleted in DB (context should reflect that count)
-        metrics['tracks_removed'] += int(context.get('removed', 0) or 0)
+        metrics["tracks_removed"] += int(context.get("removed", 0) or 0)
 
 
 def _update_workflow_status(metrics: dict, event_id: str) -> None:
     """Update the workflow status based on completion/failure events."""
-    if event_id == 'WORKFLOW_COMPLETE':
-        metrics['workflow_status'] = 'completed'
-    elif event_id in ['WORKFLOW_ABORTED', 'WORKFLOW_INTERRUPTED', 'WORKFLOW_FATAL']:
-        metrics['workflow_status'] = 'failed'
+    if event_id == "WORKFLOW_COMPLETE":
+        metrics["workflow_status"] = "completed"
+    elif event_id in ["WORKFLOW_ABORTED", "WORKFLOW_INTERRUPTED", "WORKFLOW_FATAL"]:
+        metrics["workflow_status"] = "failed"
 
 
 def _add_timeline_entry(metrics: dict, entry: dict, pd_module: Any) -> None:
     """Add a timeline entry for key workflow events."""
-    event_id = entry.get('event_id', '')
+    event_id = entry.get("event_id", "")
     if event_id not in _KEY_WORKFLOW_EVENTS:
         return
 
-    timestamp = entry.get('timestamp', '')
-    message = entry.get('message', '')
+    timestamp = entry.get("timestamp", "")
+    message = entry.get("message", "")
 
     try:
-        ts = pd_module.to_datetime(timestamp, format='%Y%m%d_%H%M%S_%f')
-        metrics['timeline'].append({
-            'timestamp': ts,
-            'event_id': event_id,
-            'message': message,
-            'display_time': ts.strftime('%H:%M:%S')
+        ts = pd_module.to_datetime(timestamp, format="%Y%m%d_%H%M%S_%f")
+        metrics["timeline"].append({
+            "timestamp": ts,
+            "event_id": event_id,
+            "message": message,
+            "display_time": ts.strftime("%H:%M:%S"),
         })
     except Exception:
         pass
 
 
 def analyze_workflow_run(log_file: str) -> dict:
-    """
-    Analyze a single workflow run and extract key metrics.
+    """Analyze a single workflow run and extract key metrics.
 
     Args:
         log_file: Path to workflow log file
@@ -564,6 +561,7 @@ def analyze_workflow_run(log_file: str) -> dict:
         >>> analysis = analyze_workflow_run('logs/workflow_20251203.log')
         >>> analysis['tracks_added']
         42
+
     """
     import pandas as pd  # noqa: PLC0415
 
@@ -571,14 +569,14 @@ def analyze_workflow_run(log_file: str) -> dict:
     metrics = _init_workflow_metrics(len(log_entries))
 
     for entry in log_entries:
-        level = entry.get('level', '')
-        event_id = entry.get('event_id', '')
+        level = entry.get("level", "")
+        event_id = entry.get("event_id", "")
 
         # Collect errors and warnings
-        if level == 'ERROR':
-            metrics['errors'].append(entry)
-        elif level == 'WARNING':
-            metrics['warnings'].append(entry)
+        if level == "ERROR":
+            metrics["errors"].append(entry)
+        elif level == "WARNING":
+            metrics["warnings"].append(entry)
 
         # Update metrics and timeline
         _update_metrics_for_event(metrics, entry)
@@ -586,18 +584,17 @@ def analyze_workflow_run(log_file: str) -> dict:
         _update_workflow_status(metrics, event_id)
 
     # Sort timeline by timestamp
-    metrics['timeline'].sort(key=lambda x: x['timestamp'])
+    metrics["timeline"].sort(key=lambda x: x["timestamp"])
 
     # If no completion event found, mark as incomplete
-    if metrics['workflow_status'] == 'unknown' and metrics['total_logs'] > 0:
-        metrics['workflow_status'] = 'incomplete'
+    if metrics["workflow_status"] == "unknown" and metrics["total_logs"] > 0:
+        metrics["workflow_status"] = "incomplete"
 
     return metrics
 
 
 class _DashboardAwareFilter(logging.Filter):
-    """
-    Custom filter that ensures dashboard-critical logs are always written to file,
+    """Custom filter that ensures dashboard-critical logs are always written to file,
     while other logs respect the configured LOG_LEVEL.
 
     This filter allows:
@@ -610,31 +607,31 @@ class _DashboardAwareFilter(logging.Filter):
     """
 
     def __init__(self, configured_level: int):
-        """
-        Initialize filter with configured log level.
+        """Initialize filter with configured log level.
 
         Args:
             configured_level: Minimum level for non-critical logs (logging.DEBUG, INFO, etc.)
+
         """
         super().__init__()
         self.configured_level = configured_level
 
     def filter(self, record: logging.LogRecord) -> bool:
-        """
-        Determine if a log record should be written to file.
+        """Determine if a log record should be written to file.
 
         Args:
             record: LogRecord to evaluate
 
         Returns:
             True if log should be written, False otherwise
+
         """
         # Always allow WARNING and ERROR logs
         if record.levelno >= logging.WARNING:
             return True
 
         # Always allow logs with dashboard-critical event_ids
-        event_id = getattr(record, 'event_id', None)
+        event_id = getattr(record, "event_id", None)
         if event_id in _DASHBOARD_CRITICAL_EVENTS:
             return True
 
@@ -646,10 +643,9 @@ def setup_logging(  # noqa: PLR0915
     logs_dir: str | None = None,
     log_level: int = logging.INFO,
     log_name_prefix: str = "run",
-    rotate_daily: bool = False
+    rotate_daily: bool = False,
 ) -> None:
-    """
-    Configure logging system with console and file output.
+    """Configure logging system with console and file output.
 
     This function is idempotent - subsequent calls after the first initialization
     have no effect. Log files are organized by environment and date, with
@@ -697,6 +693,7 @@ def setup_logging(  # noqa: PLR0915
     Note:
         Must be called before any logging operations. Subsequent calls are no-ops.
         Dashboard-critical logs are always written to file regardless of LOG_LEVEL.
+
     """
     global _LOGGING_INITIALIZED  # noqa: PLW0603
 
@@ -704,20 +701,20 @@ def setup_logging(  # noqa: PLR0915
         return
 
     # Get configured log level from environment, defaulting to INFO
-    log_level_str = os.getenv('LOG_LEVEL', 'INFO').upper()
+    log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
     try:
         configured_level = getattr(logging, log_level_str, logging.INFO)
     except AttributeError:
         configured_level = logging.INFO
 
     # Override function parameter with environment variable if set
-    if 'LOG_LEVEL' in os.environ:
+    if "LOG_LEVEL" in os.environ:
         log_level = configured_level
 
     # Determine environment-specific logs directory
     if logs_dir is None:
-        ENV = os.getenv('APP_ENV', 'default')
-        base_dir = os.path.join(os.path.dirname(__file__), '..', 'observability')
+        ENV = os.getenv("APP_ENV", "default")
+        base_dir = os.path.join(os.path.dirname(__file__), "..", "observability")
         logs_dir = os.path.join(base_dir, "logs", ENV)
 
     if rotate_daily:
@@ -732,7 +729,7 @@ def setup_logging(  # noqa: PLR0915
             logs_dir,
             now.strftime("%Y"),
             now.strftime("%m"),
-            now.strftime("%d")
+            now.strftime("%d"),
         )
         os.makedirs(dated_logs_dir, exist_ok=True)
 
@@ -751,7 +748,7 @@ def setup_logging(  # noqa: PLR0915
 
     # Silence noisy third-party library loggers (spotipy, urllib3, requests)
     # These libraries log entire API responses at DEBUG level, which is excessive
-    for lib_name in ['urllib3', 'requests', 'spotipy', 'charset_normalizer', 'watchdog']:
+    for lib_name in ["urllib3", "requests", "spotipy", "charset_normalizer", "watchdog"]:
         lib_logger = logging.getLogger(lib_name)
         lib_logger.setLevel(logging.WARNING)  # Only show warnings and errors from these libs
 
@@ -783,10 +780,10 @@ def setup_logging(  # noqa: PLR0915
         # Use TimedRotatingFileHandler for daemon processes - rotates at midnight
         file_handler = logging.handlers.TimedRotatingFileHandler(
             log_path,
-            when='midnight',
+            when="midnight",
             interval=1,
             backupCount=30,  # Keep 30 days of logs
-            encoding='utf-8'
+            encoding="utf-8",
         )
         # Add date suffix to rotated files (e.g., task_scheduler.log.2025-12-10)
         file_handler.suffix = "%Y-%m-%d"
@@ -811,14 +808,13 @@ def setup_logging(  # noqa: PLR0915
         "rotate_daily": rotate_daily,
         "log_level": log_level_str,
         "console_level": log_level_str,
-        "dashboard_events_always_logged": True
+        "dashboard_events_always_logged": True,
     })
     _LOGGING_INITIALIZED = True
 
 # Public Logging API
 class write_log:
-    """
-    Structured logging interface with event-based categorization.
+    """Structured logging interface with event-based categorization.
 
     All methods accept an event_id for log categorization and optional context
     for structured data. Use this class instead of direct logging calls for
@@ -827,6 +823,7 @@ class write_log:
     Example:
         >>> write_log.info("DB_CONNECT", "Connecting to database", {"db_path": "/path/to/db"})
         >>> write_log.error("API_FAIL", "Failed to connect", {"error": str(e)})
+
     """
 
     @staticmethod

@@ -1,5 +1,4 @@
-"""
-Spotify playlist scraper module.
+"""Spotify playlist scraper module.
 
 This module provides functionality to extract track information from Spotify
 playlists using the Spotify Web API. It handles authentication, pagination,
@@ -29,8 +28,7 @@ load_dotenv()
 
 
 def clean_name(name: str) -> str:
-    """
-    Normalize track and artist names for improved search consistency.
+    """Normalize track and artist names for improved search consistency.
 
     Removes common punctuation and normalizes whitespace that may interfere
     with Soulseek search queries. This improves match rates.
@@ -46,6 +44,7 @@ def clean_name(name: str) -> str:
         "DC Breaks InsideInfo Remix"
         >>> clean_name("Track  Name   (feat.  Artist)")
         "Track Name feat Artist"
+
     """
     # Remove problematic punctuation that interferes with searches
     name = name.replace(",", "")
@@ -59,8 +58,7 @@ def clean_name(name: str) -> str:
 
 
 def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, str, str]]]:
-    """
-    Extract track information and playlist name from a Spotify playlist.
+    """Extract track information and playlist name from a Spotify playlist.
 
     This function:
     1. Authenticates with the Spotify API using client credentials
@@ -90,6 +88,7 @@ def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, st
         "My Playlist Name"
         >>> print(tracks[0])
         ("5ms8IkagrFWObtzSOahVrx", "MASTER BOOT RECORD", "Skynet")
+
     """
     # Validate API credentials
     client_id = os.getenv("SPOTIFY_CLIENT_ID")
@@ -104,7 +103,7 @@ def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, st
     try:
         auth_manager = SpotifyClientCredentials(
             client_id=client_id,
-            client_secret=client_secret
+            client_secret=client_secret,
         )
         sp = spotipy.Spotify(auth_manager=auth_manager)
     except Exception as e:

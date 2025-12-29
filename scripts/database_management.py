@@ -1,5 +1,4 @@
-"""
-Database management module for Spotiseek application.
+"""Database management module for Spotiseek application.
 
 This module provides a thread-safe singleton interface for managing the SQLite database
 that tracks music playlists (Spotify, SoundCloud), tracks, download statuses, and mappings
@@ -20,7 +19,7 @@ from scripts.logs_utils import write_log
 # Get environment configuration (used by TrackDB class)
 # Note: Avoid hard-binding to ENV/DB_PATH at import time for long-lived processes.
 _IMPORT_ENV = os.getenv("APP_ENV")
-_BASE_DB_DIR = os.path.join(os.path.dirname(__file__), '..', 'output')
+_BASE_DB_DIR = os.path.join(os.path.dirname(__file__), "..", "output")
 _IMPORT_DB_PATH = (
     os.path.join(_BASE_DB_DIR, _IMPORT_ENV, f"database_{_IMPORT_ENV}.db")
     if _IMPORT_ENV else None
@@ -30,6 +29,7 @@ _IMPORT_DB_PATH = (
 @dataclass
 class TrackData:
     """Data class for track information to reduce function parameters."""
+
     track_id: str
     track_name: str
     artist: str
@@ -42,8 +42,7 @@ class TrackData:
 
 
 class TrackDB:
-    """
-    Thread-safe singleton database manager for track and playlist management.
+    """Thread-safe singleton database manager for track and playlist management.
 
     This class implements the Singleton pattern to ensure only one database connection
     exists throughout the application lifecycle. It manages:
@@ -53,6 +52,7 @@ class TrackDB:
 
     Attributes:
         conn: SQLite database connection
+
     """
 
     # Maintain one instance per absolute db_path
@@ -67,7 +67,7 @@ class TrackDB:
             env_now = os.getenv("APP_ENV")
             if not env_now:
                 raise OSError(
-                    "APP_ENV environment variable is not set. Database interaction is disabled."
+                    "APP_ENV environment variable is not set. Database interaction is disabled.",
                 )
             db_dir_now = os.path.join(_BASE_DB_DIR, env_now)
             resolved_db_path = os.path.join(db_dir_now, f"database_{env_now}.db")
@@ -84,14 +84,14 @@ class TrackDB:
         return inst
 
     def __init__(self):
-        """
-        Initialize the database connection and create tables if needed.
+        """Initialize the database connection and create tables if needed.
 
         Args:
             db_path: Optional path to the SQLite database file. If not provided, constructed from current APP_ENV.
 
         Note:
             Due to singleton pattern, initialization only happens once per application run.
+
         """
         if self._initialized:
             return
@@ -112,8 +112,7 @@ class TrackDB:
         self._create_tables()
 
     def clear_database(self) -> None:
-        """
-        Delete the database file and reinitialize with empty tables.
+        """Delete the database file and reinitialize with empty tables.
 
         This method includes safeguards for production environments, requiring
         explicit user confirmation before proceeding with deletion.
@@ -124,6 +123,7 @@ class TrackDB:
         Warning:
             This operation is destructive and cannot be undone. All track, playlist,
             and download mapping data will be permanently lost.
+
         """
         # Production environment safeguard (evaluate at runtime)
         env_now = os.getenv("APP_ENV")
@@ -132,16 +132,16 @@ class TrackDB:
                 confirm = input(
                     f"APP_ENV is: {env_now}.\n"
                     "Are you sure you want to delete the database? "
-                    "This action cannot be undone. Type 'yes' to continue: "
+                    "This action cannot be undone. Type 'yes' to continue: ",
                 )
             except EOFError:
                 write_log.error(
                     "DB_CLEAR_CONFIRM_FAIL",
                     "No input available for confirmation prompt. Aborting clear_database().",
-                    {"ENV": env_now}
+                    {"ENV": env_now},
                 )
                 raise RuntimeError(
-                    "No input available for confirmation prompt. Aborting clear_database()."
+                    "No input available for confirmation prompt. Aborting clear_database().",
                 ) from None
 
             if confirm.strip().lower() != "yes":
@@ -165,8 +165,7 @@ class TrackDB:
         self._create_tables()
 
     def _create_tables(self) -> None:
-        """
-        Create database schema if it doesn't already exist.
+        """Create database schema if it doesn't already exist.
 
         Schema includes:
         - tracks: Track metadata and download status (supports Spotify, SoundCloud, etc.)
@@ -275,42 +274,43 @@ class TrackDB:
         self.conn.commit()
 
     def add_slskd_blacklist(self, slskd_uuid: str, reason: str | None = None) -> None:
-        """
-        Add a slskd_uuid to the blacklist table.
+        """Add a slskd_uuid to the blacklist table.
+
         Args:
             slskd_uuid: The Soulseek download UUID to blacklist
             reason: Optional reason for blacklisting
+
         """
         write_log.info(
             "SLSKD_BLACKLIST_ADD",
             "Adding slskd_uuid to blacklist.",
-            {"slskd_uuid": slskd_uuid, "reason": reason}
+            {"slskd_uuid": slskd_uuid, "reason": reason},
         )
         cursor = self.conn.cursor()
         cursor.execute(
             "INSERT OR IGNORE INTO slskd_blacklist (slskd_uuid, reason) VALUES (?, ?)",
-            (slskd_uuid, reason)
+            (slskd_uuid, reason),
         )
         self.conn.commit()
 
     def is_slskd_blacklisted(self, slskd_uuid: str) -> bool:
-        """
-        Check if a slskd_uuid is blacklisted.
+        """Check if a slskd_uuid is blacklisted.
+
         Args:
             slskd_uuid: The Soulseek download UUID to check
         Returns:
             True if blacklisted, False otherwise
+
         """
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT 1 FROM slskd_blacklist WHERE slskd_uuid = ?",
-            (slskd_uuid,)
+            (slskd_uuid,),
         )
         return cursor.fetchone() is not None
 
     def add_track(self, track_data: TrackData) -> None:
-        """
-        Add a track to the database if it doesn't already exist.
+        """Add a track to the database if it doesn't already exist.
 
         Args:
             track_data: TrackData object containing track information
@@ -318,6 +318,7 @@ class TrackDB:
         Note:
             Uses INSERT OR IGNORE to prevent duplicate entries. If the track
             already exists, this operation has no effect.
+
         """
         cursor = self.conn.cursor()
 
@@ -334,8 +335,8 @@ class TrackDB:
                     "source": track_data.source,
                     "status": track_data.download_status,
                     "extension": track_data.extension,
-                    "bitrate": track_data.bitrate
-                }
+                    "bitrate": track_data.bitrate,
+                },
             )
 
         cursor.execute(
@@ -347,13 +348,12 @@ class TrackDB:
             """,
             (track_data.track_id, track_data.track_name, track_data.artist,
                track_data.source, track_data.download_status, track_data.failed_reason,
-               track_data.slskd_file_name, track_data.extension, track_data.bitrate)
+               track_data.slskd_file_name, track_data.extension, track_data.bitrate),
         )
         self.conn.commit()
 
     def add_playlist(self, playlist_url: str, m3u8_path: str | None = None, playlist_name: str | None = None) -> int:
-        """
-        Add a new playlist to the database if it doesn't already exist.
+        """Add a new playlist to the database if it doesn't already exist.
 
         Args:
             playlist_url: Name of the playlist
@@ -362,20 +362,21 @@ class TrackDB:
 
         Returns:
             The database ID of the playlist (existing or newly created)
+
         """
         cursor = self.conn.cursor()
 
         # Check if the playlist already exists
         cursor.execute(
             "SELECT rowid FROM playlists WHERE playlist_url = ?",
-            (playlist_url,)
+            (playlist_url,),
         )
         result = cursor.fetchone()
 
         if result:
             cursor.execute(
                 "UPDATE playlists SET m3u8_path = ?, playlist_name = ? WHERE playlist_url = ?",
-                (m3u8_path, playlist_name, playlist_url)
+                (m3u8_path, playlist_name, playlist_url),
             )
             self.conn.commit()
             return result[0]  # Return the existing playlist ID
@@ -384,78 +385,79 @@ class TrackDB:
         write_log.debug("PLAYLIST_ADD", "Adding playlist.", {"playlist_url": playlist_url})
         cursor.execute(
             "INSERT INTO playlists (playlist_url, m3u8_path, playlist_name) VALUES (?, ?, ?)",
-            (playlist_url, m3u8_path, playlist_name)
+            (playlist_url, m3u8_path, playlist_name),
         )
         self.conn.commit()
         return cursor.lastrowid
 
     def update_playlist_m3u8_path(self, playlist_url: str, m3u8_path: str) -> None:
-        """
-        Update the m3u8_path for a playlist.
+        """Update the m3u8_path for a playlist.
+
         Args:
             playlist_url: Playlist URL
             m3u8_path: Path to the m3u8 file
+
         """
         write_log.debug(
             "PLAYLIST_M3U8_UPDATE",
             "Updating m3u8_path for playlist.",
-            {"playlist_url": playlist_url, "m3u8_path": m3u8_path}
+            {"playlist_url": playlist_url, "m3u8_path": m3u8_path},
         )
         cursor = self.conn.cursor()
         cursor.execute(
             "UPDATE playlists SET m3u8_path = ? WHERE playlist_url = ?",
-            (m3u8_path, playlist_url)
+            (m3u8_path, playlist_url),
         )
         self.conn.commit()
 
     def update_playlist_name(self, playlist_url: str, playlist_name: str) -> None:
-        """
-        Update the playlist_name for a playlist.
+        """Update the playlist_name for a playlist.
+
         Args:
             playlist_url: Playlist URL
             playlist_name: Name of the playlist from Spotify
+
         """
         write_log.debug(
             "PLAYLIST_NAME_UPDATE",
             "Updating playlist_name for playlist.",
-            {"playlist_url": playlist_url, "playlist_name": playlist_name}
+            {"playlist_url": playlist_url, "playlist_name": playlist_name},
         )
         cursor = self.conn.cursor()
         cursor.execute(
             "UPDATE playlists SET playlist_name = ? WHERE playlist_url = ?",
-            (playlist_name, playlist_url)
+            (playlist_name, playlist_url),
         )
         self.conn.commit()
 
     def set_playlist_display_order(self, playlist_url: str, display_order: int) -> None:
-        """
-        Set or update the display order for a playlist, creating it if needed.
+        """Set or update the display order for a playlist, creating it if needed.
 
         Args:
             playlist_url: Playlist URL
             display_order: Zero-based order from CSV
+
         """
         write_log.debug(
             "PLAYLIST_ORDER_SET",
             "Setting display order for playlist.",
-            {"playlist_url": playlist_url, "display_order": display_order}
+            {"playlist_url": playlist_url, "display_order": display_order},
         )
         cursor = self.conn.cursor()
         # Ensure playlist row exists
         cursor.execute(
             "INSERT OR IGNORE INTO playlists (playlist_url) VALUES (?)",
-            (playlist_url,)
+            (playlist_url,),
         )
         # Update display_order
         cursor.execute(
             "UPDATE playlists SET display_order = ? WHERE playlist_url = ?",
-            (display_order, playlist_url)
+            (display_order, playlist_url),
         )
         self.conn.commit()
 
     def link_track_to_playlist(self, track_id: str, playlist_url: str) -> None:
-        """
-        Create an association between a track and a playlist.
+        """Create an association between a track and a playlist.
 
         Args:
             track_id: Track identifier
@@ -464,16 +466,17 @@ class TrackDB:
         Note:
             Uses INSERT OR IGNORE to prevent duplicate associations.
             A track can be linked to multiple playlists.
+
         """
         write_log.debug(
             "TRACK_LINK_PLAYLIST",
             "Linking track to playlist.",
-            {"track_id": track_id, "playlist_url": playlist_url}
+            {"track_id": track_id, "playlist_url": playlist_url},
         )
         cursor = self.conn.cursor()
         cursor.execute(
             "INSERT OR IGNORE INTO playlist_tracks (playlist_url, track_id) VALUES (?, ?)",
-            (playlist_url, track_id)
+            (playlist_url, track_id),
         )
         self.conn.commit()
 
@@ -481,15 +484,15 @@ class TrackDB:
         self,
         track_id: str,
         status: str,
-        failed_reason: str | None = None
+        failed_reason: str | None = None,
     ) -> None:
-        """
-        Update the download status for a track.
+        """Update the download status for a track.
 
         Args:
             track_id: Track identifier
             status: New download status (e.g., "pending", "downloading", "completed", "failed")
             failed_reason: Optional reason when status is set to "failed"
+
         """
         context = {"track_id": track_id, "status": status}
         if failed_reason:
@@ -499,27 +502,27 @@ class TrackDB:
         if status == "failed":
             cursor.execute(
                 "UPDATE tracks SET download_status = ?, failed_reason = ? WHERE track_id = ?",
-                (status, failed_reason, track_id)
+                (status, failed_reason, track_id),
             )
         else:
             cursor.execute(
                 "UPDATE tracks SET download_status = ?, failed_reason = NULL WHERE track_id = ?",
-                (status, track_id)
+                (status, track_id),
             )
         self.conn.commit()
 
     def update_slskd_file_name(
         self,
         track_id: str,
-        slskd_file_name: str
+        slskd_file_name: str,
     ) -> None:
-        """
-        Update the Soulseek file name for a track.
+        """Update the Soulseek file name for a track.
         Only store the last subdirectory and filename (e.g., 'folder/filename.ext' or 'folder\\filename.ext').
 
         Args:
             track_id: Track identifier
             slskd_file_name: Soulseek filename to update (may be a full or partial path)
+
         """
         # Normalize path separators
         norm_path = slskd_file_name.replace("/", "\\")
@@ -534,213 +537,210 @@ class TrackDB:
         write_log.debug(
             "TRACK_SLSKD_FILENAME_UPDATE", "Updating Soulseek file name for track.", {
                 "track_id": track_id,
-                "slskd_file_name": trimmed
-            }
+                "slskd_file_name": trimmed,
+            },
         )
         cursor = self.conn.cursor()
         cursor.execute(
             "UPDATE tracks SET slskd_file_name = ? WHERE track_id = ?",
-            (trimmed, track_id)
+            (trimmed, track_id),
         )
         self.conn.commit()
 
     def update_extension_bitrate(
-        self, track_id: str, extension: str | None = None, bitrate: int | None = None
+        self, track_id: str, extension: str | None = None, bitrate: int | None = None,
     ) -> None:
-        """
-        Update the extension and bitrate for a track.
+        """Update the extension and bitrate for a track.
+
         Args:
             track_id: Track identifier
             extension: File extension (e.g., 'mp3', 'wav')
             bitrate: Bitrate in kbps (e.g., 320)
+
         """
         write_log.debug(
             "TRACK_UPDATE_EXT_BITRATE",
             "Updating extension and bitrate for track.",
-            {"track_id": track_id, "extension": extension, "bitrate": bitrate}
+            {"track_id": track_id, "extension": extension, "bitrate": bitrate},
         )
         cursor = self.conn.cursor()
         cursor.execute(
             "UPDATE tracks SET extension = ?, bitrate = ? WHERE track_id = ?",
-            (extension, bitrate, track_id)
+            (extension, bitrate, track_id),
         )
         self.conn.commit()
 
     def get_tracks_by_status(self, status: str) -> list[tuple]:
-        """
-        Retrieve all tracks with a specific download status.
+        """Retrieve all tracks with a specific download status.
 
         Args:
             status: Download status to filter by
 
         Returns:
             List of tuples containing all track fields for matching tracks
+
         """
         write_log.info("TRACKS_QUERY_STATUS", "Querying tracks by status.", {"status": status})
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT * FROM tracks WHERE download_status = ?",
-            (status,)
+            (status,),
         )
         return cursor.fetchall()
 
     def set_search_uuid(self, track_id: str, slskd_search_uuid: str | None) -> None:
-        """
-        Set or update the search UUID for a given Spotify track.
+        """Set or update the search UUID for a given Spotify track.
         """
         write_log.debug(
             "SLSKD_SEARCH_UUID_SET",
             "Setting search UUID for track.",
-            {"track_id": track_id, "slskd_search_uuid": slskd_search_uuid}
+            {"track_id": track_id, "slskd_search_uuid": slskd_search_uuid},
         )
         cursor = self.conn.cursor()
         cursor.execute(
             "UPDATE tracks SET slskd_search_uuid = ? WHERE track_id = ?",
-            (slskd_search_uuid, track_id)
+            (slskd_search_uuid, track_id),
         )
         self.conn.commit()
 
     def set_download_uuid(self, track_id: str, slskd_download_uuid: str | None, username: str | None = None) -> None:
-        """
-        Set or update the download UUID (and optionally username) for a given Spotify track.
+        """Set or update the download UUID (and optionally username) for a given Spotify track.
         Username is updated only if provided (non-None).
         """
         write_log.debug(
             "SLSKD_DOWNLOAD_UUID_SET",
             "Setting download UUID for track.",
-            {"track_id": track_id, "slskd_download_uuid": slskd_download_uuid, "username": username}
+            {"track_id": track_id, "slskd_download_uuid": slskd_download_uuid, "username": username},
         )
         cursor = self.conn.cursor()
         if username is not None:
             cursor.execute(
                 "UPDATE tracks SET slskd_download_uuid = ?, username = ? WHERE track_id = ?",
-                (slskd_download_uuid, username, track_id)
+                (slskd_download_uuid, username, track_id),
             )
         else:
             cursor.execute(
                 "UPDATE tracks SET slskd_download_uuid = ? WHERE track_id = ?",
-                (slskd_download_uuid, track_id)
+                (slskd_download_uuid, track_id),
             )
         self.conn.commit()
 
     def get_username_by_slskd_uuid(self, slskd_uuid: str) -> str | None:
-        """
-        Retrieve the Soulseek username associated with a download UUID.
+        """Retrieve the Soulseek username associated with a download UUID.
 
         Args:
             slskd_uuid: Soulseek download UUID
 
         Returns:
             Username if found, None otherwise
+
         """
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT username FROM tracks WHERE slskd_download_uuid = ?",
-            (slskd_uuid,)
+            (slskd_uuid,),
         )
         result = cursor.fetchone()
         return result[0] if result else None
 
     def delete_slskd_mapping(self, slskd_uuid: str) -> None:
-        """
-        Clear the Soulseek download UUID mapping for a track.
+        """Clear the Soulseek download UUID mapping for a track.
 
         Args:
             slskd_uuid: Soulseek download UUID to remove
+
         """
         write_log.debug("SLSKD_MAPPING_DELETE", "Clearing slskd download UUID.", {"slskd_uuid": slskd_uuid})
         cursor = self.conn.cursor()
         cursor.execute(
             "UPDATE tracks SET slskd_download_uuid = NULL WHERE slskd_download_uuid = ?",
-            (slskd_uuid,)
+            (slskd_uuid,),
         )
         self.conn.commit()
 
     def get_track_id_by_slskd_search_uuid(self, slskd_uuid: str) -> str | None:
-        """
-        Retrieve the Spotify ID associated with a Soulseek search UUID.
+        """Retrieve the Spotify ID associated with a Soulseek search UUID.
 
         Args:
             slskd_uuid: Soulseek search UUID
 
         Returns:
             Spotify track ID if found, None otherwise
+
         """
         write_log.debug(
             "SLSKD_QUERY_TRACK_ID",
             "Querying Spotify ID for slskd_search_uuid.",
-            {"slskd_uuid": slskd_uuid}
+            {"slskd_uuid": slskd_uuid},
         )
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT track_id FROM tracks WHERE slskd_search_uuid = ?",
-            (slskd_uuid,)
+            (slskd_uuid,),
         )
         result = cursor.fetchone()
         return result[0] if result else None
 
     def get_track_id_by_slskd_download_uuid(self, slskd_uuid: str) -> str | None:
-        """
-        Retrieve the Spotify ID associated with a Soulseek download UUID.
+        """Retrieve the Spotify ID associated with a Soulseek download UUID.
 
         Args:
             slskd_uuid: Soulseek download UUID
 
         Returns:
             Spotify track ID if found, None otherwise
+
         """
         write_log.debug(
             "SLSKD_QUERY_TRACK_ID_DOWNLOAD",
             "Querying Spotify ID for slskd_download_uuid.",
-            {"slskd_uuid": slskd_uuid}
+            {"slskd_uuid": slskd_uuid},
         )
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT track_id FROM tracks WHERE slskd_download_uuid = ?",
-            (slskd_uuid,)
+            (slskd_uuid,),
         )
         result = cursor.fetchone()
         return result[0] if result else None
 
     def get_download_uuid_by_track_id(self, track_id: str) -> str | None:
-        """
-        Retrieve the Soulseek download UUID associated with a Spotify track ID.
+        """Retrieve the Soulseek download UUID associated with a Spotify track ID.
         """
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT slskd_download_uuid FROM tracks WHERE track_id = ?",
-            (track_id,)
+            (track_id,),
         )
         result = cursor.fetchone()
         return result[0] if result else None
 
     def get_search_uuid_by_track_id(self, track_id: str) -> str | None:
-        """
-        Retrieve the Soulseek search UUID associated with a Spotify track ID.
+        """Retrieve the Soulseek search UUID associated with a Spotify track ID.
         """
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT slskd_search_uuid FROM tracks WHERE track_id = ?",
-            (track_id,)
+            (track_id,),
         )
         result = cursor.fetchone()
         return result[0] if result else None
 
     def get_track_status(self, track_id: str) -> str | None:
-        """
-        Retrieve the download status of a track.
+        """Retrieve the download status of a track.
 
         Args:
             track_id: Track identifier
 
         Returns:
             Download status string if track exists, None otherwise
+
         """
         write_log.debug("TRACK_STATUS_QUERY", "Querying track status.", {"track_id": track_id})
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT download_status FROM tracks WHERE track_id = ?",
-            (track_id,)
+            (track_id,),
         )
         result = cursor.fetchone()
         status = result[0] if result else None
@@ -748,78 +748,77 @@ class TrackDB:
         return status
 
     def get_track_extension(self, track_id: str) -> str | None:
-        """
-        Retrieve the file extension of a track.
+        """Retrieve the file extension of a track.
 
         Args:
             track_id: Track identifier
 
         Returns:
             File extension string if track exists, None otherwise
+
         """
         write_log.debug("TRACK_EXTENSION_QUERY", "Querying track extension.", {"track_id": track_id})
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT extension FROM tracks WHERE track_id = ?",
-            (track_id,)
+            (track_id,),
         )
         result = cursor.fetchone()
         extension = result[0] if result else None
         write_log.debug(
             "TRACK_EXTENSION_RESULT",
             "Track extension result.",
-            {"track_id": track_id, "extension": extension}
+            {"track_id": track_id, "extension": extension},
         )
         return extension
 
     def get_local_file_path(self, track_id: str) -> str | None:
-        """
-        Retrieve the local file path of a track.
+        """Retrieve the local file path of a track.
 
         Args:
             track_id: Track identifier
 
         Returns:
             Local file path string if track exists and has one, None otherwise
+
         """
         write_log.debug("TRACK_LOCAL_PATH_QUERY", "Querying local_file_path for track.", {"track_id": track_id})
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT local_file_path FROM tracks WHERE track_id = ?",
-            (track_id,)
+            (track_id,),
         )
         result = cursor.fetchone()
         local_path = result[0] if result else None
         write_log.debug(
             "TRACK_LOCAL_PATH_RESULT",
             "Track local_file_path result.",
-            {"track_id": track_id, "local_file_path": local_path}
+            {"track_id": track_id, "local_file_path": local_path},
         )
         return local_path
 
     def update_local_file_path(self, track_id: str, local_file_path: str) -> None:
-        """
-        Update the local filesystem path for a downloaded track.
+        """Update the local filesystem path for a downloaded track.
 
         Args:
             track_id: Track identifier
             local_file_path: Absolute path to the downloaded file
+
         """
         write_log.debug(
             "TRACK_LOCAL_PATH_UPDATE",
             "Updating local_file_path for track.",
-            {"track_id": track_id, "local_file_path": local_file_path}
+            {"track_id": track_id, "local_file_path": local_file_path},
         )
         cursor = self.conn.cursor()
         cursor.execute(
             "UPDATE tracks SET local_file_path = ? WHERE track_id = ?",
-            (local_file_path, track_id)
+            (local_file_path, track_id),
         )
         self.conn.commit()
 
     def get_playlists_for_track(self, track_id: str) -> list:
-        """
-        Return a list of playlist URLs for a given track_id.
+        """Return a list of playlist URLs for a given track_id.
         """
         cursor = self.conn.cursor()
         cursor.execute("SELECT playlist_url FROM playlist_tracks WHERE track_id = ?", (track_id,))
@@ -836,7 +835,7 @@ class TrackDB:
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT track_id FROM playlist_tracks WHERE playlist_url = ?",
-            (playlist_url,)
+            (playlist_url,),
         )
         return [row[0] for row in cursor.fetchall()]
 
@@ -845,12 +844,12 @@ class TrackDB:
         write_log.debug(
             "TRACK_UNLINK_PLAYLIST",
             "Unlinking track from playlist.",
-            {"track_id": track_id, "playlist_url": playlist_url}
+            {"track_id": track_id, "playlist_url": playlist_url},
         )
         cursor = self.conn.cursor()
         cursor.execute(
             "DELETE FROM playlist_tracks WHERE playlist_url = ? AND track_id = ?",
-            (playlist_url, track_id)
+            (playlist_url, track_id),
         )
         self.conn.commit()
 
@@ -859,7 +858,7 @@ class TrackDB:
         write_log.info(
             "PLAYLIST_DELETE",
             "Deleting playlist and associations.",
-            {"playlist_url": playlist_url}
+            {"playlist_url": playlist_url},
         )
         cursor = self.conn.cursor()
         cursor.execute("DELETE FROM playlist_tracks WHERE playlist_url = ?", (playlist_url,))
@@ -871,7 +870,7 @@ class TrackDB:
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT COUNT(*) FROM playlist_tracks WHERE track_id = ?",
-            (track_id,)
+            (track_id,),
         )
         result = cursor.fetchone()
         return int(result[0]) if result and result[0] is not None else 0
@@ -881,7 +880,7 @@ class TrackDB:
         write_log.info(
             "TRACK_DELETE",
             "Deleting track and associations.",
-            {"track_id": track_id}
+            {"track_id": track_id},
         )
         cursor = self.conn.cursor()
         cursor.execute("DELETE FROM playlist_tracks WHERE track_id = ?", (track_id,))
@@ -898,13 +897,12 @@ class TrackDB:
             JOIN tracks t ON pt.track_id = t.track_id
             WHERE pt.playlist_url = ?
             """,
-            (playlist_url,)
+            (playlist_url,),
         )
         return cursor.fetchall()
 
     def get_m3u8_path_for_playlist(self, playlist_url: str) -> str:
-        """
-        Return the m3u8_path for a given playlist_url, or None if not found.
+        """Return the m3u8_path for a given playlist_url, or None if not found.
         """
         cursor = self.conn.cursor()
         cursor.execute("SELECT m3u8_path FROM playlists WHERE playlist_url = ?", (playlist_url,))
@@ -919,13 +917,14 @@ class TrackDB:
 # --- Dashboard Helper Functions ---
 
 
-def get_playlists(db_path: str) -> tuple[Optional['pd.DataFrame'], str | None]:
-    """
-    Retrieve all playlists from the database.
+def get_playlists(db_path: str) -> tuple[Optional["pd.DataFrame"], str | None]:
+    """Retrieve all playlists from the database.
+
     Args:
         db_path: Path to the SQLite database file
     Returns:
         Tuple of (DataFrame with playlists, error message if any)
+
     """
     try:
         import pandas as pd  # noqa: PLC0415
@@ -941,13 +940,14 @@ def get_playlists(db_path: str) -> tuple[Optional['pd.DataFrame'], str | None]:
     except Exception as e:
         return None, str(e)
 
-def get_track_status_breakdown(db_path: str) -> tuple[Optional['pd.DataFrame'], str | None]:
-    """
-    Retrieve track download status breakdown from the database.
+def get_track_status_breakdown(db_path: str) -> tuple[Optional["pd.DataFrame"], str | None]:
+    """Retrieve track download status breakdown from the database.
+
     Args:
         db_path: Path to the SQLite database file
     Returns:
         Tuple of (DataFrame with status breakdown, error message if any)
+
     """
     try:
         import pandas as pd  # noqa: PLC0415
@@ -960,9 +960,8 @@ def get_track_status_breakdown(db_path: str) -> tuple[Optional['pd.DataFrame'], 
         return None, str(e)
 
 
-def get_failed_reason_breakdown(db_path: str) -> tuple[Optional['pd.DataFrame'], str | None]:
-    """
-    Retrieve breakdown of reasons why tracks don't have a local_file_path.
+def get_failed_reason_breakdown(db_path: str) -> tuple[Optional["pd.DataFrame"], str | None]:
+    """Retrieve breakdown of reasons why tracks don't have a local_file_path.
 
     Includes all tracks without a local file path, grouped by download_status and failed_reason.
 
@@ -971,6 +970,7 @@ def get_failed_reason_breakdown(db_path: str) -> tuple[Optional['pd.DataFrame'],
 
     Returns:
         Tuple of (DataFrame with download_status, failed_reason, and counts, error message if any)
+
     """
     try:
         import pandas as pd  # noqa: PLC0415

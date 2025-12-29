@@ -1,7 +1,6 @@
-"""
-Workflow orchestrator for Spotiseek.
+"""Workflow orchestrator for Spotiseek.
 
-This module coordinates the complete workflow of:
+This module provides task functions for the task-based scheduler, coordinating:
 1. Reading playlist URLs from CSV
 2. Fetching track metadata via the unified playlist scraper (auto-detects Spotify vs SoundCloud)
 3. Initiating downloads via Soulseek
@@ -19,19 +18,17 @@ Key Features:
 - Quality upgrade system (upgrades lossy tracks to lossless when available)
 - iTunes library export for music player integration
 
-Workflow Stages:
-1. Playlist Processing: Read CSV, fetch track metadata from Spotify/SoundCloud, create M3U8 files
-2. Track Processing: Add tracks to database, initiate Soulseek downloads
-3. Status Updates: Sync download status from slskd API, remux to preferred formats
-4. Quality Upgrades: Redownload non-WAV (lossy) tracks for lossless upgrades
-5. Library Export: Generate iTunes XML for music player integration
-
-Public API:
-- main(): Primary workflow execution function
+Task Functions (used by task_scheduler.py):
+- task_scrape_playlists(): Fetch track metadata from playlists
+- task_initiate_searches(): Queue tracks for Soulseek search
+- task_poll_search_results(): Process completed searches
+- task_sync_download_status(): Update download status from slskd
+- task_mark_quality_upgrades(): Mark non-WAV tracks for upgrade
+- task_process_upgrades(): Initiate quality upgrade searches
+- task_export_library(): Generate iTunes-compatible XML
+- task_remux_existing_files(): Remux files to match format preferences
 """
 
-import argparse
-import csv
 import os
 import re
 import subprocess
@@ -47,13 +44,10 @@ sys.dont_write_bytecode = True
 dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(dotenv_path)
 
+from scripts.constants import LOSSLESS_FORMATS, LOSSY_FORMATS  # noqa: E402
 from scripts.database_management import TrackData, TrackDB  # noqa: E402
 from scripts.logs_utils import setup_logging, write_log  # noqa: E402
-from scripts.m3u8_manager import (  # noqa: E402
-    delete_all_m3u8_files,
-    update_track_in_m3u8,
-    write_playlist_m3u8,
-)
+from scripts.m3u8_manager import update_track_in_m3u8, write_playlist_m3u8  # noqa: E402
 from scripts.playlist_scraper import get_tracks_from_playlist  # noqa: E402
 from scripts.soulseek_client import (  # noqa: E402
     download_tracks_async,
@@ -77,7 +71,7 @@ ENV = os.getenv("APP_ENV")
 if not ENV:
     raise OSError(
         "APP_ENV environment variable is not set. Workflow execution is disabled. "
-        "Set APP_ENV to 'test', 'stage', or 'prod'."
+        "Set APP_ENV to 'test', 'stage', or 'prod'.",
     )
 
 write_log.info("ENV", "Running in environment.", {"ENV": ENV})
@@ -86,18 +80,17 @@ write_log.info("ENV", "Running in environment.", {"ENV": ENV})
 # Configuration Management
 
 class WorkflowConfig:
-    """
-    Centralized configuration for workflow execution.
+    """Centralized configuration for workflow execution.
 
     All paths are environment-aware and automatically created if they don't exist.
     """
 
     def __init__(self, env: str):
-        """
-        Initialize workflow configuration for specified environment.
+        """Initialize workflow configuration for specified environment.
 
         Args:
             env: Environment name ('test', 'stage', or 'prod')
+
         """
         self.env = env
         self.base_dir = os.path.dirname(os.path.dirname(__file__))
@@ -134,7 +127,7 @@ class WorkflowConfig:
             self.database_dir,
             self.m3u8_dir,
             self.xml_dir,
-            self.logs_dir
+            self.logs_dir,
         ]
 
         for directory in directories:
@@ -145,8 +138,7 @@ class WorkflowConfig:
         return os.path.join(self.xml_dir, f"library_{self.env}.xml")
 
     def get_music_folder_url(self) -> str:
-        """
-        Get the music folder URL for iTunes XML export.
+        """Get the music folder URL for iTunes XML export.
 
         Handles Docker container to host path conversion if needed.
         """
@@ -171,8 +163,7 @@ track_db = TrackDB()
 # Playlist Processing Functions
 
 def read_playlists_from_csv(csv_path: str) -> list[str]:
-    """
-    Read playlist URLs from a CSV file.
+    """Read playlist URLs from a CSV file.
 
     Each row should contain one playlist URL. Empty rows and comment lines (starting with #) are skipped.
     Inline comments after URLs (using #) are also supported.
@@ -190,22 +181,23 @@ def read_playlists_from_csv(csv_path: str) -> list[str]:
         >>> urls = read_playlists_from_csv("playlists/test/playlists_test.csv")
         >>> len(urls)
         5
+
     """
     write_log.info("PLAYLISTS_READ", "Reading playlists from CSV.", {"csv_path": csv_path})
 
     playlists = []
     with open(csv_path, newline="", encoding="utf-8") as csvfile:
-        for line in csvfile:
+        for raw_line in csvfile:
             # Strip whitespace
-            line = line.strip()
-            
+            stripped = raw_line.strip()
+
             # Skip empty lines or lines starting with #
-            if not line or line.startswith('#'):
+            if not stripped or stripped.startswith("#"):
                 continue
-            
+
             # Remove inline comments (text after #)
-            url = line.split('#')[0].strip()
-            
+            url = stripped.split("#")[0].strip()
+
             # Add URL if it's not empty after removing comments
             if url:
                 playlists.append(url)
@@ -215,8 +207,7 @@ def read_playlists_from_csv(csv_path: str) -> list[str]:
 
 
 def sanitize_playlist_name(playlist_name: str) -> str:
-    """
-    Sanitize playlist name for use as filename on Windows.
+    """Sanitize playlist name for use as filename on Windows.
 
     Removes or replaces characters that are invalid in Windows filenames.
 
@@ -229,11 +220,12 @@ def sanitize_playlist_name(playlist_name: str) -> str:
     Example:
         >>> sanitize_playlist_name('My Playlist: Best Songs!')
         'My_Playlist_Best_Songs'
+
     """
     # Replace invalid Windows filename characters with underscores
-    sanitized = re.sub(r'[<>:"/\\|?*,]', '_', playlist_name)
+    sanitized = re.sub(r'[<>:"/\\|?*,]', "_", playlist_name)
     # Replace spaces with underscores
-    sanitized = sanitized.replace(' ', '_')
+    sanitized = sanitized.replace(" ", "_")
     return sanitized
 
 
@@ -248,19 +240,19 @@ def _delete_local_file(local_file_path: str | None, track_id: str) -> None:
             write_log.info(
                 "AUDIO_FILE_DELETED",
                 "Deleted audio file for removed track.",
-                {"track_id": track_id, "file_path": local_file_path}
+                {"track_id": track_id, "file_path": local_file_path},
             )
         else:
             write_log.debug(
                 "AUDIO_FILE_MISSING",
                 "Audio file already absent during deletion.",
-                {"track_id": track_id, "file_path": local_file_path}
+                {"track_id": track_id, "file_path": local_file_path},
             )
     except Exception as e:
         write_log.warn(
             "AUDIO_FILE_DELETE_FAIL",
             "Failed to delete audio file.",
-            {"track_id": track_id, "file_path": local_file_path, "error": str(e)}
+            {"track_id": track_id, "file_path": local_file_path, "error": str(e)},
         )
 
 
@@ -288,13 +280,13 @@ def _rewrite_playlist_m3u8_from_db(playlist_url: str, m3u8_path: str) -> None:
                 write_log.info(
                     "M3U8_DELETE_EMPTY_PLAYLIST",
                     "Removed M3U8 file for empty playlist.",
-                    {"playlist_url": playlist_url, "m3u8_path": m3u8_path}
+                    {"playlist_url": playlist_url, "m3u8_path": m3u8_path},
                 )
             except Exception as e:
                 write_log.warn(
                     "M3U8_DELETE_EMPTY_FAIL",
                     "Failed to delete empty playlist M3U8 file.",
-                    {"playlist_url": playlist_url, "m3u8_path": m3u8_path, "error": str(e)}
+                    {"playlist_url": playlist_url, "m3u8_path": m3u8_path, "error": str(e)},
                 )
         return
 
@@ -314,7 +306,7 @@ def _rewrite_playlist_m3u8_from_db(playlist_url: str, m3u8_path: str) -> None:
         write_log.error(
             "M3U8_REWRITE_FAIL",
             "Failed to rewrite M3U8 file from DB state.",
-            {"playlist_url": playlist_url, "m3u8_path": m3u8_path, "error": str(e)}
+            {"playlist_url": playlist_url, "m3u8_path": m3u8_path, "error": str(e)},
         )
 
 
@@ -322,7 +314,7 @@ def _prune_removed_tracks_for_playlist(
     playlist_url: str,
     playlist_name: str,
     m3u8_path: str,
-    current_tracks: list[tuple[str, str, str]]
+    current_tracks: list[tuple[str, str, str]],
 ) -> None:
     """Remove tracks that are no longer present in the Spotify playlist."""
     current_ids = {track[0] for track in current_tracks}
@@ -344,7 +336,7 @@ def _prune_removed_tracks_for_playlist(
     write_log.info(
         "PLAYLIST_TRACKS_PRUNED",
         "Removed tracks no longer present in playlist input.",
-        {"playlist_url": playlist_url, "playlist_name": playlist_name, "removed": removed_count}
+        {"playlist_url": playlist_url, "playlist_name": playlist_name, "removed": removed_count},
     )
 
 
@@ -368,13 +360,13 @@ def _prune_missing_playlists(input_playlist_urls: list[str]) -> None:
                 write_log.info(
                     "M3U8_DELETE_PLAYLIST_REMOVED",
                     "Deleted M3U8 file for removed playlist.",
-                    {"playlist_url": playlist_url, "m3u8_path": m3u8_path}
+                    {"playlist_url": playlist_url, "m3u8_path": m3u8_path},
                 )
             except Exception as e:
                 write_log.warn(
                     "M3U8_DELETE_PLAYLIST_FAIL",
                     "Failed to delete M3U8 file for removed playlist.",
-                    {"playlist_url": playlist_url, "m3u8_path": m3u8_path, "error": str(e)}
+                    {"playlist_url": playlist_url, "m3u8_path": m3u8_path, "error": str(e)},
                 )
 
         for track_id, _, _, local_file_path in tracks:
@@ -383,13 +375,12 @@ def _prune_missing_playlists(input_playlist_urls: list[str]) -> None:
     write_log.info(
         "PLAYLISTS_PRUNED",
         "Pruned playlists not present in input CSV.",
-        {"removed_count": len(missing)}
+        {"removed_count": len(missing)},
     )
 
 
 def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
-    """
-    Process a single playlist: fetch tracks and add to database.
+    """Process a single playlist: fetch tracks and add to database.
 
     This function:
     1. Fetches playlist name and tracks from Spotify or SoundCloud
@@ -408,6 +399,7 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
     Note:
         Errors are logged but don't stop processing. Individual track
         failures are isolated and won't affect other tracks.
+
     """
     write_log.info("PLAYLIST_PROCESS", "Processing playlist.", {"playlist_url": playlist_url})
 
@@ -419,7 +411,7 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
     except Exception as e:
         write_log.error("PLAYLIST_FETCH_FAIL", "Failed to get tracks for playlist.",
                        {"playlist_url": playlist_url, "error": str(e)})
-        return
+        return None
 
     # Generate M3U8 file path with sanitized playlist name
     safe_name = sanitize_playlist_name(playlist_name)
@@ -435,7 +427,7 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
     except Exception as e:
         write_log.error("PLAYLIST_DB_FAIL", "Failed to add playlist to database.",
                        {"playlist_url": playlist_url, "error": str(e)})
-        return
+        return None
 
     try:
         _prune_removed_tracks_for_playlist(playlist_url, playlist_name, m3u8_path, tracks)
@@ -443,7 +435,7 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
         write_log.error(
             "PLAYLIST_PRUNE_FAIL",
             "Failed to prune removed tracks for playlist.",
-            {"playlist_url": playlist_url, "error": str(e)}
+            {"playlist_url": playlist_url, "error": str(e)},
         )
 
     # Create M3U8 file with track metadata as comments (only if it doesn't exist)
@@ -468,7 +460,7 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
                 track_id=track_id,
                 track_name=track_name,
                 artist=artist,
-                source=source
+                source=source,
             ))
 
             # Link track to playlist in database
@@ -479,7 +471,7 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
             current_status = track_db.get_track_status(track_id)
             skip_statuses = {
                 "completed", "queued", "downloading", "searching",
-                "requested", "inprogress", "redownload_pending"
+                "requested", "inprogress", "redownload_pending",
             }
 
             if current_status not in skip_statuses:
@@ -502,7 +494,7 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
         write_log.error(
             "M3U8_FINAL_REWRITE_FAIL",
             "Failed to rewrite M3U8 after playlist processing.",
-            {"playlist_url": playlist_url, "error": str(e)}
+            {"playlist_url": playlist_url, "error": str(e)},
         )
 
     return tracks_to_download
@@ -511,8 +503,7 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
 # Download Status Management Functions
 
 def update_download_statuses() -> None:
-    """
-    Query slskd API for download status and update database accordingly.
+    """Query slskd API for download status and update database accordingly.
 
     This function:
     1. Queries all active downloads from slskd API
@@ -523,6 +514,7 @@ def update_download_statuses() -> None:
     Note:
         This function should be called periodically during workflow execution
         to keep the database synchronized with actual download states.
+
     """
     write_log.info("DOWNLOAD_STATUS_UPDATE", "Checking download statuses from slskd.")
 
@@ -538,8 +530,7 @@ def update_download_statuses() -> None:
 
 
 def mark_tracks_for_quality_upgrade() -> None:
-    """
-    Identify completed tracks that are not in lossless WAV format and mark them for quality upgrade.
+    """Identify completed tracks that are not in lossless WAV format and mark them for quality upgrade.
 
     This function:
     1. Queries all tracks with status='completed'
@@ -554,6 +545,7 @@ def mark_tracks_for_quality_upgrade() -> None:
     Note:
         This function should be called before process_redownload_queue() to ensure
         all eligible tracks are queued for quality checks.
+
     """
     write_log.info("QUALITY_UPGRADE_SCAN", "Scanning completed tracks for quality upgrade opportunities.")
 
@@ -566,7 +558,7 @@ def mark_tracks_for_quality_upgrade() -> None:
 
     write_log.info(
         "QUALITY_UPGRADE_CHECKING",
-        f"Checking {len(completed_tracks)} completed tracks for upgrade eligibility."
+        f"Checking {len(completed_tracks)} completed tracks for upgrade eligibility.",
     )
 
     upgrade_count = 0
@@ -595,8 +587,7 @@ def mark_tracks_for_quality_upgrade() -> None:
 
 
 def _update_file_status(file: dict, username: str | None = None) -> None:
-    """
-    Update database status for a single download file.
+    """Update database status for a single download file.
 
     Maps slskd file states to database status values and updates accordingly.
     For completed downloads, also updates the local file path and M3U8 files.
@@ -605,6 +596,7 @@ def _update_file_status(file: dict, username: str | None = None) -> None:
     Args:
         file: File object from slskd API containing id, state, filename
         username: Soulseek username the download is from (used for removing failed downloads)
+
     """
     slskd_uuid = file.get("id")
     track_id = track_db.get_track_id_by_slskd_download_uuid(slskd_uuid)
@@ -622,7 +614,7 @@ def _update_file_status(file: dict, username: str | None = None) -> None:
     # Define failed states for comparison
     failed_states = (
         "Completed, Errored", "Completed, TimedOut", "Completed, Cancelled",
-        "Completed, Rejected", "Completed, Aborted"
+        "Completed, Rejected", "Completed, Aborted",
     )
 
     # Handle successful downloads
@@ -641,7 +633,7 @@ def _update_file_status(file: dict, username: str | None = None) -> None:
         write_log.info(
             "DOWNLOAD_FAILED",
             "Download failed.",
-            {"track_id": track_id, "state": state, "failed_reason": failed_reason}
+            {"track_id": track_id, "state": state, "failed_reason": failed_reason},
         )
 
     # Handle queued downloads
@@ -668,8 +660,7 @@ def _update_file_status(file: dict, username: str | None = None) -> None:
 
 
 def _should_skip_completed_download(track_id: str) -> bool:
-    """
-    Check if a completed download should be skipped from processing.
+    """Check if a completed download should be skipped from processing.
 
     Skips tracks that are either marked for redownload (quality upgrade pending)
     or already fully processed to prevent redundant remuxing.
@@ -679,6 +670,7 @@ def _should_skip_completed_download(track_id: str) -> bool:
 
     Returns:
         True if the download should be skipped, False otherwise
+
     """
     current_status = track_db.get_track_status(track_id)
     if current_status == "redownload_pending":
@@ -695,8 +687,7 @@ def _should_skip_completed_download(track_id: str) -> bool:
 
 
 def _compute_download_local_path(file: dict) -> str | None:
-    """
-    Compute the local file path for a downloaded file from slskd.
+    """Compute the local file path for a downloaded file from slskd.
 
     Extracts the last two path components (parent folder and filename) from
     the slskd file path to create a cleaner local path structure.
@@ -711,6 +702,7 @@ def _compute_download_local_path(file: dict) -> str | None:
         >>> file = {"filename": "Collection\\Artist\\Album\\Track.mp3"}
         >>> _compute_download_local_path(file)
         "/downloads/Album/Track.mp3"
+
     """
     filename_rel = file.get("filename")
     if not filename_rel:
@@ -730,8 +722,7 @@ def _compute_download_local_path(file: dict) -> str | None:
 
 
 def _is_duplicate_record(track_id: str, local_file_path: str) -> bool:
-    """
-    Check if a download is a duplicate record (same file already tracked).
+    """Check if a download is a duplicate record (same file already tracked).
 
     Prevents reprocessing old slskd records that appear after quality upgrade
     resets or when slskd history contains already-processed downloads.
@@ -742,6 +733,7 @@ def _is_duplicate_record(track_id: str, local_file_path: str) -> bool:
 
     Returns:
         True if this file is already tracked in the database, False otherwise
+
     """
     existing_path = track_db.get_local_file_path(track_id)
     if not existing_path:
@@ -760,8 +752,7 @@ def _is_duplicate_record(track_id: str, local_file_path: str) -> bool:
 
 
 def _extract_extension_bitrate(file: dict, local_file_path: str) -> tuple[str | None, int | None]:
-    """
-    Extract file extension and bitrate from slskd file metadata.
+    """Extract file extension and bitrate from slskd file metadata.
 
     Attempts to get extension from file metadata first, falling back to
     extracting it from the filename if not available.
@@ -773,6 +764,7 @@ def _extract_extension_bitrate(file: dict, local_file_path: str) -> tuple[str | 
     Returns:
         Tuple of (extension, bitrate). Extension is lowercase, bitrate in kbps.
         Either value may be None if not determinable.
+
     """
     extension = None
     if file.get("extension"):
@@ -790,8 +782,7 @@ def _extract_extension_bitrate(file: dict, local_file_path: str) -> tuple[str | 
 
 
 def _remux_completed_download(track_id: str, local_file_path: str, extension: str | None, bitrate: int | None) -> str:
-    """
-    Remux a completed download to the preferred format based on configuration.
+    """Remux a completed download to the preferred format based on configuration.
 
     Remuxing behavior depends on PREFER_MP3 setting:
     - If True: All formats are converted to MP3 320kbps
@@ -807,17 +798,18 @@ def _remux_completed_download(track_id: str, local_file_path: str, extension: st
 
     Returns:
         Final file path after remuxing (may be same as input if no remux needed)
+
     """
-    lossless_formats = {'flac', 'alac', 'ape'}
-    lossy_formats = {'ogg', 'm4a', 'aac', 'wma', 'opus'}
+    # Exclude 'wav' from lossless set - already in target format
+    lossless_to_remux = LOSSLESS_FORMATS - {"wav"}
     final_path = local_file_path
 
     if PREFER_MP3:
-        if extension in lossless_formats or extension in lossy_formats or extension == 'wav':
+        if extension in lossless_to_remux or extension in LOSSY_FORMATS or extension == "wav":
             final_path = _remux_lossy_to_mp3(local_file_path, track_id, extension) or local_file_path
-    elif extension in lossless_formats:
+    elif extension in lossless_to_remux:
         final_path = _remux_lossless_to_wav(local_file_path, track_id, extension) or local_file_path
-    elif extension in lossy_formats:
+    elif extension in LOSSY_FORMATS:
         final_path = _remux_lossy_to_mp3(local_file_path, track_id, extension) or local_file_path
     elif extension == "mp3":
         track_db.update_extension_bitrate(track_id, extension="mp3", bitrate=bitrate)
@@ -828,8 +820,7 @@ def _remux_completed_download(track_id: str, local_file_path: str, extension: st
 
 
 def _handle_completed_download(file: dict, track_id: str) -> None:
-    """
-    Process a successfully completed download.
+    """Process a successfully completed download.
 
     This function:
     1. Checks if track is marked for redownload (skips status update if so)
@@ -842,6 +833,7 @@ def _handle_completed_download(file: dict, track_id: str) -> None:
     Args:
         file: File object from slskd API
         track_id: Track identifier
+
     """
     if _should_skip_completed_download(track_id):
         return
@@ -867,211 +859,225 @@ def _handle_completed_download(file: dict, track_id: str) -> None:
         {
             "track_id": track_id,
             "local_file_path": final_path,
-            "is_new": not bool(existing_path)
-        }
+            "is_new": not bool(existing_path),
+        },
     )
     _update_m3u8_files_for_track(track_id, final_path)
     track_db.update_track_status(track_id, "completed")
 
 def _is_audio_valid(audio_path: str) -> bool:
-    """
-    Use ffmpeg to check if an audio file is valid and decodable.
+    """Use ffmpeg to check if an audio file is valid and decodable.
     Returns True if valid, False otherwise.
     """
     try:
         result = subprocess.run([
-            "ffmpeg", "-v", "error", "-i", audio_path, "-f", "null", "-"
+            "ffmpeg", "-v", "error", "-i", audio_path, "-f", "null", "-",
         ], check=False, capture_output=True, text=True)
         return result.returncode == 0
     except Exception as e:
         write_log.error(
             "AUDIO_CHECK_FAIL",
             "Failed to check audio file integrity.",
-            {"audio_path": audio_path, "error": str(e)}
+            {"audio_path": audio_path, "error": str(e)},
         )
         return False
 
 
-def _remux_lossless_to_wav(local_file_path: str, track_id: str, extension: str) -> str:
+def _get_ffmpeg_log_path() -> str:
+    """Get the path for the FFmpeg remux log file.
+
+    Creates dated directory structure and returns path to shared log file.
+
+    Returns:
+        Absolute path to ffmpeg_remux.log
+
     """
-    Remux a lossless audio file (FLAC, ALAC, APE) to WAV.
+    base_dir = os.path.dirname(os.path.dirname(__file__))
+    logs_dir = os.path.join(base_dir, "observability", "logs", ENV)
+    now = datetime.now()
+    dated_logs_dir = os.path.join(
+        logs_dir,
+        now.strftime("%Y"),
+        now.strftime("%m"),
+        now.strftime("%d"),
+    )
+    os.makedirs(dated_logs_dir, exist_ok=True)
+    return os.path.join(dated_logs_dir, "ffmpeg_remux.log")
+
+
+def _run_ffmpeg_remux(
+    input_path: str,
+    output_path: str,
+    ffmpeg_args: list[str],
+    log_context: dict[str, str],
+) -> bool:
+    """Run FFmpeg to remux an audio file with logging.
+
+    Args:
+        input_path: Path to input file (already normalized with forward slashes)
+        output_path: Path to output file (already normalized with forward slashes)
+        ffmpeg_args: FFmpeg codec arguments (e.g., ["-codec:a", "pcm_s16le", "-ar", "44100"])
+        log_context: Dict with 'track_id', 'source_ext', 'target_ext' for logging
+
+    Returns:
+        True if remux succeeded, False otherwise
+
+    """
+    track_id = log_context["track_id"]
+    source_ext = log_context["source_ext"]
+    target_ext = log_context["target_ext"]
+
+    ffmpeg_cmd = ["ffmpeg", "-y", "-i", input_path, *ffmpeg_args, output_path]
+    ffmpeg_log_file = _get_ffmpeg_log_path()
+    now = datetime.now()
+
+    write_log.debug(
+        f"FFMPEG_REMUX_{source_ext.upper()}",
+        f"Remuxing {source_ext.upper()} to {target_ext.upper()}.",
+        {"input": input_path, "output": output_path, "ffmpeg_log_file": ffmpeg_log_file},
+    )
+
+    with open(ffmpeg_log_file, "a", encoding="utf-8") as logf:
+        logf.write(
+            f"\n--- Remux {now.strftime('%Y-%m-%d %H:%M:%S')} "
+            f"| Track ID: {track_id} | Input: {input_path} | Output: {output_path} ---\n",
+        )
+        subprocess.run(ffmpeg_cmd, check=True, stdout=logf, stderr=subprocess.STDOUT)
+
+    return True
+
+
+def _cleanup_original_file(original_path: str, new_path: str, track_id: str, extension: str) -> None:
+    """Remove the original file after successful remux.
+
+    Args:
+        original_path: Path to original file
+        new_path: Path to remuxed file
+        track_id: Track identifier for logging
+        extension: Original file extension for logging
+
+    """
+    if not os.path.exists(original_path) or original_path == new_path:
+        return
+
+    try:
+        os.remove(original_path)
+        write_log.debug(
+            "ORIGINAL_FILE_REMOVED",
+            f"Deleted original {extension.upper()} file after remuxing.",
+            {"track_id": track_id, "removed_file": original_path},
+        )
+    except Exception as e:
+        write_log.warn(
+            "ORIGINAL_FILE_DELETE_FAILED",
+            f"Failed to delete original {extension.upper()} file after remuxing.",
+            {"track_id": track_id, "file_path": original_path, "error": str(e)},
+        )
+
+
+def _handle_corrupt_audio(track_id: str, file_path: str, extension: str, is_lossless: bool) -> None:
+    """Handle corrupt audio file by updating status and blacklisting.
+
+    Args:
+        track_id: Track identifier
+        file_path: Path to corrupt file
+        extension: File extension
+        is_lossless: Whether the file was lossless format
+
+    """
+    event_id = "LOSSLESS_INVALID" if is_lossless else "LOSSY_INVALID"
+    write_log.warn(
+        event_id,
+        f"{'Lossless' if is_lossless else 'Lossy'} file failed integrity check. Skipping remux.",
+        {"track_id": track_id, "file_path": file_path, "extension": extension},
+    )
+    track_db.update_track_status(track_id, "corrupt")
+    slskd_uuid_to_blacklist = track_db.get_download_uuid_by_track_id(track_id)
+    if slskd_uuid_to_blacklist:
+        track_db.add_slskd_blacklist(slskd_uuid_to_blacklist, reason=f"corrupt_{extension}")
+
+
+def _remux_lossless_to_wav(local_file_path: str, track_id: str, extension: str) -> str:
+    """Remux a lossless audio file (FLAC, ALAC, APE) to WAV.
     Update extension/bitrate in DB if successful.
     Returns the new WAV path if successful, else original path.
     """
     wav_path = os.path.splitext(local_file_path)[0] + ".wav"
-    try:
-        ffmpeg_input = local_file_path.replace("\\", "/")
-        ffmpeg_output = wav_path.replace("\\", "/")
+    ffmpeg_input = local_file_path.replace("\\", "/")
+    ffmpeg_output = wav_path.replace("\\", "/")
 
+    try:
         # Check audio integrity before remuxing
         if not _is_audio_valid(ffmpeg_input):
-            write_log.warn(
-                "LOSSLESS_INVALID",
-                "Lossless file failed integrity check. Skipping remux.",
-                {"track_id": track_id, "file_path": ffmpeg_input, "extension": extension}
-            )
-            track_db.update_track_status(track_id, "corrupt")
-            slskd_uuid_to_blacklist = track_db.get_download_uuid_by_track_id(track_id)
-            if slskd_uuid_to_blacklist:
-                track_db.add_slskd_blacklist(slskd_uuid_to_blacklist, reason=f"corrupt_{extension}")
+            _handle_corrupt_audio(track_id, ffmpeg_input, extension, is_lossless=True)
             return local_file_path
 
-        ffmpeg_cmd = [
-            "ffmpeg", "-y", "-i", ffmpeg_input,
-            "-codec:a", "pcm_s16le", "-ar", "44100", ffmpeg_output
-        ]
-        # Compose ffmpeg log file path in the same logs dir as workflow logs
-        base_dir = os.path.dirname(os.path.dirname(__file__))
-        logs_dir = os.path.join(base_dir, 'observability', "logs", ENV)
-        now = datetime.now()
-        dated_logs_dir = os.path.join(
-            logs_dir,
-            now.strftime("%Y"),
-            now.strftime("%m"),
-            now.strftime("%d")
-        )
-        os.makedirs(dated_logs_dir, exist_ok=True)
-        # Use a single log file per workflow run (date-based, no timestamp)
-        ffmpeg_log_file = os.path.join(
-            dated_logs_dir,
-            "ffmpeg_remux.log"
-        )
-        write_log.debug(
-            "FFMPEG_REMUX_LOSSLESS",
-            f"Remuxing {extension.upper()} to WAV.",
-            {"input": ffmpeg_input, "output": ffmpeg_output, "ffmpeg_log_file": ffmpeg_log_file}
-        )
-        with open(ffmpeg_log_file, "a", encoding="utf-8") as logf:
-            logf.write(
-                f"\n--- Remux {now.strftime('%Y-%m-%d %H:%M:%S')} "
-                f"| Track ID: {track_id} | Input: {ffmpeg_input} | Output: {ffmpeg_output} ---\n"
-            )
-            subprocess.run(ffmpeg_cmd, check=True, stdout=logf, stderr=subprocess.STDOUT)
+        # Remux to WAV (16-bit, 44.1kHz)
+        ffmpeg_args = ["-codec:a", "pcm_s16le", "-ar", "44100"]
+        log_context = {"track_id": track_id, "source_ext": extension, "target_ext": "wav"}
+        _run_ffmpeg_remux(ffmpeg_input, ffmpeg_output, ffmpeg_args, log_context)
+
         track_db.update_extension_bitrate(track_id, extension="wav", bitrate=None)
         write_log.debug(
             "REMUX_SUCCESS",
             f"{extension.upper()} remuxed to WAV.",
-            {"track_id": track_id, "wav_path": wav_path, "ffmpeg_log_file": ffmpeg_log_file}
+            {"track_id": track_id, "wav_path": wav_path},
         )
 
-        # Remove original file to free up disk space
-        try:
-            if os.path.exists(local_file_path) and local_file_path != wav_path:
-                os.remove(local_file_path)
-                write_log.debug(
-                    "ORIGINAL_FILE_REMOVED",
-                    f"Deleted original {extension.upper()} file after remuxing to WAV.",
-                    {"track_id": track_id, "removed_file": local_file_path}
-                )
-        except Exception as e:
-            write_log.warn(
-                "ORIGINAL_FILE_DELETE_FAILED",
-                f"Failed to delete original {extension.upper()} file after remuxing.",
-                {"track_id": track_id, "file_path": local_file_path, "error": str(e)}
-            )
-
+        _cleanup_original_file(local_file_path, wav_path, track_id, extension)
         return wav_path
+
     except Exception as e:
         write_log.error(
             "REMUX_FAIL",
             f"Failed to remux {extension.upper()} to WAV.",
-            {"track_id": track_id, "error": str(e)}
+            {"track_id": track_id, "error": str(e)},
         )
         track_db.update_extension_bitrate(track_id, extension=extension)
         return local_file_path
 
 
 def _remux_lossy_to_mp3(local_file_path: str, track_id: str, extension: str) -> str:
-    """
-    Remux a lossy audio file (OGG, M4A, AAC, WMA, OPUS) to MP3 320kbps.
+    """Remux a lossy audio file (OGG, M4A, AAC, WMA, OPUS) to MP3 320kbps.
     Update extension/bitrate in DB if successful.
     Returns the new MP3 path if successful, else original path.
     """
     mp3_path = os.path.splitext(local_file_path)[0] + ".mp3"
-    try:
-        ffmpeg_input = local_file_path.replace("\\", "/")
-        ffmpeg_output = mp3_path.replace("\\", "/")
+    ffmpeg_input = local_file_path.replace("\\", "/")
+    ffmpeg_output = mp3_path.replace("\\", "/")
 
+    try:
         # Check audio integrity before remuxing
         if not _is_audio_valid(ffmpeg_input):
-            write_log.warn(
-                "LOSSY_INVALID",
-                "Lossy file failed integrity check. Skipping remux.",
-                {"track_id": track_id, "file_path": ffmpeg_input, "extension": extension}
-            )
-            track_db.update_track_status(track_id, "corrupt")
-            slskd_uuid_to_blacklist = track_db.get_download_uuid_by_track_id(track_id)
-            if slskd_uuid_to_blacklist:
-                track_db.add_slskd_blacklist(slskd_uuid_to_blacklist, reason=f"corrupt_{extension}")
+            _handle_corrupt_audio(track_id, ffmpeg_input, extension, is_lossless=False)
             return local_file_path
 
-        ffmpeg_cmd = [
-            "ffmpeg", "-y", "-i", ffmpeg_input,
-            "-codec:a", "libmp3lame", "-b:a", "320k", ffmpeg_output
-        ]
-        # Compose ffmpeg log file path in the same logs dir as workflow logs
-        base_dir = os.path.dirname(os.path.dirname(__file__))
-        logs_dir = os.path.join(base_dir, 'observability', "logs", ENV)
-        now = datetime.now()
-        dated_logs_dir = os.path.join(
-            logs_dir,
-            now.strftime("%Y"),
-            now.strftime("%m"),
-            now.strftime("%d")
-        )
-        os.makedirs(dated_logs_dir, exist_ok=True)
-        # Use a single log file per workflow run (date-based, no timestamp)
-        ffmpeg_log_file = os.path.join(
-            dated_logs_dir,
-            "ffmpeg_remux.log"
-        )
-        write_log.debug(
-            "FFMPEG_REMUX_LOSSY",
-            f"Remuxing {extension.upper()} to MP3 320kbps.",
-            {"input": ffmpeg_input, "output": ffmpeg_output, "ffmpeg_log_file": ffmpeg_log_file}
-        )
-        with open(ffmpeg_log_file, "a", encoding="utf-8") as logf:
-            logf.write(
-                f"\n--- Remux {now.strftime('%Y-%m-%d %H:%M:%S')} "
-                f"| Spotify ID: {track_id} | Input: {ffmpeg_input} | Output: {ffmpeg_output} ---\n"
-            )
-            subprocess.run(ffmpeg_cmd, check=True, stdout=logf, stderr=subprocess.STDOUT)
+        # Remux to MP3 320kbps
+        ffmpeg_args = ["-codec:a", "libmp3lame", "-b:a", "320k"]
+        log_context = {"track_id": track_id, "source_ext": extension, "target_ext": "mp3"}
+        _run_ffmpeg_remux(ffmpeg_input, ffmpeg_output, ffmpeg_args, log_context)
+
         track_db.update_extension_bitrate(track_id, extension="mp3", bitrate=320)
         write_log.info(
             "REMUX_SUCCESS",
             f"{extension.upper()} remuxed to MP3 320kbps.",
-            {"track_id": track_id, "mp3_path": mp3_path, "ffmpeg_log_file": ffmpeg_log_file}
+            {"track_id": track_id, "mp3_path": mp3_path},
         )
 
-        # Remove original file to free up disk space
-        try:
-            if os.path.exists(local_file_path) and local_file_path != mp3_path:
-                os.remove(local_file_path)
-                write_log.debug(
-                    "ORIGINAL_FILE_REMOVED",
-                    f"Deleted original {extension.upper()} file after remuxing to MP3.",
-                    {"track_id": track_id, "removed_file": local_file_path}
-                )
-        except Exception as e:
-            write_log.warn(
-                "ORIGINAL_FILE_DELETE_FAILED",
-                f"Failed to delete original {extension.upper()} file after remuxing.",
-                {"track_id": track_id, "file_path": local_file_path, "error": str(e)}
-            )
-
+        _cleanup_original_file(local_file_path, mp3_path, track_id, extension)
         return mp3_path
+
     except Exception as e:
         write_log.error(
             "REMUX_FAIL",
             f"Failed to remux {extension.upper()} to MP3.",
-            {"track_id": track_id, "error": str(e)}
+            {"track_id": track_id, "error": str(e)},
         )
         track_db.update_extension_bitrate(track_id, extension=extension)
         return local_file_path
 
 def _update_m3u8_files_for_track(track_id: str, local_file_path: str) -> None:
-    """
-    Update all M3U8 files that contain a specific track.
+    """Update all M3U8 files that contain a specific track.
 
     Replaces the track comment line with the actual file path in all
     playlists that contain this track.
@@ -1079,6 +1085,7 @@ def _update_m3u8_files_for_track(track_id: str, local_file_path: str) -> None:
     Args:
         track_id: Track identifier
         local_file_path: Absolute path to the downloaded file
+
     """
     try:
         # Get all playlists that contain this track
@@ -1106,37 +1113,6 @@ def _update_m3u8_files_for_track(track_id: str, local_file_path: str) -> None:
                        {"track_id": track_id, "error": str(e)})
 
 
-# Database Reset Function
-
-def reset_database() -> None:
-    """
-    Clear the database and delete all M3U8 files.
-
-    This is a destructive operation that:
-    1. Deletes the database file
-    2. Recreates empty tables
-    3. Removes all M3U8 playlist files
-
-    Production safety:
-        Requires explicit confirmation when ENV is "prod".
-    """
-    global track_db  # noqa: PLW0603
-
-    write_log.info("RESET_START", "Clearing database and M3U8 files.")
-
-    # Clear database (includes production safeguards)
-    track_db.clear_database()
-
-    # Delete all M3U8 files
-    delete_all_m3u8_files(config.m3u8_dir)
-    write_log.info("M3U8_DELETE_COMPLETE", "All M3U8 files deleted.",
-                  {"m3u8_dir": config.m3u8_dir})
-
-    # Re-initialize database connection
-    track_db = TrackDB()
-    write_log.info("RESET_COMPLETE", "Database reset complete.")
-
-
 # ============================================================================
 # TASK FUNCTIONS (for task-based scheduler)
 # ============================================================================
@@ -1144,8 +1120,7 @@ def reset_database() -> None:
 # They return True on success, False on failure.
 
 def task_scrape_playlists() -> bool:
-    """
-    Task: Scrape Spotify playlists and add tracks to database.
+    """Task: Scrape Spotify playlists and add tracks to database.
 
     This task:
     1. Reads playlist URLs from the CSV file
@@ -1155,6 +1130,7 @@ def task_scrape_playlists() -> bool:
 
     Returns:
         True if successful, False if failed
+
     """
     write_log.info("TASK_SCRAPE_START", "Starting playlist scrape task.")
 
@@ -1167,7 +1143,7 @@ def task_scrape_playlists() -> bool:
         except FileNotFoundError:
             fallback_csv = os.path.abspath(os.path.join(
                 os.path.dirname(os.path.dirname(__file__)),
-                "input_playlists", "playlists.csv"
+                "input_playlists", "playlists.csv",
             ))
             write_log.warn("PLAYLISTS_CSV_MISSING",
                           "Primary playlists CSV not found, falling back to default.",
@@ -1185,7 +1161,7 @@ def task_scrape_playlists() -> bool:
             write_log.error(
                 "PLAYLIST_ORDER_SET_FAIL",
                 "Failed to set playlist display order from CSV.",
-                {"error": str(e)}
+                {"error": str(e)},
             )
 
         _prune_missing_playlists(playlists)
@@ -1208,8 +1184,7 @@ def task_scrape_playlists() -> bool:
 
 
 def task_initiate_searches() -> bool:
-    """
-    Task: Initiate Soulseek searches for tracks that need downloading.
+    """Task: Initiate Soulseek searches for tracks that need downloading.
 
     This task:
     1. Queries the database for tracks needing searches: 'pending', 'new', 'not_found', 'no_suitable_file'
@@ -1218,6 +1193,7 @@ def task_initiate_searches() -> bool:
 
     Returns:
         True if successful, False if failed
+
     """
     write_log.info("TASK_INITIATE_SEARCHES_START", "Starting search initiation task.")
 
@@ -1242,7 +1218,7 @@ def task_initiate_searches() -> bool:
                     write_log.debug(
                         "TASK_INITIATE_SEARCH_SKIP_SEARCHING",
                         "Skipping track with active search.",
-                        {"track_id": track_id}
+                        {"track_id": track_id},
                     )
                     continue
                 track_name = track_row[1]
@@ -1270,8 +1246,7 @@ def task_initiate_searches() -> bool:
 
 
 def task_poll_search_results() -> bool:
-    """
-    Task: Poll slskd for completed searches and initiate downloads.
+    """Task: Poll slskd for completed searches and initiate downloads.
 
     This task:
     1. Checks for searches that have completed on slskd
@@ -1280,6 +1255,7 @@ def task_poll_search_results() -> bool:
 
     Returns:
         True if successful, False if failed
+
     """
     write_log.info("TASK_POLL_SEARCH_START", "Starting search polling task.")
 
@@ -1303,8 +1279,7 @@ def task_poll_search_results() -> bool:
 
 
 def task_sync_download_status() -> bool:
-    """
-    Task: Sync download status from slskd API to database.
+    """Task: Sync download status from slskd API to database.
 
     This task:
     1. Queries slskd for all active downloads
@@ -1313,6 +1288,7 @@ def task_sync_download_status() -> bool:
 
     Returns:
         True if successful, False if failed
+
     """
     write_log.info("TASK_SYNC_STATUS_START", "Starting download status sync task.")
 
@@ -1336,8 +1312,7 @@ def task_sync_download_status() -> bool:
 
 
 def task_mark_quality_upgrades() -> bool:
-    """
-    Task: Mark completed non-WAV tracks for quality upgrade.
+    """Task: Mark completed non-WAV tracks for quality upgrade.
 
     This task:
     1. Scans all completed downloads
@@ -1346,6 +1321,7 @@ def task_mark_quality_upgrades() -> bool:
 
     Returns:
         True if successful, False if failed
+
     """
     write_log.info("TASK_MARK_UPGRADES_START", "Starting quality upgrade marking task.")
 
@@ -1364,8 +1340,7 @@ def task_mark_quality_upgrades() -> bool:
 
 
 def task_process_upgrades() -> bool:
-    """
-    Task: Process the quality upgrade queue.
+    """Task: Process the quality upgrade queue.
 
     This task:
     1. Gets all tracks marked for redownload
@@ -1373,6 +1348,7 @@ def task_process_upgrades() -> bool:
 
     Returns:
         True if successful, False if failed
+
     """
     write_log.info("TASK_PROCESS_UPGRADES_START", "Starting quality upgrade processing task.")
 
@@ -1398,8 +1374,7 @@ def task_process_upgrades() -> bool:
 
 
 def task_export_library() -> bool:
-    """
-    Task: Export iTunes-compatible XML library.
+    """Task: Export iTunes-compatible XML library.
 
     This task:
     1. Reads all completed tracks from database
@@ -1408,6 +1383,7 @@ def task_export_library() -> bool:
 
     Returns:
         True if successful, False if failed
+
     """
     write_log.info("TASK_EXPORT_LIBRARY_START", "Starting library export task.")
 
@@ -1433,8 +1409,7 @@ def _determine_remux_target(
     lossless_formats: set[str],
     lossy_formats: set[str],
 ) -> tuple[bool, str | None]:
-    """
-    Determine if a file needs remuxing and what the target format should be.
+    """Determine if a file needs remuxing and what the target format should be.
 
     Decision logic based on PREFER_MP3 setting:
     - If True: All non-MP3 files should be converted to MP3
@@ -1447,6 +1422,7 @@ def _determine_remux_target(
 
     Returns:
         Tuple of (needs_remux, target_format). target_format is None if no remux needed.
+
     """
     if PREFER_MP3:
         return current_extension != "mp3", "mp3" if current_extension != "mp3" else None
@@ -1461,8 +1437,7 @@ def _determine_remux_target(
 
 
 def _remux_single_track(track_id: str, lossless_formats: set[str], lossy_formats: set[str]) -> str:
-    """
-    Remux a single track to match current format preferences.
+    """Remux a single track to match current format preferences.
 
     Handles the complete remux workflow for one track:
     1. Validates file exists and has determinable extension
@@ -1476,6 +1451,7 @@ def _remux_single_track(track_id: str, lossless_formats: set[str], lossy_formats
 
     Returns:
         Status string: "remuxed", "skipped", or "error"
+
     """
     status = "skipped"
     local_file_path = track_db.get_local_file_path(track_id)
@@ -1532,8 +1508,7 @@ def _remux_single_track(track_id: str, lossless_formats: set[str], lossy_formats
 
 
 def task_remux_existing_files() -> bool:
-    """
-    Task: Remux existing files to match current format preferences.
+    """Task: Remux existing files to match current format preferences.
 
     This task addresses two scenarios:
     1. Files that failed to remux during download (e.g., program crash)
@@ -1553,6 +1528,7 @@ def task_remux_existing_files() -> bool:
 
     Returns:
         True if successful, False if failed
+
     """
     write_log.info("TASK_REMUX_EXISTING_START", "Starting existing files remux task.",
                   {"prefer_mp3": PREFER_MP3})
@@ -1567,9 +1543,8 @@ def task_remux_existing_files() -> bool:
 
         write_log.info("TASK_REMUX_CHECKING", f"Checking {len(completed_tracks)} completed tracks.")
 
-        # Define format categories
-        lossless_formats = {'wav', 'flac', 'alac', 'ape'}
-        lossy_formats = {'mp3', 'ogg', 'm4a', 'aac', 'wma', 'opus'}
+        # Include mp3 in lossy for the remux target check
+        lossy_with_mp3 = LOSSY_FORMATS | {"mp3"}
 
         remuxed_count = 0
         skipped_count = 0
@@ -1577,7 +1552,7 @@ def task_remux_existing_files() -> bool:
 
         for track_row in completed_tracks:
             track_id = track_row[0]
-            result = _remux_single_track(track_id, lossless_formats, lossy_formats)
+            result = _remux_single_track(track_id, LOSSLESS_FORMATS, lossy_with_mp3)
 
             if result == "remuxed":
                 remuxed_count += 1
@@ -1597,175 +1572,3 @@ def task_remux_existing_files() -> bool:
                        "Existing files remux task failed.",
                        {"error": str(e)})
         return False
-
-
-# Main Workflow Function
-
-def main(reset_db: bool = False) -> None:
-    """
-    Main workflow execution function.
-
-    Coordinates the complete process:
-    1. Optional database reset
-    2. Read playlists from CSV
-    3. Process each playlist (fetch tracks, initiate downloads)
-    4. Update download statuses
-    5. Process quality upgrade queue (redownload non-WAV tracks)
-    6. Export iTunes-compatible XML library
-
-    Args:
-        reset_db: If True, clear the database before starting
-
-    Note:
-        The workflow is designed to be resilient - individual failures
-        are logged but don't stop the entire process.
-    """
-    global track_db  # noqa: PLW0602
-
-    write_log.info("WORKFLOW_START", "Starting Spotiseek workflow.", {"env": ENV})
-
-    # Reset database if requested
-    if reset_db:
-        reset_database()
-
-    # Wait for slskd to be ready before proceeding
-    write_log.info("SLSKD_HEALTH_CHECK_START", "Checking slskd availability.")
-    if not wait_for_slskd_ready(max_wait_seconds=120, poll_interval=2):
-        write_log.error("SLSKD_UNAVAILABLE",
-                       "slskd service is not available. Cannot proceed with downloads.")
-        write_log.info("WORKFLOW_ABORTED", "Workflow aborted due to slskd unavailability.")
-        track_db.close()
-        return
-
-    # Process any pending searches from previous runs (restart-safe)
-    write_log.info("PENDING_SEARCHES_CHECK", "Checking for completed searches from previous runs.")
-    process_pending_searches()
-
-    # Update download statuses for any completed downloads
-    write_log.info("DOWNLOAD_STATUS_CHECK", "Checking download statuses.")
-    update_download_statuses()
-
-    # Load playlists from CSV, fallback to playlists/playlists.csv if not found
-    try:
-        playlists = read_playlists_from_csv(config.playlists_csv)
-        write_log.info("PLAYLISTS_LOADED", "Loaded playlists from CSV.", {"count": len(playlists)})
-    except FileNotFoundError:
-        fallback_csv = os.path.abspath(
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "input_playlists", "playlists.csv")
-        )
-        write_log.warn(
-            "PLAYLISTS_CSV_MISSING",
-            "Primary playlists CSV not found, falling back to default.",
-            {"primary_csv": config.playlists_csv, "fallback_csv": fallback_csv}
-        )
-        try:
-            playlists = read_playlists_from_csv(fallback_csv)
-            write_log.info(
-                "PLAYLISTS_LOADED_FALLBACK",
-                "Loaded playlists from fallback CSV.",
-                {"count": len(playlists)}
-            )
-        except FileNotFoundError:
-            write_log.error(
-                "PLAYLISTS_CSV_MISSING_BOTH",
-                "Neither environment nor fallback playlists CSV file found.",
-                {"primary_csv": config.playlists_csv, "fallback_csv": fallback_csv}
-            )
-            return
-        except Exception as e:
-            write_log.error(
-                "PLAYLISTS_CSV_FAIL_FALLBACK",
-                "Failed to read fallback playlists CSV.",
-                {"csv_path": fallback_csv, "error": str(e)}
-            )
-            return
-    except Exception as e:
-        write_log.error(
-            "PLAYLISTS_CSV_FAIL",
-            "Failed to read playlists CSV.",
-            {"csv_path": config.playlists_csv, "error": str(e)}
-        )
-        return
-
-    # Persist CSV order into database for downstream ordering (XML, dashboard)
-    try:
-        for idx, purl in enumerate(playlists):
-            track_db.set_playlist_display_order(purl, idx)
-    except Exception as e:
-        write_log.error(
-            "PLAYLIST_ORDER_SET_FAIL",
-            "Failed to set playlist display order from CSV.",
-            {"error": str(e)}
-        )
-
-    # Process each playlist and collect all tracks for batch download
-    all_tracks = []
-    for playlist_url in playlists:
-        tracks = process_playlist(playlist_url)
-        all_tracks.extend(tracks)
-
-    # Initiate searches for all new tracks (fire-and-forget)
-    write_log.info("BATCH_SEARCH_START", "Initiating searches for all new tracks.",
-                  {"total_tracks": len(all_tracks)})
-    download_tracks_async(all_tracks)
-    write_log.info("BATCH_SEARCH_INITIATED", "All searches initiated. They will continue in slskd.",
-                  {"total_tracks": len(all_tracks)})
-
-    # Mark completed non-WAV tracks for quality upgrade
-    write_log.info("QUALITY_UPGRADE_MARK_START", "Marking completed tracks for quality upgrade.")
-    mark_tracks_for_quality_upgrade()
-
-    # Initiate quality upgrade searches (fire-and-forget)
-    write_log.info("REDOWNLOAD_QUEUE_START", "Initiating quality upgrade searches.")
-    process_redownload_queue()
-    write_log.info("REDOWNLOAD_QUEUE_INITIATED", "Quality upgrade searches initiated. They will continue in slskd.")
-
-    # Note: All searches are now running in slskd and will complete asynchronously.
-    # They will be processed on the next workflow run via process_pending_searches()
-
-    # Export playlists and tracks to iTunes-style XML
-    try:
-        xml_path = config.get_xml_export_path()
-        music_folder_url = config.get_music_folder_url()
-
-        export_itunes_xml(xml_path, music_folder_url)
-    except Exception as e:
-        write_log.error("XML_EXPORT_FAIL", "Failed to export iTunes XML.",
-                       {"xml_path": xml_path, "error": str(e)})
-
-    write_log.info("WORKFLOW_COMPLETE", "Workflow completed successfully.")
-    track_db.close()
-
-
-# Entry Point
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Spotiseek Workflow: Scrape Spotify playlists and download tracks via Soulseek",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python workflow.py                    # Normal execution
-  python workflow.py --reset            # Clear database and start fresh
-
-Environment:
-  Set APP_ENV environment variable to 'test', 'stage', or 'prod' before running.
-        """
-    )
-    parser.add_argument(
-        "--reset",
-        action="store_true",
-        help="Clear the database before running the workflow (requires confirmation in production)"
-    )
-    args = parser.parse_args()
-
-    try:
-        main(reset_db=args.reset)
-    except KeyboardInterrupt:
-        write_log.info("WORKFLOW_INTERRUPTED", "Workflow interrupted by user.")
-        track_db.close()
-        sys.exit(130)
-    except Exception as e:
-        write_log.error("WORKFLOW_FATAL", "Fatal error in workflow.", {"error": str(e)})
-        track_db.close()
-        sys.exit(1)
