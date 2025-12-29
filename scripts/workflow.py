@@ -1177,6 +1177,17 @@ def task_scrape_playlists() -> bool:
                           "Loaded playlists from fallback CSV.",
                           {"count": len(playlists)})
 
+        # Persist CSV order into database for downstream ordering (XML, dashboard)
+        try:
+            for idx, purl in enumerate(playlists):
+                track_db.set_playlist_display_order(purl, idx)
+        except Exception as e:
+            write_log.error(
+                "PLAYLIST_ORDER_SET_FAIL",
+                "Failed to set playlist display order from CSV.",
+                {"error": str(e)}
+            )
+
         _prune_missing_playlists(playlists)
 
         # Process each playlist
@@ -1675,6 +1686,17 @@ def main(reset_db: bool = False) -> None:
             {"csv_path": config.playlists_csv, "error": str(e)}
         )
         return
+
+    # Persist CSV order into database for downstream ordering (XML, dashboard)
+    try:
+        for idx, purl in enumerate(playlists):
+            track_db.set_playlist_display_order(purl, idx)
+    except Exception as e:
+        write_log.error(
+            "PLAYLIST_ORDER_SET_FAIL",
+            "Failed to set playlist display order from CSV.",
+            {"error": str(e)}
+        )
 
     # Process each playlist and collect all tracks for batch download
     all_tracks = []

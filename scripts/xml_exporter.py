@@ -294,8 +294,11 @@ def export_itunes_xml(xml_path: str, music_folder_url: str | None = None) -> Non
     tracks = cursor.fetchall()
     write_log.debug("XML_TRACKS_FETCHED", "Fetched tracks from database.", {"count": len(tracks)})
 
-    # Fetch all playlists
-    cursor.execute("SELECT playlist_url, playlist_name FROM playlists")
+    # Fetch all playlists in display order (as per CSV)
+    cursor.execute(
+        "SELECT playlist_url, playlist_name FROM playlists "
+        "ORDER BY display_order IS NULL, display_order"
+    )
     playlists = cursor.fetchall()
     write_log.debug("XML_PLAYLISTS_FETCHED", "Fetched playlists from database.", {"count": len(playlists)})
 

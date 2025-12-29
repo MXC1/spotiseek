@@ -225,6 +225,13 @@ class TrackDB:
             )
         """)
 
+        # Ensure playlists table has display_order column for ordering by CSV
+        cursor.execute("PRAGMA table_info(playlists)")
+        playlist_columns = [row[1] for row in cursor.fetchall()]
+        if "display_order" not in playlist_columns:
+            cursor.execute("ALTER TABLE playlists ADD COLUMN display_order INTEGER")
+            self.conn.commit()
+
         # Junction table: many-to-many relationship between playlists and tracks
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS playlist_tracks (
@@ -417,6 +424,32 @@ class TrackDB:
         cursor.execute(
             "UPDATE playlists SET playlist_name = ? WHERE playlist_url = ?",
             (playlist_name, playlist_url)
+        )
+        self.conn.commit()
+
+    def set_playlist_display_order(self, playlist_url: str, display_order: int) -> None:
+        """
+        Set or update the display order for a playlist, creating it if needed.
+
+        Args:
+            playlist_url: Playlist URL
+            display_order: Zero-based order from CSV
+        """
+        write_log.debug(
+            "PLAYLIST_ORDER_SET",
+            "Setting display order for playlist.",
+            {"playlist_url": playlist_url, "display_order": display_order}
+        )
+        cursor = self.conn.cursor()
+        # Ensure playlist row exists
+        cursor.execute(
+            "INSERT OR IGNORE INTO playlists (playlist_url) VALUES (?)",
+            (playlist_url,)
+        )
+        # Update display_order
+        cursor.execute(
+            "UPDATE playlists SET display_order = ? WHERE playlist_url = ?",
+            (display_order, playlist_url)
         )
         self.conn.commit()
 
@@ -897,7 +930,11 @@ def get_playlists(db_path: str) -> tuple[Optional['pd.DataFrame'], str | None]:
     try:
         import pandas as pd  # noqa: PLC0415
         conn = sqlite3.connect(db_path)
-        query = "SELECT playlist_name, playlist_url FROM playlists"
+        # Order by display_order if available, put NULLs last
+        query = (
+            "SELECT playlist_name, playlist_url FROM playlists "
+            "ORDER BY display_order IS NULL, display_order"
+        )
         df = pd.read_sql_query(query, conn)
         conn.close()
         return df, None
