@@ -221,7 +221,7 @@ def do_track_import(
             metadata.get('bitrate')
         )
         if is_worse:
-            write_log.warning("IMPORT_LOW_QUALITY", "Imported file has lower quality than target.",
+            write_log.warn("IMPORT_LOW_QUALITY", "Imported file has lower quality than target.",
                             {"track_id": track_id, "reason": reason})
         
         # Update database

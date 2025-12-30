@@ -106,7 +106,7 @@ def scan_directory_for_audio_files(directory: str) -> List[Dict]:
     audio_files = []
     
     if not os.path.isdir(directory):
-        write_log.warning("AUTO_IMPORT_INVALID_DIR", "Invalid directory path.", {"directory": directory})
+        write_log.warn("AUTO_IMPORT_INVALID_DIR", "Invalid directory path.", {"directory": directory})
         return audio_files
     
     write_log.info("AUTO_IMPORT_SCAN_START", "Starting directory scan.", {"directory": directory})

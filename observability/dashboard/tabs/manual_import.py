@@ -48,7 +48,7 @@ def _get_non_completed_tracks_cached(db_path: str) -> Dict[str, List[dict]]:
     write_log.info("IMPORT_UI_QUERY", "Querying tracks missing local_file_path grouped by playlist.")
     
     if not os.path.exists(db_path):
-        write_log.warning("IMPORT_UI_DB_NOT_FOUND", "Database file does not exist.", {"db_path": db_path})
+        write_log.warn("IMPORT_UI_DB_NOT_FOUND", "Database file does not exist.", {"db_path": db_path})
         return {}
     
     conn = sqlite3.connect(db_path)
