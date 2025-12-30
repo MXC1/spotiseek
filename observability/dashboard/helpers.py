@@ -15,6 +15,7 @@ from mutagen import File as MutagenFile
 from scripts.constants import LOSSLESS_FORMATS, MIN_BITRATE_KBPS
 from scripts.logs_utils import write_log
 from scripts.m3u8_manager import update_track_in_m3u8
+from scripts.soulseek_client import remove_search_from_slskd, remove_download_from_slskd
 
 from .config import DB_PATH, IS_DOCKER, IMPORTED_DIR, track_db
 
@@ -210,6 +211,21 @@ def do_track_import(
             shutil.copy2(source_path, destination_path)
             write_log.info("AUTO_IMPORT_FILE_COPIED", "Copied file for auto-import.", 
                           {"track_id": track_id, "source": source_path, "destination": destination_path})
+        
+        # Clean up any ongoing searches and downloads in slskd
+        search_uuid = track_db.get_search_uuid_by_track_id(track_id)
+        if search_uuid:
+            remove_search_from_slskd(search_uuid, track_id)
+            write_log.debug("IMPORT_SEARCH_REMOVED", "Removed ongoing search from slskd.", 
+                          {"track_id": track_id, "search_uuid": search_uuid})
+        
+        download_uuid = track_db.get_download_uuid_by_track_id(track_id)
+        if download_uuid:
+            username = track_db.get_username_by_slskd_uuid(download_uuid)
+            if username:
+                remove_download_from_slskd(username, download_uuid)
+                write_log.debug("IMPORT_DOWNLOAD_REMOVED", "Removed download from slskd.", 
+                              {"track_id": track_id, "download_uuid": download_uuid, "username": username})
         
         # Extract metadata
         metadata = extract_metadata_from_file(destination_path)
