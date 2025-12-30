@@ -530,21 +530,25 @@ def update_download_statuses() -> None:
 
 
 def mark_tracks_for_quality_upgrade() -> None:
-    """Identify completed tracks that are not in lossless WAV format and mark them for quality upgrade.
+    """Identify completed tracks that don't meet quality requirements and mark for upgrade.
 
     This function:
     1. Queries all tracks with status='completed'
-    2. Checks their file extension
-    3. Marks non-WAV tracks as 'redownload_pending' for quality upgrade
+    2. Checks if they meet quality requirements based on PREFER_MP3 setting
+    3. Marks ineligible tracks as 'redownload_pending' for quality upgrade
 
-    Quality upgrade logic:
-    - WAV files are optimal quality (all lossless formats are remuxed to WAV)
-    - All non-WAV formats are marked for potential upgrade to lossless
+    Quality requirements:
+    - If PREFER_MP3 is False: Target is WAV (lossless, all formats)
+      - Non-WAV files are marked for upgrade to lossless
+    - If PREFER_MP3 is True: Target is MP3 320kbps (lossy but high quality)
+      - Non-MP3 files are marked for upgrade
+      - MP3 files with bitrate < 320kbps are marked for upgrade
     - The actual upgrade decision (whether a better file exists) happens during search
 
     Note:
-        This function should be called before process_redownload_queue() to ensure
-        all eligible tracks are queued for quality checks.
+        This function can be called multiple times safely. Tracks that meet quality
+        requirements will not be marked for upgrade, while those that don't will be
+        queued for search.
 
     """
     write_log.info("QUALITY_UPGRADE_SCAN", "Scanning completed tracks for quality upgrade opportunities.")
@@ -562,28 +566,55 @@ def mark_tracks_for_quality_upgrade() -> None:
     )
 
     upgrade_count = 0
-    target_format = "mp3" if PREFER_MP3 else "wav"
 
     for track_row in completed_tracks:
         track_id = track_row[0]  # First column is track_id
 
-        # Get current file extension
+        # Get current file properties
         current_extension = track_db.get_track_extension(track_id)
+        current_bitrate = track_db.get_track_bitrate(track_id)
 
-        # Mark for upgrade if not target format (or if extension is unknown/null)
-        if not current_extension or current_extension.lower() != target_format:
+        # Determine if track meets quality requirements
+        meets_requirements = False
+
+        if PREFER_MP3:
+            # Target: MP3 320kbps
+            if current_extension and current_extension.lower() == "mp3":
+                # MP3 file: check if it's high quality (320kbps)
+                if current_bitrate and current_bitrate >= 320:
+                    meets_requirements = True
+        else:
+            # Target: WAV (lossless)
+            if current_extension and current_extension.lower() == "wav":
+                meets_requirements = True
+
+        # Mark for upgrade if doesn't meet requirements
+        if not meets_requirements:
             track_db.update_track_status(track_id, "redownload_pending")
             upgrade_count += 1
-            write_log.debug("QUALITY_UPGRADE_MARKED", "Marked track for quality upgrade.",
-                          {"track_id": track_id, "current_extension": current_extension or "unknown"})
+            write_log.debug(
+                "QUALITY_UPGRADE_MARKED",
+                "Marked track for quality upgrade.",
+                {
+                    "track_id": track_id,
+                    "extension": current_extension or "unknown",
+                    "bitrate": current_bitrate or "unknown",
+                },
+            )
 
     if upgrade_count > 0:
-        write_log.info("QUALITY_UPGRADE_MARKED_COMPLETE",
-                      f"Marked {upgrade_count} tracks for quality upgrade (non-{target_format.upper()} files).",
-                      {"marked_count": upgrade_count, "total_completed": len(completed_tracks)})
+        target = "MP3 320kbps" if PREFER_MP3 else "WAV"
+        write_log.info(
+            "QUALITY_UPGRADE_MARKED_COMPLETE",
+            f"Marked {upgrade_count} tracks for quality upgrade (target: {target}).",
+            {"marked_count": upgrade_count, "total_completed": len(completed_tracks)},
+        )
     else:
-        write_log.info("QUALITY_UPGRADE_NO_CANDIDATES",
-                      f"All completed tracks are already {target_format.upper()} format or already queued for upgrade.")
+        target = "MP3 320kbps" if PREFER_MP3 else "WAV"
+        write_log.info(
+            "QUALITY_UPGRADE_NO_CANDIDATES",
+            f"All completed tracks already meet quality requirements (target: {target})."
+        )
 
 
 def _update_file_status(file: dict, username: str | None = None) -> None:

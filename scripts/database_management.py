@@ -772,6 +772,31 @@ class TrackDB:
         )
         return extension
 
+    def get_track_bitrate(self, track_id: str) -> int | None:
+        """Retrieve the bitrate of a track in kbps.
+
+        Args:
+            track_id: Track identifier
+
+        Returns:
+            Bitrate in kbps if track exists, None otherwise
+
+        """
+        write_log.debug("TRACK_BITRATE_QUERY", "Querying track bitrate.", {"track_id": track_id})
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT bitrate FROM tracks WHERE track_id = ?",
+            (track_id,),
+        )
+        result = cursor.fetchone()
+        bitrate = result[0] if result else None
+        write_log.debug(
+            "TRACK_BITRATE_RESULT",
+            "Track bitrate result.",
+            {"track_id": track_id, "bitrate": bitrate},
+        )
+        return bitrate
+
     def get_local_file_path(self, track_id: str) -> str | None:
         """Retrieve the local file path of a track.
 
