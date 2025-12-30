@@ -44,7 +44,7 @@ sys.dont_write_bytecode = True
 dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(dotenv_path)
 
-from scripts.constants import LOSSLESS_FORMATS, LOSSY_FORMATS  # noqa: E402
+from scripts.constants import LOSSLESS_FORMATS, LOSSY_FORMATS, MIN_BITRATE_KBPS  # noqa: E402
 from scripts.database_management import TrackData, TrackDB  # noqa: E402
 from scripts.logs_utils import setup_logging, write_log  # noqa: E402
 from scripts.m3u8_manager import update_track_in_m3u8, write_playlist_m3u8  # noqa: E402
@@ -579,14 +579,17 @@ def mark_tracks_for_quality_upgrade() -> None:
 
         if PREFER_MP3:
             # Target: MP3 320kbps
-            if current_extension and current_extension.lower() == "mp3":
+            if all(
+                current_extension,
+                current_extension.lower() == "mp3",
+                current_bitrate,
+                current_bitrate >= MIN_BITRATE_KBPS
+                ):
                 # MP3 file: check if it's high quality (320kbps)
-                if current_bitrate and current_bitrate >= 320:
-                    meets_requirements = True
-        else:
-            # Target: WAV (lossless)
-            if current_extension and current_extension.lower() == "wav":
                 meets_requirements = True
+        # Target: WAV (lossless)
+        elif current_extension and current_extension.lower() == "wav":
+            meets_requirements = True
 
         # Mark for upgrade if doesn't meet requirements
         if not meets_requirements:
