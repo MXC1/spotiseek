@@ -15,6 +15,7 @@ services:
       - 127.0.0.1:54300:50300/tcp
     user: 1000:1000
     image: slskd/slskd:latest
+    restart: unless-stopped
 
   dashboard:
     build:
@@ -38,6 +39,7 @@ services:
       - ./README.md:/app/README.md:ro
       - ./scripts:/app/scripts:ro
       - ./input_playlists:/app/input_playlists:ro
+      - /mnt/h/Contents:/app/HContents:ro
     depends_on:
       - slskd
     restart: unless-stopped
