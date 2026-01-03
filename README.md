@@ -53,6 +53,14 @@ This starts:
 - **slskd** (Soulseek daemon) - http://localhost:5030
 - **workflow** (Task scheduler)
 - **dashboard** (Web UI) - http://localhost:8501
+---
+
+## Importing into Rekordbox
+
+1. Run the workflow so the iTunes-style XML is generated at `output/{APP_ENV}/library_{APP_ENV}.xml` (for example, `output/prod/library_prod.xml`).
+2. In Rekordbox, open **File → Preferences → Advanced → Database → iTunes Library File → Browse** and find the XML at the location above.
+3. In the left sidebar, select the **iTunes logo**. You should see all your playlists there.
+4. When you regenerate the XML, simply click the refresh icon at the top of the list of playlists to ensure new tracks and playlists are picked up.
 
 ---
 
