@@ -284,14 +284,16 @@ def export_itunes_xml(xml_path: str, music_folder_url: str | None = None) -> Non
     conn = db.conn
     cursor = conn.cursor()
 
-    # Fetch all tracks from database
+    # Fetch all tracks from database, excluding those marked for redownload, failed, or with no file path
     cursor.execute("""
         SELECT track_id, track_name, artist, download_status,
                slskd_file_name, local_file_path, added_at
         FROM tracks
+        WHERE local_file_path IS NOT NULL
+        AND download_status NOT IN ('redownload_pending', 'failed')
     """)
     tracks = cursor.fetchall()
-    write_log.debug("XML_TRACKS_FETCHED", "Fetched tracks from database.", {"count": len(tracks)})
+    write_log.debug("XML_TRACKS_FETCHED", "Fetched tracks from database (excluding redownload_pending and failed).", {"count": len(tracks)})
 
     # Fetch all playlists in display order (as per CSV)
     cursor.execute(
@@ -327,7 +329,7 @@ def export_itunes_xml(xml_path: str, music_folder_url: str | None = None) -> Non
 
     # Map track_id to track integer ID (only for downloaded tracks)
     source_id_to_track_id = {}
-    downloaded_tracks = [t for t in tracks if t[5]]  # Filter by local_file_path
+    downloaded_tracks = tracks  # All tracks from SQL query are already filtered
     write_log.info("XML_DOWNLOADED_TRACKS", "Filtered downloaded tracks.",
                    {"total_tracks": len(tracks), "downloaded_tracks": len(downloaded_tracks)})
 

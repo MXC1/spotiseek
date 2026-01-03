@@ -885,6 +885,16 @@ def _handle_completed_download(file: dict, track_id: str) -> None:
     extension, bitrate = _extract_extension_bitrate(file, local_file_path)
     final_path = _remux_completed_download(track_id, local_file_path, extension, bitrate)
 
+    # Check if remux failed and status was set to "failed" due to corruption detection
+    current_status = track_db.get_track_status(track_id)
+    if current_status == "failed":
+        write_log.debug(
+            "DOWNLOAD_SKIPPED_REDOWNLOAD",
+            "Skipping status update for corrupt track marked for redownload.",
+            {"track_id": track_id},
+        )
+        return
+
     existing_path = track_db.get_local_file_path(track_id)
     track_db.update_local_file_path(track_id, final_path)
     write_log.debug(
@@ -1012,6 +1022,9 @@ def _cleanup_original_file(original_path: str, new_path: str, track_id: str, ext
 def _handle_corrupt_audio(track_id: str, file_path: str, extension: str, is_lossless: bool) -> None:
     """Handle corrupt audio file by updating status and blacklisting.
 
+    Marks the track as failed to attempt retrieving a valid copy from
+    a different source on Soulseek.
+
     Args:
         track_id: Track identifier
         file_path: Path to corrupt file
@@ -1022,10 +1035,10 @@ def _handle_corrupt_audio(track_id: str, file_path: str, extension: str, is_loss
     event_id = "LOSSLESS_INVALID" if is_lossless else "LOSSY_INVALID"
     write_log.warn(
         event_id,
-        f"{'Lossless' if is_lossless else 'Lossy'} file failed integrity check. Skipping remux.",
+        f"{'Lossless' if is_lossless else 'Lossy'} file failed integrity check. Marking for redownload.",
         {"track_id": track_id, "file_path": file_path, "extension": extension},
     )
-    track_db.update_track_status(track_id, "corrupt")
+    track_db.update_track_status(track_id, "failed", failed_reason="corrupt_file")
     slskd_uuid_to_blacklist = track_db.get_download_uuid_by_track_id(track_id)
     if slskd_uuid_to_blacklist:
         track_db.add_slskd_blacklist(slskd_uuid_to_blacklist, reason=f"corrupt_{extension}")
@@ -1092,7 +1105,7 @@ def _remux_lossy_to_mp3(local_file_path: str, track_id: str, extension: str) -> 
         _run_ffmpeg_remux(ffmpeg_input, ffmpeg_output, ffmpeg_args, log_context)
 
         track_db.update_extension_bitrate(track_id, extension="mp3", bitrate=320)
-        write_log.info(
+        write_log.debug(
             "REMUX_SUCCESS",
             f"{extension.upper()} remuxed to MP3 320kbps.",
             {"track_id": track_id, "mp3_path": mp3_path},
