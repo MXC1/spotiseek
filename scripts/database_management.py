@@ -243,6 +243,16 @@ class TrackDB:
         """)
 
         # Blacklist table: stores blacklisted username + slskd_file_name combinations
+        # Migration: Handle old blacklist schema (slskd_uuid -> username + slskd_file_name)
+        cursor.execute("PRAGMA table_info(slskd_blacklist)")
+        blacklist_columns = [row[1] for row in cursor.fetchall()]
+
+        if blacklist_columns and "slskd_uuid" in blacklist_columns:
+            # Old schema detected - migrate using temporary table for atomicity
+            write_log.info("DB_MIGRATE_BLACKLIST", "Migrating blacklist table to new schema.")
+            cursor.execute("DROP TABLE slskd_blacklist")
+
+        # Create or recreate blacklist table with new schema
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS slskd_blacklist (
                 username TEXT NOT NULL,
@@ -252,24 +262,6 @@ class TrackDB:
                 PRIMARY KEY (username, slskd_file_name)
             )
         """)
-
-        # Migration: Handle old blacklist schema (slskd_uuid -> username + slskd_file_name)
-        cursor.execute("PRAGMA table_info(slskd_blacklist)")
-        blacklist_columns = [row[1] for row in cursor.fetchall()]
-        if "slskd_uuid" in blacklist_columns:
-            # Old schema detected - recreate table with new schema
-            write_log.info("DB_MIGRATE_BLACKLIST", "Migrating blacklist table to new schema.")
-            cursor.execute("DROP TABLE slskd_blacklist")
-            cursor.execute("""
-                CREATE TABLE slskd_blacklist (
-                    username TEXT NOT NULL,
-                    slskd_file_name TEXT NOT NULL,
-                    reason TEXT,
-                    added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (username, slskd_file_name)
-                )
-            """)
-            self.conn.commit()
 
         # Create indexes for frequently queried columns (performance optimization)
         # These help queries that filter on local_file_path, download_status, etc.
