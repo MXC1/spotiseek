@@ -171,7 +171,7 @@ class TrackDB:
         - tracks: Track metadata and download status (supports Spotify, SoundCloud, etc.)
         - playlists: Playlist names and IDs
         - playlist_tracks: Many-to-many relationship between playlists and tracks
-        - slskd_blacklist: Blacklisted Soulseek download UUIDs
+        - slskd_blacklist: Blacklisted username + file name combinations
         """
         write_log.info("DB_CREATE_TABLES", "Creating database tables if they don't exist.")
         cursor = self.conn.cursor()
@@ -242,14 +242,34 @@ class TrackDB:
             )
         """)
 
-        # Blacklist table: stores blacklisted slskd_uuids
+        # Blacklist table: stores blacklisted username + slskd_file_name combinations
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS slskd_blacklist (
-                slskd_uuid TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                slskd_file_name TEXT NOT NULL,
                 reason TEXT,
-                added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (username, slskd_file_name)
             )
         """)
+
+        # Migration: Handle old blacklist schema (slskd_uuid -> username + slskd_file_name)
+        cursor.execute("PRAGMA table_info(slskd_blacklist)")
+        blacklist_columns = [row[1] for row in cursor.fetchall()]
+        if "slskd_uuid" in blacklist_columns:
+            # Old schema detected - recreate table with new schema
+            write_log.info("DB_MIGRATE_BLACKLIST", "Migrating blacklist table to new schema.")
+            cursor.execute("DROP TABLE slskd_blacklist")
+            cursor.execute("""
+                CREATE TABLE slskd_blacklist (
+                    username TEXT NOT NULL,
+                    slskd_file_name TEXT NOT NULL,
+                    reason TEXT,
+                    added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (username, slskd_file_name)
+                )
+            """)
+            self.conn.commit()
 
         # Create indexes for frequently queried columns (performance optimization)
         # These help queries that filter on local_file_path, download_status, etc.
@@ -273,39 +293,41 @@ class TrackDB:
 
         self.conn.commit()
 
-    def add_slskd_blacklist(self, slskd_uuid: str, reason: str | None = None) -> None:
-        """Add a slskd_uuid to the blacklist table.
+    def add_slskd_blacklist(self, username: str, slskd_file_name: str, reason: str | None = None) -> None:
+        """Add a username + slskd_file_name combination to the blacklist table.
 
         Args:
-            slskd_uuid: The Soulseek download UUID to blacklist
+            username: The Soulseek username
+            slskd_file_name: The file name from slskd
             reason: Optional reason for blacklisting
 
         """
         write_log.info(
             "SLSKD_BLACKLIST_ADD",
-            "Adding slskd_uuid to blacklist.",
-            {"slskd_uuid": slskd_uuid, "reason": reason},
+            "Adding username + file to blacklist.",
+            {"username": username, "slskd_file_name": slskd_file_name, "reason": reason},
         )
         cursor = self.conn.cursor()
         cursor.execute(
-            "INSERT OR IGNORE INTO slskd_blacklist (slskd_uuid, reason) VALUES (?, ?)",
-            (slskd_uuid, reason),
+            "INSERT OR IGNORE INTO slskd_blacklist (username, slskd_file_name, reason) VALUES (?, ?, ?)",
+            (username, slskd_file_name, reason),
         )
         self.conn.commit()
 
-    def is_slskd_blacklisted(self, slskd_uuid: str) -> bool:
-        """Check if a slskd_uuid is blacklisted.
+    def is_slskd_blacklisted(self, username: str, slskd_file_name: str) -> bool:
+        """Check if a username + slskd_file_name combination is blacklisted.
 
         Args:
-            slskd_uuid: The Soulseek download UUID to check
+            username: The Soulseek username
+            slskd_file_name: The file name from slskd
         Returns:
             True if blacklisted, False otherwise
 
         """
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT 1 FROM slskd_blacklist WHERE slskd_uuid = ?",
-            (slskd_uuid,),
+            "SELECT 1 FROM slskd_blacklist WHERE username = ? AND slskd_file_name = ?",
+            (username, slskd_file_name),
         )
         return cursor.fetchone() is not None
 
@@ -821,6 +843,42 @@ class TrackDB:
             {"track_id": track_id, "local_file_path": local_path},
         )
         return local_path
+
+    def get_username_by_track_id(self, track_id: str) -> str | None:
+        """Retrieve the Soulseek username associated with a track.
+
+        Args:
+            track_id: Track identifier
+
+        Returns:
+            Username if found, None otherwise
+
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT username FROM tracks WHERE track_id = ?",
+            (track_id,),
+        )
+        result = cursor.fetchone()
+        return result[0] if result else None
+
+    def get_slskd_file_name_by_track_id(self, track_id: str) -> str | None:
+        """Retrieve the slskd file name associated with a track.
+
+        Args:
+            track_id: Track identifier
+
+        Returns:
+            slskd file name if found, None otherwise
+
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT slskd_file_name FROM tracks WHERE track_id = ?",
+            (track_id,),
+        )
+        result = cursor.fetchone()
+        return result[0] if result else None
 
     def update_local_file_path(self, track_id: str, local_file_path: str) -> None:
         """Update the local filesystem path for a downloaded track.

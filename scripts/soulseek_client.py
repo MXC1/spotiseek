@@ -461,7 +461,7 @@ def select_best_file(responses: list[dict[str, Any]], search_text: str) -> tuple
     write_log.debug("SLSKD_FILE_SELECTION_START", "Starting file selection process.",
                    {"response_count": len(responses), "allow_alternatives": allow_alternatives})
 
-    # Collect all candidate files, skipping blacklisted slskd_uuids
+    # Collect all candidate files, skipping blacklisted username + filename combinations
     candidates = []
     non_audio_count = 0
     low_bitrate_count = 0
@@ -473,9 +473,9 @@ def select_best_file(responses: list[dict[str, Any]], search_text: str) -> tuple
         total_files += len(files)
 
         for file in files:
-            slskd_uuid = file.get("id")
+            filename = file.get("filename")
 
-            if slskd_uuid and track_db.is_slskd_blacklisted(slskd_uuid):
+            if username and filename and track_db.is_slskd_blacklisted(username, filename):
                 continue  # Blacklisted file skipped
 
             # Filter out non-audio files
