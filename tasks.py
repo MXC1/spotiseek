@@ -1,4 +1,6 @@
 # ruff: noqa: ARG001
+import os
+import platform
 import subprocess
 from pathlib import Path
 
@@ -18,6 +20,23 @@ def get_app_env():
     print("APP_ENV not found in .env!")
     return None
 
+
+def running_inside_wsl() -> bool:
+    """Detect whether the current process is inside a WSL environment."""
+    if os.environ.get("WSL_DISTRO_NAME"):
+        return True
+    try:
+        return "microsoft" in Path("/proc/version").read_text().lower()
+    except OSError:
+        return False
+
+
+def wrap_docker_cmd(cmd: list[str]) -> list[str]:
+    """Prefix Docker commands with `wsl` when launched from Windows host shells."""
+    if platform.system() == "Windows" and not running_inside_wsl():
+        return ["wsl", *cmd]
+    return cmd
+
 @task(help={
     "env": "Optional environment name to override APP_ENV (e.g. test_new)",
 })
@@ -30,8 +49,11 @@ def nuke(c, env=None):
     If --env is provided, that value is used for app_env. Otherwise, APP_ENV is
     read from .env via get_app_env().
     """
-    subprocess.run(["docker-compose", "down"], check=True)
-    subprocess.run(["docker", "system", "prune", "-a", "--volumes", "-f"], check=True)
+    subprocess.run(wrap_docker_cmd(["docker-compose", "down"]), check=True)
+    subprocess.run(
+        wrap_docker_cmd(["docker", "system", "prune", "-a", "--volumes", "-f"]),
+        check=True,
+    )
     app_env = env if env else get_app_env()
     if app_env:
         targets = [
@@ -86,12 +108,15 @@ def exec(c, service, command):
     if not service or not command:
         print("You must specify both --service and --command.")
         return
-    subprocess.run(["docker-compose", "exec", service, *command.split()], check=True)
+    subprocess.run(
+        wrap_docker_cmd(["docker-compose", "exec", service, *command.split()]),
+        check=True,
+    )
 
 @task
 def build(c):
     """Build all Docker images"""
-    subprocess.run(["docker-compose", "build"], check=True)
+    subprocess.run(wrap_docker_cmd(["docker-compose", "build"]), check=True)
 
 @task
 def up(c, service=None):
@@ -102,12 +127,12 @@ def up(c, service=None):
     cmd = ["docker-compose", "up", "-d", "--build"]
     if service:
         cmd.append(service)
-    subprocess.run(cmd, check=True)
+    subprocess.run(wrap_docker_cmd(cmd), check=True)
 
 @task
 def down(c):
     """Stop all services using docker-compose"""
-    subprocess.run(["docker-compose", "down"], check=True)
+    subprocess.run(wrap_docker_cmd(["docker-compose", "down"]), check=True)
 
 @task
 def logs(c, service=None):
@@ -115,12 +140,15 @@ def logs(c, service=None):
     cmd = ["docker-compose", "logs", "-f"]
     if service:
         cmd.append(service)
-    subprocess.run(cmd, check=True)
+    subprocess.run(wrap_docker_cmd(cmd), check=True)
 
 @task
 def prune(c):
     """Remove all stopped containers, networks, images, and volumes"""
-    subprocess.run(["docker", "system", "prune", "-a", "--volumes", "-f"], check=True)
+    subprocess.run(
+        wrap_docker_cmd(["docker", "system", "prune", "-a", "--volumes", "-f"]),
+        check=True,
+    )
 
 @task
 def clean(c):
@@ -139,7 +167,7 @@ def run_all_tasks(c, attach=False):
     if not attach:
         cmd.append("-d")
     cmd.extend(["workflow", "python", "-m", "scripts.task_scheduler", "--run-all"])
-    subprocess.run(cmd, check=True)
+    subprocess.run(wrap_docker_cmd(cmd), check=True)
 
 @task
 def lint(c):
