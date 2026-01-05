@@ -39,7 +39,6 @@ services:
       - ./README.md:/app/README.md:ro
       - ./scripts:/app/scripts:ro
       - ./input_playlists:/app/input_playlists:ro
-      - /mnt/h/Contents:/app/HContents:ro
     depends_on:
       - slskd
     restart: unless-stopped
