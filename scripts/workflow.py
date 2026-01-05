@@ -1045,8 +1045,17 @@ def _handle_corrupt_audio(track_id: str, file_path: str, extension: str, is_loss
     slskd_file_name = track_db.get_slskd_file_name_by_track_id(track_id)
     if username and slskd_file_name:
         track_db.add_slskd_blacklist(username, slskd_file_name, reason=f"corrupt_{extension}")
-
-
+    else:
+        write_log.warn(
+            "BLACKLIST_SKIP",
+            "Cannot blacklist corrupt file - missing username or filename.",
+            {
+                "track_id": track_id,
+                "username": username,
+                "slskd_file_name": slskd_file_name,
+                "extension": extension,
+            },
+        )
 def _remux_lossless_to_wav(local_file_path: str, track_id: str, extension: str) -> str:
     """Remux a lossless audio file (FLAC, ALAC, APE) to WAV.
     Update extension/bitrate in DB if successful.

@@ -480,6 +480,17 @@ def select_best_file(responses: list[dict[str, Any]], search_text: str) -> tuple
                 normalized_filename = normalize_slskd_filename(filename)
                 if track_db.is_slskd_blacklisted(username, normalized_filename):
                     continue  # Blacklisted file skipped
+            else:
+                # Log when blacklist cannot be applied due to missing fields
+                write_log.warning(
+                    "SLSKD_BLACKLIST_SKIPPED_MISSING_FIELDS",
+                    "Skipping blacklist check because username or filename is missing.",
+                    {
+                        "username": username,
+                        "filename": filename,
+                        "raw_file": file,
+                    },
+                )
 
             # Filter out non-audio files
             if not is_audio_file(file):
