@@ -26,6 +26,32 @@ _IMPORT_DB_PATH = (
 )
 
 
+def normalize_slskd_filename(slskd_file_name: str) -> str:
+    """Normalize a slskd filename to a consistent format for storage and comparison.
+
+    This function:
+    1. Replaces forward slashes with backslashes
+    2. Keeps only the last two path components (subfolder + filename)
+       or just the filename if there's only one component
+
+    Args:
+        slskd_file_name: The raw filename from slskd (may be a full or partial path)
+
+    Returns:
+        Normalized filename string
+
+    """
+    # Normalize path separators
+    norm_path = slskd_file_name.replace("/", "\\")
+    parts = norm_path.split("\\")
+    # Only keep the last two components (subfolder and filename), or just filename if only one
+    if len(parts) >= 2:  # noqa: PLR2004
+        return parts[-2] + "\\" + parts[-1]
+    if len(parts) == 1:
+        return parts[0]
+    return slskd_file_name
+
+
 @dataclass
 class TrackData:
     """Data class for track information to reduce function parameters."""
@@ -171,7 +197,7 @@ class TrackDB:
         - tracks: Track metadata and download status (supports Spotify, SoundCloud, etc.)
         - playlists: Playlist names and IDs
         - playlist_tracks: Many-to-many relationship between playlists and tracks
-        - slskd_blacklist: Blacklisted Soulseek download UUIDs
+        - slskd_blacklist: Blacklisted username + file name combinations
         """
         write_log.info("DB_CREATE_TABLES", "Creating database tables if they don't exist.")
         cursor = self.conn.cursor()
@@ -242,12 +268,27 @@ class TrackDB:
             )
         """)
 
-        # Blacklist table: stores blacklisted slskd_uuids
+        # Blacklist table: stores blacklisted username + slskd_file_name combinations
+        # Migration: Handle old blacklist schema (slskd_uuid -> username + slskd_file_name)
+        cursor.execute("PRAGMA table_info(slskd_blacklist)")
+        blacklist_columns = [row[1] for row in cursor.fetchall()]
+
+        if blacklist_columns and "slskd_uuid" in blacklist_columns:
+            # Old schema detected - dropping table since UUID-based data cannot be migrated.
+            write_log.info(
+                "DB_MIGRATE_BLACKLIST",
+                "Old blacklist schema detected - dropping table; UUID-based data cannot be migrated.",
+            )
+            cursor.execute("DROP TABLE slskd_blacklist")
+
+        # Create or recreate blacklist table with new schema
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS slskd_blacklist (
-                slskd_uuid TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                slskd_file_name TEXT NOT NULL,
                 reason TEXT,
-                added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (username, slskd_file_name)
             )
         """)
 
@@ -273,39 +314,45 @@ class TrackDB:
 
         self.conn.commit()
 
-    def add_slskd_blacklist(self, slskd_uuid: str, reason: str | None = None) -> None:
-        """Add a slskd_uuid to the blacklist table.
+    def add_slskd_blacklist(self, username: str, slskd_file_name: str, reason: str | None = None) -> None:
+        """Add a username + slskd_file_name combination to the blacklist table.
 
         Args:
-            slskd_uuid: The Soulseek download UUID to blacklist
+            username: The Soulseek username
+            slskd_file_name: The file name from slskd (will be normalized before storage)
             reason: Optional reason for blacklisting
 
         """
+        # Normalize filename to ensure consistency
+        normalized_filename = normalize_slskd_filename(slskd_file_name)
         write_log.info(
             "SLSKD_BLACKLIST_ADD",
-            "Adding slskd_uuid to blacklist.",
-            {"slskd_uuid": slskd_uuid, "reason": reason},
+            "Adding username + file to blacklist.",
+            {"username": username, "slskd_file_name": normalized_filename, "reason": reason},
         )
         cursor = self.conn.cursor()
         cursor.execute(
-            "INSERT OR IGNORE INTO slskd_blacklist (slskd_uuid, reason) VALUES (?, ?)",
-            (slskd_uuid, reason),
+            "INSERT OR IGNORE INTO slskd_blacklist (username, slskd_file_name, reason) VALUES (?, ?, ?)",
+            (username, normalized_filename, reason),
         )
         self.conn.commit()
 
-    def is_slskd_blacklisted(self, slskd_uuid: str) -> bool:
-        """Check if a slskd_uuid is blacklisted.
+    def is_slskd_blacklisted(self, username: str, slskd_file_name: str) -> bool:
+        """Check if a username + slskd_file_name combination is blacklisted.
 
         Args:
-            slskd_uuid: The Soulseek download UUID to check
+            username: The Soulseek username
+            slskd_file_name: The file name from slskd (will be normalized before checking)
         Returns:
             True if blacklisted, False otherwise
 
         """
+        # Normalize filename to ensure consistency with stored values
+        normalized_filename = normalize_slskd_filename(slskd_file_name)
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT 1 FROM slskd_blacklist WHERE slskd_uuid = ?",
-            (slskd_uuid,),
+            "SELECT 1 FROM slskd_blacklist WHERE username = ? AND slskd_file_name = ?",
+            (username, normalized_filename),
         )
         return cursor.fetchone() is not None
 
@@ -524,16 +571,7 @@ class TrackDB:
             slskd_file_name: Soulseek filename to update (may be a full or partial path)
 
         """
-        # Normalize path separators
-        norm_path = slskd_file_name.replace("/", "\\")
-        parts = norm_path.split("\\")
-        # Only keep the last two components (subfolder and filename), or just filename if only one
-        if len(parts) >= 2:  # noqa: PLR2004
-            trimmed = parts[-2] + "\\" + parts[-1]
-        elif len(parts) == 1:
-            trimmed = parts[0]
-        else:
-            trimmed = slskd_file_name
+        trimmed = normalize_slskd_filename(slskd_file_name)
         write_log.debug(
             "TRACK_SLSKD_FILENAME_UPDATE", "Updating Soulseek file name for track.", {
                 "track_id": track_id,
@@ -821,6 +859,42 @@ class TrackDB:
             {"track_id": track_id, "local_file_path": local_path},
         )
         return local_path
+
+    def get_username_by_track_id(self, track_id: str) -> str | None:
+        """Retrieve the Soulseek username associated with a track.
+
+        Args:
+            track_id: Track identifier
+
+        Returns:
+            Username if found, None otherwise
+
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT username FROM tracks WHERE track_id = ?",
+            (track_id,),
+        )
+        result = cursor.fetchone()
+        return result[0] if result else None
+
+    def get_slskd_file_name_by_track_id(self, track_id: str) -> str | None:
+        """Retrieve the slskd file name associated with a track.
+
+        Args:
+            track_id: Track identifier
+
+        Returns:
+            slskd file name if found, None otherwise
+
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT slskd_file_name FROM tracks WHERE track_id = ?",
+            (track_id,),
+        )
+        result = cursor.fetchone()
+        return result[0] if result else None
 
     def update_local_file_path(self, track_id: str, local_file_path: str) -> None:
         """Update the local filesystem path for a downloaded track.
