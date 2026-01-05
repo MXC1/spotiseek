@@ -319,19 +319,21 @@ class TrackDB:
 
         Args:
             username: The Soulseek username
-            slskd_file_name: The file name from slskd
+            slskd_file_name: The file name from slskd (will be normalized before storage)
             reason: Optional reason for blacklisting
 
         """
+        # Normalize filename to ensure consistency
+        normalized_filename = normalize_slskd_filename(slskd_file_name)
         write_log.info(
             "SLSKD_BLACKLIST_ADD",
             "Adding username + file to blacklist.",
-            {"username": username, "slskd_file_name": slskd_file_name, "reason": reason},
+            {"username": username, "slskd_file_name": normalized_filename, "reason": reason},
         )
         cursor = self.conn.cursor()
         cursor.execute(
             "INSERT OR IGNORE INTO slskd_blacklist (username, slskd_file_name, reason) VALUES (?, ?, ?)",
-            (username, slskd_file_name, reason),
+            (username, normalized_filename, reason),
         )
         self.conn.commit()
 
@@ -340,15 +342,17 @@ class TrackDB:
 
         Args:
             username: The Soulseek username
-            slskd_file_name: The file name from slskd
+            slskd_file_name: The file name from slskd (will be normalized before checking)
         Returns:
             True if blacklisted, False otherwise
 
         """
+        # Normalize filename to ensure consistency with stored values
+        normalized_filename = normalize_slskd_filename(slskd_file_name)
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT 1 FROM slskd_blacklist WHERE username = ? AND slskd_file_name = ?",
-            (username, slskd_file_name),
+            (username, normalized_filename),
         )
         return cursor.fetchone() is not None
 
