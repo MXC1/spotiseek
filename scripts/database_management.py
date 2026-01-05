@@ -26,6 +26,32 @@ _IMPORT_DB_PATH = (
 )
 
 
+def normalize_slskd_filename(slskd_file_name: str) -> str:
+    """Normalize a slskd filename to a consistent format for storage and comparison.
+
+    This function:
+    1. Replaces forward slashes with backslashes
+    2. Keeps only the last two path components (subfolder + filename)
+       or just the filename if there's only one component
+
+    Args:
+        slskd_file_name: The raw filename from slskd (may be a full or partial path)
+
+    Returns:
+        Normalized filename string
+
+    """
+    # Normalize path separators
+    norm_path = slskd_file_name.replace("/", "\\")
+    parts = norm_path.split("\\")
+    # Only keep the last two components (subfolder and filename), or just filename if only one
+    if len(parts) >= 2:  # noqa: PLR2004
+        return parts[-2] + "\\" + parts[-1]
+    if len(parts) == 1:
+        return parts[0]
+    return slskd_file_name
+
+
 @dataclass
 class TrackData:
     """Data class for track information to reduce function parameters."""
@@ -248,8 +274,11 @@ class TrackDB:
         blacklist_columns = [row[1] for row in cursor.fetchall()]
 
         if blacklist_columns and "slskd_uuid" in blacklist_columns:
-            # Old schema detected - migrate using temporary table for atomicity
-            write_log.info("DB_MIGRATE_BLACKLIST", "Migrating blacklist table to new schema.")
+            # Old schema detected - dropping table since UUID-based data cannot be migrated.
+            write_log.info(
+                "DB_MIGRATE_BLACKLIST",
+                "Old blacklist schema detected - dropping table; UUID-based data cannot be migrated.",
+            )
             cursor.execute("DROP TABLE slskd_blacklist")
 
         # Create or recreate blacklist table with new schema
@@ -538,16 +567,7 @@ class TrackDB:
             slskd_file_name: Soulseek filename to update (may be a full or partial path)
 
         """
-        # Normalize path separators
-        norm_path = slskd_file_name.replace("/", "\\")
-        parts = norm_path.split("\\")
-        # Only keep the last two components (subfolder and filename), or just filename if only one
-        if len(parts) >= 2:  # noqa: PLR2004
-            trimmed = parts[-2] + "\\" + parts[-1]
-        elif len(parts) == 1:
-            trimmed = parts[0]
-        else:
-            trimmed = slskd_file_name
+        trimmed = normalize_slskd_filename(slskd_file_name)
         write_log.debug(
             "TRACK_SLSKD_FILENAME_UPDATE", "Updating Soulseek file name for track.", {
                 "track_id": track_id,

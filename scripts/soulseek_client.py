@@ -41,7 +41,7 @@ import requests
 from dotenv import load_dotenv
 
 from scripts.constants import LOSSLESS_FORMATS, MIN_BITRATE_KBPS, SUPPORTED_AUDIO_FORMATS
-from scripts.database_management import TrackDB
+from scripts.database_management import TrackDB, normalize_slskd_filename
 from scripts.logs_utils import write_log
 
 load_dotenv()
@@ -475,8 +475,11 @@ def select_best_file(responses: list[dict[str, Any]], search_text: str) -> tuple
         for file in files:
             filename = file.get("filename")
 
-            if username and filename and track_db.is_slskd_blacklisted(username, filename):
-                continue  # Blacklisted file skipped
+            # Normalize filename before blacklist check to match database format
+            if username and filename:
+                normalized_filename = normalize_slskd_filename(filename)
+                if track_db.is_slskd_blacklisted(username, normalized_filename):
+                    continue  # Blacklisted file skipped
 
             # Filter out non-audio files
             if not is_audio_file(file):
