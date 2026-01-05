@@ -1039,7 +1039,7 @@ def _handle_corrupt_audio(track_id: str, file_path: str, extension: str, is_loss
         {"track_id": track_id, "file_path": file_path, "extension": extension},
     )
     track_db.update_track_status(track_id, "failed", failed_reason="corrupt_file")
-    
+
     # Blacklist based on username + slskd_file_name instead of UUID
     username = track_db.get_username_by_track_id(track_id)
     slskd_file_name = track_db.get_slskd_file_name_by_track_id(track_id)
