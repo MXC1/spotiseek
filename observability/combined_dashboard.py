@@ -42,6 +42,7 @@ from observability.dashboard.tabs import (
     render_manual_import_tab,
     render_auto_import_tab,
     render_docs_tab,
+    render_blacklist_tab,
 )
 
 
@@ -58,12 +59,13 @@ def main():
     st.title(f"🎵 Spotiseek Dashboard - {ENV.upper()} Environment")
     
     # Create tabs
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📊 Overall Stats",
         "⏱️ Tasks",
         "🔍 Execution Inspection",
         "📥 Manual Import",
         "🤖 Auto Import",
+        "🚫 Blacklist",
         "📖 Docs"
     ])
     
@@ -83,6 +85,9 @@ def main():
         render_auto_import_tab()
     
     with tab6:
+        render_blacklist_tab()
+    
+    with tab7:
         render_docs_tab()
 
 

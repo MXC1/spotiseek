@@ -1264,7 +1264,7 @@ def task_initiate_searches() -> bool:
             return False
 
         # Get tracks that need searching
-        candidates_statuses = ["pending", "new", "not_found", "no_suitable_file", "corrupt", "failed"]
+        candidates_statuses = ["pending", "new", "not_found", "no_suitable_file", "corrupt", "failed", "blacklisted"]
         tracks_to_search = []
 
         for status in candidates_statuses:

@@ -139,7 +139,7 @@ def render_run_summary(run: dict, analysis: dict):
             }
             for item in analysis['timeline']
         ])
-        st.dataframe(timeline_df, use_container_width=True, hide_index=True)
+        st.dataframe(timeline_df, width="stretch", hide_index=True)
     
     # Errors section
     if analysis['errors']:
