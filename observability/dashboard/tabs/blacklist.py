@@ -111,55 +111,54 @@ def _search_completed_tracks_cached(
 # BLACKLIST FUNCTIONS
 # ============================================================================
 
-def _revert_track_to_comment_in_m3u8(m3u8_path: str, track_id: str, artist: str, track_name: str) -> None:
+def _revert_track_to_comment_in_m3u8(
+    m3u8_path: str, track_id: str, artist: str, track_name: str, local_file_path: str
+) -> None:
     """
     Revert a track entry in an M3U8 file back to a comment.
 
     This is used when blacklisting a track - the file path is replaced with
     a comment so it shows as incomplete in the playlist.
 
+    Based on how update_track_in_m3u8 works: when a track is completed,
+    the comment line "# track_id - artist - track_name" is REPLACED with
+    the file path line. So we need to find the file path and replace it
+    back with the comment.
+
     Args:
         m3u8_path: Path to the M3U8 file to update
         track_id: Track ID to search for
         artist: Artist name for the comment
         track_name: Track name for the comment
+        local_file_path: The file path to search for and replace
     """
     try:
         # Read all lines
         with open(m3u8_path, encoding="utf-8") as f:
             lines = f.readlines()
 
-        # Find and replace any line that's not a comment but is for this track
-        # We need to search for the track entry and replace it with a comment
+        # Find and replace the file path line with a comment
         new_lines = []
         track_found = False
 
-        for i, line in enumerate(lines):
-            # Skip the #EXTM3U header
-            if line.startswith("#EXTM3U"):
-                new_lines.append(line)
-                continue
-
-            # Check if this is already a comment for our track
-            if line.startswith(f"# {track_id} - "):
-                new_lines.append(line)
+        for line in lines:
+            # Check if this line is the file path for this track
+            # The file path line will be the exact path (with or without trailing newline)
+            if line.strip() == local_file_path.strip() and not track_found:
+                # Replace the file path with the comment
+                new_lines.append(f"# {track_id} - {artist} - {track_name}\n")
                 track_found = True
-                continue
+            else:
+                # Keep all other lines as-is
+                new_lines.append(line)
 
-            # Check if the previous line was a comment for our track
-            # If so, this line is the file path and should be removed
-            if i > 0 and lines[i-1].startswith(f"# {track_id} - "):
-                # Don't add this line (the file path), just the comment
-                track_found = True
-                continue
-
-            # Otherwise, keep the line as-is
-            new_lines.append(line)
-
-        # If we didn't find the track, it might have been a file path without a preceding comment
-        # In that case, we should add a comment for it
+        # If we didn't find the track path, it might already be a comment
+        # Check if comment already exists
         if not track_found:
-            new_lines.append(f"# {track_id} - {artist} - {track_name}\n")
+            comment_line = f"# {track_id} - {artist} - {track_name}\n"
+            if comment_line not in new_lines:
+                # Add comment if it doesn't exist
+                new_lines.append(comment_line)
 
         # Write back
         with open(m3u8_path, "w", encoding="utf-8") as f:
@@ -168,7 +167,7 @@ def _revert_track_to_comment_in_m3u8(m3u8_path: str, track_id: str, artist: str,
         write_log.debug(
             "M3U8_REVERT_SUCCESS",
             "Reverted track to comment in M3U8 file.",
-            {"m3u8_path": m3u8_path, "track_id": track_id}
+            {"m3u8_path": m3u8_path, "track_id": track_id, "local_file_path": local_file_path}
         )
 
     except Exception as e:
@@ -186,9 +185,18 @@ def blacklist_track(track: dict) -> tuple[bool, str]:
     2. Deleting the local file
     3. Setting local_file_path, bitrate, and extension to NULL
     4. Setting status to 'blacklisted'
+    5. Reverting M3U8 playlist entries to comments
 
     Args:
-        track: Dictionary with track information
+        track: Dictionary with track information containing:
+            - track_id: Track identifier
+            - track_name: Name of the track
+            - artist: Artist name
+            - local_file_path: Current file path on disk
+            - username: Soulseek username
+            - slskd_file_name: Normalized filename from slskd
+            - extension: File extension (optional)
+            - bitrate: Bitrate in kbps (optional)
 
     Returns:
         Tuple of (success: bool, message: str)
@@ -227,6 +235,14 @@ def blacklist_track(track: dict) -> tuple[bool, str]:
                     "slskd_file_name": slskd_file_name,
                 }
             )
+            # Abort blacklist operation when required Soulseek metadata is missing
+            # to avoid re-downloading the same file from the same user without
+            # a corresponding blacklist entry.
+            return False, (
+                "Cannot blacklist track because Soulseek metadata is incomplete "
+                "(missing username or file name). The file and track status were "
+                "left unchanged. Try again after a new download attempt."
+            )
 
         # Step 2: Delete the local file if it exists
         if local_file_path and os.path.exists(local_file_path):
@@ -245,47 +261,116 @@ def blacklist_track(track: dict) -> tuple[bool, str]:
                 )
                 return False, f"Failed to delete file: {e!s}"
 
-        # Step 3: Update database - set local_file_path, bitrate, extension to NULL
-        cursor = track_db.conn.cursor()
-        cursor.execute(
-            """
-            UPDATE tracks
-            SET local_file_path = NULL,
-                bitrate = NULL,
-                extension = NULL
-            WHERE track_id = ?
-            """,
-            (track_id,)
-        )
-        track_db.conn.commit()
+        # Capture previous DB state for potential rollback
+        previous_state = {
+            "local_file_path": local_file_path,
+            "bitrate": track.get("bitrate"),
+            "extension": track.get("extension"),
+            "status": "completed",  # Assume completed since track was searchable
+        }
 
-        write_log.info(
-            "BLACKLIST_DB_CLEARED",
-            "Cleared file metadata for blacklisted track.",
-            {"track_id": track_id}
-        )
-
-        # Step 4: Set status to 'blacklisted'
-        track_db.update_track_status(track_id, "blacklisted")
-        write_log.info(
-            "BLACKLIST_STATUS_SET",
-            "Set track status to blacklisted.",
-            {"track_id": track_id}
-        )
-
-        # Step 5: Update M3U8 playlists to revert track back to comment
-        # When a track is blacklisted, we need to revert the M3U8 entry back to a comment
-        # so it shows as incomplete in the playlist
-        playlist_urls = track_db.get_playlists_for_track(track_id)
-        for playlist_url in playlist_urls:
-            m3u8_path = track_db.get_m3u8_path_for_playlist(playlist_url)
-            if m3u8_path and os.path.exists(m3u8_path):
-                _revert_track_to_comment_in_m3u8(m3u8_path, track_id, artist, track_name)
-                write_log.debug(
-                    "BLACKLIST_M3U8_UPDATED",
-                    "Reverted M3U8 entry back to comment for blacklisted track.",
-                    {"m3u8_path": m3u8_path, "track_id": track_id}
+        try:
+            # Step 3: Update database - set local_file_path, bitrate, extension to NULL
+            # Use a short-lived SQLite connection instead of accessing track_db.conn directly
+            with sqlite3.connect(DB_PATH) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    UPDATE tracks
+                    SET local_file_path = NULL,
+                        bitrate = NULL,
+                        extension = NULL
+                    WHERE track_id = ?
+                    """,
+                    (track_id,),
                 )
+
+            write_log.info(
+                "BLACKLIST_DB_CLEARED",
+                "Cleared file metadata for blacklisted track.",
+                {"track_id": track_id}
+            )
+
+            # Step 4: Set status to 'blacklisted'
+            track_db.update_track_status(track_id, "blacklisted")
+            write_log.info(
+                "BLACKLIST_STATUS_SET",
+                "Set track status to blacklisted.",
+                {"track_id": track_id}
+            )
+
+            # Step 5: Update M3U8 playlists to revert track back to comment
+            # When a track is blacklisted, we need to revert the M3U8 entry back to a comment
+            # so it shows as incomplete in the playlist
+            playlist_urls = track_db.get_playlists_for_track(track_id)
+            for playlist_url in playlist_urls:
+                m3u8_path = track_db.get_m3u8_path_for_playlist(playlist_url)
+                if m3u8_path and os.path.exists(m3u8_path):
+                    try:
+                        _revert_track_to_comment_in_m3u8(
+                            m3u8_path,
+                            track_id,
+                            artist,
+                            track_name,
+                            local_file_path,
+                        )
+                        write_log.debug(
+                            "BLACKLIST_M3U8_UPDATED",
+                            "Reverted M3U8 entry back to comment for blacklisted track.",
+                            {"m3u8_path": m3u8_path, "track_id": track_id}
+                        )
+                    except Exception as m3u8_error:
+                        write_log.error(
+                            "BLACKLIST_M3U8_UPDATE_FAIL",
+                            "Failed to update M3U8 for blacklisted track.",
+                            {
+                                "m3u8_path": m3u8_path,
+                                "track_id": track_id,
+                                "error": str(m3u8_error),
+                            },
+                        )
+                        # Propagate to trigger rollback of DB changes
+                        raise
+
+        except Exception as step_error:
+            # Best-effort rollback of DB fields if anything after file deletion fails
+            try:
+                with sqlite3.connect(DB_PATH) as rollback_conn:
+                    rollback_cursor = rollback_conn.cursor()
+                    rollback_cursor.execute(
+                        """
+                        UPDATE tracks
+                        SET local_file_path = ?,
+                            bitrate = ?,
+                            extension = ?,
+                            download_status = ?
+                        WHERE track_id = ?
+                        """,
+                        (
+                            previous_state.get("local_file_path"),
+                            previous_state.get("bitrate"),
+                            previous_state.get("extension"),
+                            previous_state.get("status"),
+                            track_id,
+                        ),
+                    )
+                write_log.warn(
+                    "BLACKLIST_ROLLBACK_SUCCESS",
+                    "Rolled back DB changes after blacklist failure.",
+                    {"track_id": track_id},
+                )
+            except Exception as rollback_error:
+                write_log.error(
+                    "BLACKLIST_ROLLBACK_FAIL",
+                    "Failed to roll back DB changes after blacklist failure.",
+                    {
+                        "track_id": track_id,
+                        "original_error": str(step_error),
+                        "rollback_error": str(rollback_error),
+                    },
+                )
+            # Re-raise so outer handler can report failure
+            raise
 
         return True, f"Successfully blacklisted: {artist} - {track_name}"
 
@@ -397,7 +482,7 @@ def render_blacklist_section():
         help="Search for tracks that have been successfully downloaded"
     )
 
-    col_a, col_b, _col_c = st.columns([1, 1, 2])
+    col_a, col_b, _ = st.columns([1, 1, 2])
     with col_a:
         page_size = st.selectbox("Rows per page", options=[10, 25, 50, 100], index=1)
     with col_b:
@@ -412,7 +497,6 @@ def render_blacklist_section():
 
     if offset >= max(total, 1):
         offset = 0
-        page_number = 1
         rows, total = _search_completed_tracks_cached(
             DB_PATH, search, offset, int(page_size), st.session_state["blacklist_nonce"]
         )
