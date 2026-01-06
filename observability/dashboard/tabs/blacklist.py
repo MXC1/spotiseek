@@ -178,7 +178,7 @@ def _revert_track_to_comment_in_m3u8(
         )
 
 
-def blacklist_track(track: dict) -> tuple[bool, str]:
+def blacklist_track(track: dict) -> tuple[bool, str]:  # noqa: PLR0915
     """
     Blacklist a track by:
     1. Adding username + slskd_file_name to blacklist table
@@ -266,11 +266,15 @@ def blacklist_track(track: dict) -> tuple[bool, str]:
             "local_file_path": local_file_path,
             "bitrate": track.get("bitrate"),
             "extension": track.get("extension"),
+            "username": track.get("username"),
+            "slskd_file_name": track.get("slskd_file_name"),
             "download_status": "completed",  # Assume completed since track was searchable
         }
 
         try:
-            # Step 3: Update database - set local_file_path, bitrate, extension to NULL
+            # Step 3: Update database - clear all download metadata
+            # Clear username and slskd_file_name to ensure the track is fully reset
+            # for a fresh search without reference to the blacklisted file
             # Use a short-lived SQLite connection instead of accessing track_db.conn directly
             with sqlite3.connect(DB_PATH) as conn:
                 cursor = conn.cursor()
@@ -279,7 +283,9 @@ def blacklist_track(track: dict) -> tuple[bool, str]:
                     UPDATE tracks
                     SET local_file_path = NULL,
                         bitrate = NULL,
-                        extension = NULL
+                        extension = NULL,
+                        username = NULL,
+                        slskd_file_name = NULL
                     WHERE track_id = ?
                     """,
                     (track_id,),
@@ -288,7 +294,7 @@ def blacklist_track(track: dict) -> tuple[bool, str]:
 
             write_log.info(
                 "BLACKLIST_DB_CLEARED",
-                "Cleared file metadata for blacklisted track.",
+                "Cleared all download metadata for blacklisted track.",
                 {"track_id": track_id}
             )
 
@@ -352,6 +358,8 @@ def blacklist_track(track: dict) -> tuple[bool, str]:
                         SET local_file_path = ?,
                             bitrate = ?,
                             extension = ?,
+                            username = ?,
+                            slskd_file_name = ?,
                             download_status = ?
                         WHERE track_id = ?
                         """,
@@ -359,6 +367,8 @@ def blacklist_track(track: dict) -> tuple[bool, str]:
                             previous_state.get("local_file_path"),
                             previous_state.get("bitrate"),
                             previous_state.get("extension"),
+                            previous_state.get("username"),
+                            previous_state.get("slskd_file_name"),
                             previous_state.get("download_status"),
                             track_id,
                         ),
