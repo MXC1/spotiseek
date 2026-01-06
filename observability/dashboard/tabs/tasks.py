@@ -73,7 +73,7 @@ def render_tasks_section():
     col1, col2, col3 = st.columns([1, 1, 2])
     
     with col1:
-        if st.button("▶️ Run All Tasks", type="primary", use_container_width=True):
+        if st.button("▶️ Run All Tasks", type="primary", width="stretch"):
             registry.run_all_tasks()
             st.success("✅ All tasks have been started! Check task history below for progress.")
             st.cache_data.clear()
@@ -81,7 +81,7 @@ def render_tasks_section():
             st.rerun()
     
     with col2:
-        if st.button("🔄 Refresh Status", use_container_width=True):
+        if st.button("🔄 Refresh Status", width="stretch"):
             st.cache_data.clear()
             st.rerun()
     
@@ -212,7 +212,7 @@ def render_task_history_section(registry):
     
     display_df = history_df[display_cols].rename(columns=column_names)
     
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+    st.dataframe(display_df, width="stretch", hide_index=True)
     
     # Show errors if any failed runs
     failed_runs = [h for h in history if h.get('status') == 'failed' and h.get('error_message')]

@@ -313,9 +313,14 @@ def render_manual_import_section():
     search = st.text_input("Search (artist or track contains):", value="")
     col_a, col_b, col_c = st.columns([1, 1, 2])
     with col_a:
-        page_size = st.selectbox("Rows per page", options=[10, 25, 50, 100], index=1)
+        page_size = st.selectbox(
+            "Rows per page",
+            options=[10, 25, 50, 100],
+            index=1,
+            key="manual_import_page_size",
+        )
     with col_b:
-        page_number = st.number_input("Page", min_value=1, step=1, value=1)
+        page_number = st.number_input("Page", min_value=1, step=1, value=1, key="manual_import_page_num")
 
     # Fetch page
     offset = (int(page_number) - 1) * int(page_size)
@@ -334,7 +339,7 @@ def render_manual_import_section():
     # Table view (lightweight)
     if rows:
         df = pd.DataFrame(rows)[["artist", "track_name", "status", "track_id"]]
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width="stretch", hide_index=True)
     else:
         st.info("No matching tracks on this page.")
 

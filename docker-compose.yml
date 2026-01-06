@@ -13,7 +13,6 @@ services:
       - 5030:5030/tcp
       - 5031:5031/tcp
       - 127.0.0.1:54300:50300/tcp
-    user: 1000:1000
     image: slskd/slskd:latest
     restart: unless-stopped
 
@@ -33,7 +32,7 @@ services:
     volumes:
       - ./output:/app/output:rw
       - ./slskd_docker_data/${APP_ENV}/imported:/app/slskd_docker_data/${APP_ENV}/imported:rw
-      - ./slskd_docker_data/${APP_ENV}/downloads:/app/slskd_docker_data/${APP_ENV}/downloads:ro
+      - ./slskd_docker_data/${APP_ENV}/downloads:/app/slskd_docker_data/${APP_ENV}/downloads:rw
       - ./observability:/app/observability:rw
       - ./docs:/app/docs:ro
       - ./README.md:/app/README.md:ro

@@ -494,9 +494,14 @@ def render_blacklist_section():
 
     col_a, col_b, _ = st.columns([1, 1, 2])
     with col_a:
-        page_size = st.selectbox("Rows per page", options=[10, 25, 50, 100], index=1)
+        page_size = st.selectbox(
+            "Rows per page",
+            options=[10, 25, 50, 100],
+            index=1,
+            key="blacklist_page_size",
+        )
     with col_b:
-        page_number = st.number_input("Page", min_value=1, step=1, value=1)
+        page_number = st.number_input("Page", min_value=1, step=1, value=1, key="blacklist_page_num")
 
     # Fetch page
     offset = (int(page_number) - 1) * int(page_size)
@@ -524,7 +529,7 @@ def render_blacklist_section():
             "bitrate": "Bitrate (kbps)",
             "track_id": "Track ID"
         })
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        st.dataframe(display_df, width="stretch", hide_index=True)
 
         _render_track_selection_and_blacklist(rows)
 

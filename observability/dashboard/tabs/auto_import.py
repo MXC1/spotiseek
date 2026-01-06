@@ -434,7 +434,7 @@ def render_auto_import_section():
     
     col1, col2 = st.columns([1, 3])
     with col1:
-        scan_button = st.button("🔍 Scan Directory", type="primary", use_container_width=True)
+        scan_button = st.button("🔍 Scan Directory", type="primary", width="stretch")
     
     if scan_button and source_dir:
         if not os.path.isdir(source_dir):
@@ -631,7 +631,7 @@ def render_auto_import_section():
             st.markdown(f"**{selected_count} matches selected**")
         
         with col2:
-            if st.button("❌ Clear Selection", use_container_width=True):
+            if st.button("❌ Clear Selection", width="stretch"):
                 st.session_state["auto_selected_matches"] = set()
                 st.rerun()
         
@@ -640,7 +640,7 @@ def render_auto_import_section():
                 f"✅ Import {selected_count} Selected Tracks",
                 type="primary",
                 disabled=selected_count == 0,
-                use_container_width=True
+                width="stretch",
             )
         
         if import_button and selected_count > 0:
