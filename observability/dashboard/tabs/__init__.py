@@ -10,6 +10,7 @@ from .execution_inspection import render_execution_inspection_tab
 from .manual_import import render_manual_import_tab
 from .auto_import import render_auto_import_tab
 from .docs import render_docs_tab
+from .blacklist import render_blacklist_tab
 
 __all__ = [
     "render_overall_stats_tab",
@@ -18,4 +19,5 @@ __all__ = [
     "render_manual_import_tab",
     "render_auto_import_tab",
     "render_docs_tab",
+    "render_blacklist_tab",
 ]
