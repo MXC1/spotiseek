@@ -266,7 +266,7 @@ def blacklist_track(track: dict) -> tuple[bool, str]:
             "local_file_path": local_file_path,
             "bitrate": track.get("bitrate"),
             "extension": track.get("extension"),
-            "status": "completed",  # Assume completed since track was searchable
+            "download_status": "completed",  # Assume completed since track was searchable
         }
 
         try:
@@ -284,6 +284,7 @@ def blacklist_track(track: dict) -> tuple[bool, str]:
                     """,
                     (track_id,),
                 )
+                conn.commit()
 
             write_log.info(
                 "BLACKLIST_DB_CLEARED",
@@ -292,7 +293,15 @@ def blacklist_track(track: dict) -> tuple[bool, str]:
             )
 
             # Step 4: Set status to 'blacklisted'
-            track_db.update_track_status(track_id, "blacklisted")
+            # Use another connection to update status
+            with sqlite3.connect(DB_PATH) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE tracks SET download_status = ?, failed_reason = NULL WHERE track_id = ?",
+                    ("blacklisted", track_id),
+                )
+                conn.commit()
+
             write_log.info(
                 "BLACKLIST_STATUS_SET",
                 "Set track status to blacklisted.",
@@ -350,10 +359,11 @@ def blacklist_track(track: dict) -> tuple[bool, str]:
                             previous_state.get("local_file_path"),
                             previous_state.get("bitrate"),
                             previous_state.get("extension"),
-                            previous_state.get("status"),
+                            previous_state.get("download_status"),
                             track_id,
                         ),
                     )
+                    rollback_conn.commit()
                 write_log.warn(
                     "BLACKLIST_ROLLBACK_SUCCESS",
                     "Rolled back DB changes after blacklist failure.",
