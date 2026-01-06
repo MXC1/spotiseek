@@ -20,7 +20,6 @@ from observability.dashboard.config import (
 )
 from observability.dashboard.helpers import require_database
 from scripts.logs_utils import write_log
-from scripts.m3u8_manager import update_track_in_m3u8
 
 # ============================================================================
 # CACHED DATA FUNCTIONS
@@ -111,6 +110,74 @@ def _search_completed_tracks_cached(
 # ============================================================================
 # BLACKLIST FUNCTIONS
 # ============================================================================
+
+def _revert_track_to_comment_in_m3u8(m3u8_path: str, track_id: str, artist: str, track_name: str) -> None:
+    """
+    Revert a track entry in an M3U8 file back to a comment.
+
+    This is used when blacklisting a track - the file path is replaced with
+    a comment so it shows as incomplete in the playlist.
+
+    Args:
+        m3u8_path: Path to the M3U8 file to update
+        track_id: Track ID to search for
+        artist: Artist name for the comment
+        track_name: Track name for the comment
+    """
+    try:
+        # Read all lines
+        with open(m3u8_path, encoding="utf-8") as f:
+            lines = f.readlines()
+
+        # Find and replace any line that's not a comment but is for this track
+        # We need to search for the track entry and replace it with a comment
+        new_lines = []
+        track_found = False
+
+        for i, line in enumerate(lines):
+            # Skip the #EXTM3U header
+            if line.startswith("#EXTM3U"):
+                new_lines.append(line)
+                continue
+
+            # Check if this is already a comment for our track
+            if line.startswith(f"# {track_id} - "):
+                new_lines.append(line)
+                track_found = True
+                continue
+
+            # Check if the previous line was a comment for our track
+            # If so, this line is the file path and should be removed
+            if i > 0 and lines[i-1].startswith(f"# {track_id} - "):
+                # Don't add this line (the file path), just the comment
+                track_found = True
+                continue
+
+            # Otherwise, keep the line as-is
+            new_lines.append(line)
+
+        # If we didn't find the track, it might have been a file path without a preceding comment
+        # In that case, we should add a comment for it
+        if not track_found:
+            new_lines.append(f"# {track_id} - {artist} - {track_name}\n")
+
+        # Write back
+        with open(m3u8_path, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+
+        write_log.debug(
+            "M3U8_REVERT_SUCCESS",
+            "Reverted track to comment in M3U8 file.",
+            {"m3u8_path": m3u8_path, "track_id": track_id}
+        )
+
+    except Exception as e:
+        write_log.error(
+            "M3U8_REVERT_FAIL",
+            "Failed to revert track to comment in M3U8 file.",
+            {"m3u8_path": m3u8_path, "track_id": track_id, "error": str(e)}
+        )
+
 
 def blacklist_track(track: dict) -> tuple[bool, str]:
     """
@@ -206,16 +273,17 @@ def blacklist_track(track: dict) -> tuple[bool, str]:
             {"track_id": track_id}
         )
 
-        # Step 5: Update M3U8 playlists to remove the track reference
+        # Step 5: Update M3U8 playlists to revert track back to comment
+        # When a track is blacklisted, we need to revert the M3U8 entry back to a comment
+        # so it shows as incomplete in the playlist
         playlist_urls = track_db.get_playlists_for_track(track_id)
         for playlist_url in playlist_urls:
             m3u8_path = track_db.get_m3u8_path_for_playlist(playlist_url)
-            if m3u8_path:
-                # Update M3U8 to remove the path (update_track_in_m3u8 with None path)
-                update_track_in_m3u8(m3u8_path, track_id, None)
+            if m3u8_path and os.path.exists(m3u8_path):
+                _revert_track_to_comment_in_m3u8(m3u8_path, track_id, artist, track_name)
                 write_log.debug(
                     "BLACKLIST_M3U8_UPDATED",
-                    "Updated M3U8 file to remove blacklisted track.",
+                    "Reverted M3U8 entry back to comment for blacklisted track.",
                     {"m3u8_path": m3u8_path, "track_id": track_id}
                 )
 
