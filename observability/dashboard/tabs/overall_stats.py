@@ -15,7 +15,6 @@ import streamlit as st
 
 from observability.dashboard.config import (
     DB_PATH,
-    LOGS_DIR,
     CACHE_TTL_SHORT,
 )
 from observability.dashboard.helpers import (
@@ -26,13 +25,6 @@ from scripts.database_management import (
     get_playlists,
     get_track_status_breakdown,
     get_failed_reason_breakdown,
-)
-from scripts.logs_utils import (
-    get_log_files,
-    parse_logs,
-    filter_warning_error_logs,
-    logs_to_dataframe,
-    prepare_log_summary,
 )
 from scripts.constants import LOSSLESS_FORMATS
 
@@ -85,16 +77,6 @@ def get_extension_bitrate_breakdown(db_path: str):
 def get_failed_reason_breakdown_cached(db_path: str):
     """Cached helper for failed reason breakdown."""
     return get_failed_reason_breakdown(db_path)
-
-
-@st.cache_data(ttl=CACHE_TTL_SHORT)
-def _get_warning_error_logs(logs_dir: str) -> Tuple[pd.DataFrame, List[dict]]:
-    """Cached helper to load and parse warning/error logs."""
-    log_files = get_log_files(logs_dir)
-    log_entries = parse_logs(log_files)
-    warn_err_logs = filter_warning_error_logs(log_entries)
-    df_logs = logs_to_dataframe(warn_err_logs)
-    return df_logs, warn_err_logs
 
 
 @st.cache_data(ttl=CACHE_TTL_SHORT)
@@ -180,62 +162,6 @@ def get_enhanced_bitrate_breakdown(db_path: str):
 # ============================================================================
 # RENDER FUNCTIONS
 # ============================================================================
-
-def render_log_breakdown_section():
-    """Render the warning and error log breakdown section."""
-    df_logs, warn_err_logs = _get_warning_error_logs(LOGS_DIR)
-    
-    st.subheader("WARNING and ERROR Log Summary")
-    
-    if not df_logs.empty:
-        summary = prepare_log_summary(df_logs, warn_err_logs)
-        render_log_summary_table(summary)
-    else:
-        st.info("No WARNING or ERROR logs found.")
-
-
-def render_log_summary_table(summary: pd.DataFrame):
-    """
-    Render interactive log summary table with expandable sample logs.
-    
-    Args:
-        summary: DataFrame containing log summary with sample logs
-    """
-    # Render table header
-    header_cols = st.columns([2, 3, 4, 1, 2, 2])
-    header_cols[0].markdown("**Level**")
-    header_cols[1].markdown("**Event ID**")
-    header_cols[2].markdown("**Message**")
-    header_cols[3].markdown("**Count**")
-    header_cols[4].markdown("**Latest**")
-    header_cols[5].markdown("**Action**")
-    
-    # Initialize session state for selected sample
-    if 'selected_sample_idx' not in st.session_state:
-        st.session_state['selected_sample_idx'] = None
-    
-    # Render each row with expandable sample
-    for i, row in summary.iterrows():
-        cols = st.columns([2, 3, 4, 1, 2, 2])
-        cols[0].markdown(f"{row['level']}")
-        cols[1].markdown(f"{row['event_id']}")
-        # Show message (truncate if too long)
-        message = row.get('message', '')
-        if isinstance(message, str) and len(message) > 120:
-            display_message = message[:117] + '...'
-        else:
-            display_message = message
-        cols[2].markdown(f"{display_message}")
-        cols[3].markdown(f"{row['count']}")
-        cols[4].markdown(f"{row.get('latest', '')}")
-        if cols[5].button("View Sample", key=f"view_sample_{i}"):
-            st.session_state['selected_sample_idx'] = (
-                None if st.session_state['selected_sample_idx'] == i else i
-            )
-        # Show sample log if this row is selected
-        if st.session_state['selected_sample_idx'] == i:
-            st.code(row['sample_log'], language='json', wrap_lines=True)
-
 
 def render_playlists_section():
     """Render the playlists table section."""
@@ -412,6 +338,3 @@ def render_overall_stats_tab():
     with col2:
         render_track_status_section()
         render_failed_reason_section()
-        
-    # Workflow run inspection section (full width)
-    render_log_breakdown_section()
