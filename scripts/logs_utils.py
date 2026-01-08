@@ -67,6 +67,9 @@ class JsonLogFormatter(logging.Formatter):
 def get_log_files(logs_dir: str) -> list[str]:
     """Recursively find all .log files in the specified directory tree.
 
+    Includes both direct .log files and rotated log files (e.g., task_scheduler.log.2025-12-30)
+    which may be in the root logs_dir or in date-organized subdirectories.
+
     Args:
         logs_dir: Root directory path to search for log files
 
@@ -75,11 +78,27 @@ def get_log_files(logs_dir: str) -> list[str]:
 
     Example:
         >>> get_log_files('observability/test_logs')
-        ['observability/test_logs/2025/11/27/workflow_20251127_143025_123456.log', ...]
+        ['observability/test_logs/2025/11/27/workflow_20251127_143025_123456.log',
+         'observability/test_logs/task_scheduler.log.2025-12-30', ...]
 
     """
+    files = []
+    
+    # Find all .log files recursively in subdirectories
     pattern = os.path.join(logs_dir, "**", "*.log")
-    return glob.glob(pattern, recursive=True)
+    files.extend(glob.glob(pattern, recursive=True))
+    
+    # Find rotated log files in root directory (e.g., task_scheduler.log.YYYY-MM-DD)
+    # These have the format: filename.log.* but don't end in .log
+    if os.path.isdir(logs_dir):
+        for item in os.listdir(logs_dir):
+            item_path = os.path.join(logs_dir, item)
+            if os.path.isfile(item_path) and ".log" in item:
+                # Include files like task_scheduler.log.2025-12-30
+                files.append(item_path)
+    
+    # Remove duplicates
+    return list(set(files))
 
 def parse_logs(log_files: list[str]) -> list[dict]:
     """Parse JSON-formatted log files into structured entries.
@@ -366,7 +385,7 @@ def get_workflow_runs(logs_dir: str) -> list[dict]:
                 "run_id": "task_scheduler_current",
                 "timestamp": pd.Timestamp.now(),
                 "log_file": log_path,
-                "display_name": "Task Scheduler (Current)",
+                "display_name": "Task Scheduler (Today)",
             })
             continue
         if filename.startswith("task_scheduler.log."):
@@ -422,7 +441,7 @@ def get_workflow_runs(logs_dir: str) -> list[dict]:
 _KEY_WORKFLOW_EVENTS = [
     "WORKFLOW_START", "WORKFLOW_COMPLETE", "WORKFLOW_ABORTED",
     "WORKFLOW_INTERRUPTED", "WORKFLOW_FATAL",
-    "PLAYLISTS_LOADED", "BATCH_SEARCH_INITIATED",
+    "PLAYLISTS_LOADED", "BATCH_SEARCH_INITIATED", "ASYNC_DOWNLOAD_START",
     "REDOWNLOAD_QUEUE_INITIATED", "XML_EXPORT_SUCCESS",
     "SLSKD_UNAVAILABLE", "RESET_COMPLETE",
 ]
@@ -434,7 +453,8 @@ _DASHBOARD_CRITICAL_EVENTS = {
     "TRACK_ADD", "TRACK_DELETE", "TRACK_QUALITY_UPGRADE",
     "PLAYLIST_ADD", "PLAYLIST_DELETE",
     "DOWNLOAD_FAILED", "DOWNLOAD_COMPLETE",
-    "BATCH_SEARCH_START", "SLSKD_REDOWNLOAD_SEARCHES_INITIATED",
+    "BATCH_SEARCH_START", "ASYNC_DOWNLOAD_START",
+    "TASK_INITIATE_SEARCHES_COMPLETE", "SLSKD_REDOWNLOAD_SEARCHES_INITIATED",
     "PLAYLISTS_PRUNED", "PLAYLIST_TRACKS_PRUNED",
     # Timeline events
     "WORKFLOW_START", "WORKFLOW_COMPLETE", "WORKFLOW_ABORTED",
@@ -472,7 +492,9 @@ def _init_workflow_metrics(total_logs: int) -> dict:
 def _update_metrics_for_event(metrics: dict, entry: dict) -> None:
     """Update metrics counters based on the log entry's event_id."""
     event_id = entry.get("event_id", "")
-    context = entry.get("context", {})
+    context = entry.get("context", {}) or {}
+    if not isinstance(context, dict):
+        context = {}
 
     # Count events
     metrics["event_counts"][event_id] = metrics["event_counts"].get(event_id, 0) + 1
@@ -498,9 +520,20 @@ def _update_metrics_for_event(metrics: dict, entry: dict) -> None:
         elif is_new is False:
             metrics["downloads_completed_upgrade"] += 1
     elif event_id == "BATCH_SEARCH_START":
-        metrics["new_searches"] = context.get("total_tracks", 0)
+        metrics["new_searches"] = int(context.get("total_tracks", 0) or 0)
+    elif event_id == "ASYNC_DOWNLOAD_START":
+        initiated = context.get("initiated", None)
+        total = context.get("total", None)
+        initiated_count = initiated if initiated is not None else total
+        # Use the largest observed value in case multiple events fire
+        metrics["new_searches"] = max(metrics["new_searches"], int(initiated_count or 0))
+        metrics["searches_initiated"] += int(initiated_count or 0)
+    elif event_id == "TASK_INITIATE_SEARCHES_COMPLETE":
+        # Fallback in case ASYNC_DOWNLOAD_START is filtered out
+        metrics["new_searches"] = max(metrics["new_searches"], int(context.get("tracks_searched", 0) or 0))
     elif event_id == "SLSKD_REDOWNLOAD_SEARCHES_INITIATED":
-        metrics["upgrade_searches"] = context.get("initiated_count", 0)
+        count = context.get("initiated", context.get("initiated_count", 0))
+        metrics["upgrade_searches"] = max(metrics["upgrade_searches"], int(count or 0))
     elif event_id == "PLAYLISTS_PRUNED":
         metrics["playlists_removed"] += int(context.get("removed_count", 0) or 0)
     elif event_id == "PLAYLIST_TRACKS_PRUNED":

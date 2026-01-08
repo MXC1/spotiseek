@@ -293,7 +293,11 @@ def export_itunes_xml(xml_path: str, music_folder_url: str | None = None) -> Non
         AND download_status NOT IN ('redownload_pending', 'failed')
     """)
     tracks = cursor.fetchall()
-    write_log.debug("XML_TRACKS_FETCHED", "Fetched tracks from database (excluding redownload_pending and failed).", {"count": len(tracks)})
+    write_log.debug(
+        "XML_TRACKS_FETCHED",
+        "Fetched tracks from database (excluding redownload_pending and failed).",
+        {"count": len(tracks)}
+    )
 
     # Fetch all playlists in display order (as per CSV)
     cursor.execute(
