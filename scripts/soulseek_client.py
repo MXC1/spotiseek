@@ -58,6 +58,11 @@ TOKEN = os.getenv("TOKEN")
 MAX_SEARCH_ATTEMPTS = 50
 SEARCH_POLL_INTERVAL = 2  # seconds
 
+# Search rate limiting (to prevent Soulseek server bans)
+# CRITICAL: Initiating too many searches at once triggers automatic 30-minute bans
+SEARCH_BATCH_SIZE = 25  # Maximum searches per batch
+SEARCH_BATCH_DELAY_SECONDS = 2.0  # Delay between batches
+
 # HTTP status codes
 HTTP_OK = 200
 HTTP_NOT_FOUND = 404
@@ -888,11 +893,14 @@ def process_search_results(
 
 
 def download_tracks_async(tracks: list[tuple[str, str, str]]) -> None:
-    """Initiate searches for multiple tracks without waiting for results.
+    """Initiate searches for multiple tracks with rate limiting to prevent bans.
 
-    This function uses a fire-and-forget approach: it creates all search requests
-    in slskd but does NOT wait for them to complete. Searches will continue running
-    in slskd even after this function returns.
+    This function uses a fire-and-forget approach with batching: it creates search
+    requests in slskd but does NOT wait for them to complete. Searches are batched
+    with delays between batches to avoid triggering Soulseek rate limits.
+
+    Rate limiting is critical: Initiating too many searches at once causes automatic
+    30-minute bans from the Soulseek server.
 
     To process completed searches, call process_pending_searches() later.
 
@@ -903,16 +911,42 @@ def download_tracks_async(tracks: list[tuple[str, str, str]]) -> None:
     if not tracks:
         return
 
-    # Initiate all searches without waiting for results
+    # Initiate searches in batches with delays to prevent rate limiting
     initiated_count = 0
-    for track_id, artist, track_name in tracks:
-        search_info = initiate_track_search(artist, track_name, track_id)
-        if search_info:
-            initiated_count += 1
+    total_tracks = len(tracks)
+    batch_size = SEARCH_BATCH_SIZE
+    batch_delay = SEARCH_BATCH_DELAY_SECONDS
+    
+    for i in range(0, total_tracks, batch_size):
+        batch = tracks[i:i + batch_size]
+        batch_num = (i // batch_size) + 1
+        total_batches = (total_tracks + batch_size - 1) // batch_size
+        
+        write_log.debug(
+            "SEARCH_BATCH_START",
+            f"Processing search batch {batch_num}/{total_batches}",
+            {"batch_size": len(batch), "batch_num": batch_num, "total_batches": total_batches}
+        )
+        
+        # Process current batch
+        for track_id, artist, track_name in batch:
+            search_info = initiate_track_search(artist, track_name, track_id)
+            if search_info:
+                initiated_count += 1
+        
+        # Add delay between batches (but not after the last batch)
+        if i + batch_size < total_tracks:
+            write_log.debug(
+                "SEARCH_BATCH_DELAY",
+                f"Waiting {batch_delay}s before next batch to prevent rate limiting",
+                {"delay_seconds": batch_delay, "next_batch": batch_num + 1}
+            )
+            time.sleep(batch_delay)
 
     if initiated_count > 0:
         write_log.info("ASYNC_DOWNLOAD_START", "Initiated searches for tracks.",
-                      {"initiated": initiated_count, "total": len(tracks)})
+                      {"initiated": initiated_count, "total": total_tracks,
+                       "batch_size": batch_size, "batch_delay": batch_delay})
 
 
 def process_pending_searches() -> None:
