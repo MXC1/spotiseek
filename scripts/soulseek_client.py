@@ -975,8 +975,8 @@ def process_pending_searches() -> None:
         track_id = track_row[0]  # First column is track_id
         track_name = track_row[1]
         artist = track_row[2]
-        # Column 6 is local_file_path
-        local_file_path = track_row[6] if len(track_row) > 6 else None  # noqa: PLR2004
+        # Column 7 holds local_file_path; index 6 is slskd_file_name
+        local_file_path = track_row[7] if len(track_row) > 7 else None  # noqa: PLR2004
 
         # Try to get the slskd search UUID for this track
         slskd_uuid = track_db.get_search_uuid_by_track_id(track_id)
