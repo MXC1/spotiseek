@@ -83,11 +83,11 @@ def get_log_files(logs_dir: str) -> list[str]:
 
     """
     files = []
-    
+
     # Find all .log files recursively in subdirectories
     pattern = os.path.join(logs_dir, "**", "*.log")
     files.extend(glob.glob(pattern, recursive=True))
-    
+
     # Find rotated log files in root directory (e.g., task_scheduler.log.YYYY-MM-DD)
     # These have the format: filename.log.* but don't end in .log
     if os.path.isdir(logs_dir):
@@ -96,7 +96,7 @@ def get_log_files(logs_dir: str) -> list[str]:
             if os.path.isfile(item_path) and ".log" in item:
                 # Include files like task_scheduler.log.2025-12-30
                 files.append(item_path)
-    
+
     # Remove duplicates
     return list(set(files))
 
@@ -514,7 +514,7 @@ def _update_metrics_for_event(metrics: dict, entry: dict) -> None:
         metrics[event_counter_map[event_id]] += 1
     elif event_id == "DOWNLOAD_COMPLETE":
         metrics["downloads_completed"] += 1
-        is_new = context.get("is_new", None)
+        is_new = context.get("is_new")
         if is_new is True:
             metrics["downloads_completed_new"] += 1
         elif is_new is False:
@@ -522,8 +522,8 @@ def _update_metrics_for_event(metrics: dict, entry: dict) -> None:
     elif event_id == "BATCH_SEARCH_START":
         metrics["new_searches"] = int(context.get("total_tracks", 0) or 0)
     elif event_id == "ASYNC_DOWNLOAD_START":
-        initiated = context.get("initiated", None)
-        total = context.get("total", None)
+        initiated = context.get("initiated")
+        total = context.get("total")
         initiated_count = initiated if initiated is not None else total
         # Use the largest observed value in case multiple events fire
         metrics["new_searches"] = max(metrics["new_searches"], int(initiated_count or 0))

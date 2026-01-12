@@ -8,6 +8,7 @@ Key Features:
 - Spotify API authentication via client credentials
 - Automatic pagination for large playlists
 - Name cleaning/normalization for improved search results
+- Genre extraction from artist metadata
 - Comprehensive error handling and logging
 
 Public API:
@@ -57,15 +58,139 @@ def clean_name(name: str) -> str:
     return name
 
 
-def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, str, str]]]:
+def _fetch_artist_genres(sp: spotipy.Spotify, artist_ids: list[str]) -> dict[str, list[str]]:
+    """Fetch genre information for multiple artists in batches.
+
+    Spotify API allows fetching up to 50 artists at a time.
+
+    Args:
+        sp: Authenticated Spotify client
+        artist_ids: List of Spotify artist IDs
+
+    Returns:
+        Dictionary mapping artist_id to list of genres
+
+    """
+    artist_genres: dict[str, list[str]] = {}
+
+    if not artist_ids:
+        return artist_genres
+
+    # Remove duplicates while preserving order
+    unique_ids = list(dict.fromkeys(artist_ids))
+
+    # Process in batches of 50 (Spotify API limit)
+    batch_size = 50
+    for i in range(0, len(unique_ids), batch_size):
+        batch = unique_ids[i:i + batch_size]
+        try:
+            result = sp.artists(batch)
+            for artist_data in result.get("artists", []):
+                if artist_data:
+                    artist_id = artist_data.get("id")
+                    genres = artist_data.get("genres", [])
+                    if artist_id:
+                        artist_genres[artist_id] = genres
+        except Exception as e:
+            write_log.warn(
+                "SPOTIFY_ARTIST_GENRES_FAIL",
+                "Failed to fetch artist genres for batch.",
+                {"batch_start": i, "error": str(e)},
+            )
+
+    return artist_genres
+
+
+def _get_genre_for_track(track: dict, artist_genres: dict[str, list[str]]) -> str | None:
+    """Get genre from the first artist that has genres.
+
+    Args:
+        track: Track object from Spotify API
+        artist_genres: Dictionary mapping artist_id to list of genres
+
+    Returns:
+        First genre found, or None if no genres available
+
+    """
+    for artist in track.get("artists", []):
+        artist_id = artist.get("id")
+        if artist_id and artist_id in artist_genres:
+            genres = artist_genres[artist_id]
+            if genres:
+                return genres[0]
+    return None
+
+
+def _collect_artist_ids(tracks: list[dict]) -> list[str]:
+    """Collect all artist IDs from track list for batch genre lookup.
+
+    Args:
+        tracks: List of track items from Spotify API
+
+    Returns:
+        List of artist IDs
+
+    """
+    artist_ids = []
+    for item in tracks:
+        track = item.get("track")
+        if track:
+            for artist in track.get("artists", []):
+                artist_id = artist.get("id")
+                if artist_id:
+                    artist_ids.append(artist_id)
+    return artist_ids
+
+
+def _process_track_item(
+    item: dict,
+    idx: int,
+    artist_genres: dict[str, list[str]],
+) -> tuple[str, str, str, str | None] | None:
+    """Process a single track item from Spotify API response.
+
+    Args:
+        item: Track item from API response
+        idx: Track index for logging
+        artist_genres: Dictionary mapping artist_id to list of genres
+
+    Returns:
+        Tuple of (track_id, artists, track_name, genre) or None if track should be skipped
+
+    """
+    track = item.get("track")
+
+    # Skip null tracks (removed/unavailable)
+    if not track:
+        write_log.warn("SPOTIFY_TRACK_MISSING", "Track data is null. Skipping.", {"index": idx})
+        return None
+
+    track_id = track.get("id")
+    if not track_id:
+        write_log.warn("SPOTIFY_ID_MISSING", "Track is missing Spotify ID. Skipping.",
+                      {"index": idx, "track_name": track.get("name")})
+        return None
+
+    # Concatenate and clean artist names (multiple artists separated by spaces)
+    artists = " ".join([clean_name(artist["name"]) for artist in track.get("artists", [])])
+    track_name = clean_name(track.get("name", ""))
+
+    # Get genre from the first artist that has genres
+    genre = _get_genre_for_track(track, artist_genres)
+
+    return (track_id, artists, track_name, genre)
+
+
+def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, str, str, str | None]]]:
     """Extract track information and playlist name from a Spotify playlist.
 
     This function:
     1. Authenticates with the Spotify API using client credentials
     2. Extracts the playlist ID from the URL
     3. Fetches playlist metadata (name) and all tracks with pagination
-    4. Cleans artist and track names for improved search results
-    5. Returns structured track data
+    4. Fetches genre information from artist metadata
+    5. Cleans artist and track names for improved search results
+    6. Returns structured track data
 
     Args:
         playlist_url: Full Spotify playlist URL
@@ -74,9 +199,10 @@ def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, st
     Returns:
         Tuple containing:
             - playlist_name (str): The name of the playlist
-            - tracks (List[Tuple]): List of (track_id, artists, track_name) tuples.
+            - tracks (List[Tuple]): List of (track_id, artists, track_name, genre) tuples.
               Track ID is the Spotify track ID.
               Artist names are space-concatenated and cleaned.
+              Genre is the first genre from the first artist, or None.
 
     Raises:
         ValueError: If API credentials are missing or playlist URL is invalid
@@ -87,7 +213,7 @@ def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, st
         >>> print(playlist_name)
         "My Playlist Name"
         >>> print(tracks[0])
-        ("5ms8IkagrFWObtzSOahVrx", "MASTER BOOT RECORD", "Skynet")
+        ("5ms8IkagrFWObtzSOahVrx", "MASTER BOOT RECORD", "Skynet", "chiptune")
 
     """
     # Validate API credentials
@@ -141,27 +267,16 @@ def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, st
                           {"playlist_id": playlist_id, "error": str(e)})
             break
 
+    # Collect all unique artist IDs and fetch genres in batch
+    all_artist_ids = _collect_artist_ids(tracks)
+    artist_genres = _fetch_artist_genres(sp, all_artist_ids)
+
     # Process and clean track data
     cleaned_tracks = []
     for idx, item in enumerate(tracks, 1):
-        track = item.get("track")
-
-        # Skip null tracks (removed/unavailable)
-        if not track:
-            write_log.warn("SPOTIFY_TRACK_MISSING", "Track data is null. Skipping.", {"index": idx})
-            continue
-
-        track_id = track.get("id")
-        if not track_id:
-            write_log.warn("SPOTIFY_ID_MISSING", "Track is missing Spotify ID. Skipping.",
-                          {"index": idx, "track_name": track.get("name")})
-            continue
-
-        # Concatenate and clean artist names (multiple artists separated by spaces)
-        artists = " ".join([clean_name(artist["name"]) for artist in track.get("artists", [])])
-        track_name = clean_name(track.get("name", ""))
-
-        cleaned_tracks.append((track_id, artists, track_name))
+        result = _process_track_item(item, idx, artist_genres)
+        if result:
+            cleaned_tracks.append(result)
 
     write_log.info("SPOTIFY_FETCH_SUCCESS", "Successfully fetched and cleaned tracks.",
                   {"playlist_name": playlist_name, "track_count": len(cleaned_tracks)})
