@@ -55,6 +55,7 @@ from scripts.soulseek_client import (  # noqa: E402
     process_redownload_queue,
     query_download_status,
     remove_download_from_slskd,
+    remove_search_from_slskd,
     wait_for_slskd_ready,
 )
 from scripts.xml_exporter import export_itunes_xml  # noqa: E402
@@ -863,6 +864,7 @@ def _handle_completed_download(file: dict, track_id: str) -> None:
     4. Checks if this is an old slskd record being reprocessed (same file already tracked)
     5. Updates the database with the local file path
     6. Updates all M3U8 files that contain this track
+    7. Removes any ongoing searches and downloads from slskd
 
     Args:
         file: File object from slskd API
@@ -907,6 +909,22 @@ def _handle_completed_download(file: dict, track_id: str) -> None:
         },
     )
     _update_m3u8_files_for_track(track_id, final_path)
+
+    # Clean up any ongoing searches and downloads in slskd
+    search_uuid = track_db.get_search_uuid_by_track_id(track_id)
+    if search_uuid:
+        remove_search_from_slskd(search_uuid, track_id)
+        write_log.debug("IMPORT_SEARCH_REMOVED", "Removed ongoing search from slskd.",
+                      {"track_id": track_id, "search_uuid": search_uuid})
+
+    download_uuid = track_db.get_download_uuid_by_track_id(track_id)
+    if download_uuid:
+        username = track_db.get_username_by_slskd_uuid(download_uuid)
+        if username:
+            remove_download_from_slskd(username, download_uuid)
+            write_log.debug("IMPORT_DOWNLOAD_REMOVED", "Removed download from slskd.",
+                          {"track_id": track_id, "download_uuid": download_uuid, "username": username})
+
     track_db.update_track_status(track_id, "completed")
 
 def _is_audio_valid(audio_path: str) -> bool:
