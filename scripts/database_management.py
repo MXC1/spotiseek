@@ -65,6 +65,7 @@ class TrackData:
     slskd_file_name: str | None = None
     extension: str | None = None
     bitrate: int | None = None
+    genre: str | None = None
 
 
 class TrackDB:
@@ -239,6 +240,8 @@ class TrackDB:
             cursor.execute("ALTER TABLE tracks ADD COLUMN failed_reason TEXT")
         if "source" not in columns:
             cursor.execute("ALTER TABLE tracks ADD COLUMN source TEXT NOT NULL DEFAULT 'spotify'")
+        if "genre" not in columns:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN genre TEXT")
 
 
         # Playlists table: stores playlist information, m3u8 path, and playlist name
@@ -383,6 +386,7 @@ class TrackDB:
                     "status": track_data.download_status,
                     "extension": track_data.extension,
                     "bitrate": track_data.bitrate,
+                    "genre": track_data.genre,
                 },
             )
 
@@ -390,12 +394,13 @@ class TrackDB:
             """
             INSERT OR IGNORE INTO tracks
               (track_id, track_name, artist, source, download_status,
-               failed_reason, slskd_file_name, extension, bitrate)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               failed_reason, slskd_file_name, extension, bitrate, genre)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (track_data.track_id, track_data.track_name, track_data.artist,
                track_data.source, track_data.download_status, track_data.failed_reason,
-               track_data.slskd_file_name, track_data.extension, track_data.bitrate),
+               track_data.slskd_file_name, track_data.extension, track_data.bitrate,
+               track_data.genre),
         )
         self.conn.commit()
 
@@ -834,6 +839,24 @@ class TrackDB:
             {"track_id": track_id, "bitrate": bitrate},
         )
         return bitrate
+
+    def get_track_genre(self, track_id: str) -> str | None:
+        """Retrieve the genre of a track.
+
+        Args:
+            track_id: Track identifier
+
+        Returns:
+            Genre string if track exists and has one, None otherwise
+
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT genre FROM tracks WHERE track_id = ?",
+            (track_id,),
+        )
+        result = cursor.fetchone()
+        return result[0] if result else None
 
     def get_local_file_path(self, track_id: str) -> str | None:
         """Retrieve the local file path of a track.

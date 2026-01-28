@@ -916,24 +916,24 @@ def download_tracks_async(tracks: list[tuple[str, str, str]]) -> None:
     total_tracks = len(tracks)
     batch_size = SEARCH_BATCH_SIZE
     batch_delay = SEARCH_BATCH_DELAY_SECONDS
-    
+
     for i in range(0, total_tracks, batch_size):
         batch = tracks[i:i + batch_size]
         batch_num = (i // batch_size) + 1
         total_batches = (total_tracks + batch_size - 1) // batch_size
-        
+
         write_log.debug(
             "SEARCH_BATCH_START",
             f"Processing search batch {batch_num}/{total_batches}",
             {"batch_size": len(batch), "batch_num": batch_num, "total_batches": total_batches}
         )
-        
+
         # Process current batch
         for track_id, artist, track_name in batch:
             search_info = initiate_track_search(artist, track_name, track_id)
             if search_info:
                 initiated_count += 1
-        
+
         # Add delay between batches (but not after the last batch)
         if i + batch_size < total_tracks:
             write_log.debug(

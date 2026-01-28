@@ -227,15 +227,16 @@ def _parse_hydration_data(html_content: str) -> dict | None:
 
 def get_tracks_from_playlist(  # noqa: PLR0915
     playlist_url: str,
-) -> tuple[str, list[tuple[str, str, str]]]:
+) -> tuple[str, list[tuple[str, str, str, str | None]]]:
     """Extract track information and playlist name from a SoundCloud playlist.
 
     This function:
     1. Fetches the playlist page HTML
     2. Extracts the embedded __sc_hydration JSON data
     3. Parses playlist metadata (name) and all tracks
-    4. Cleans artist and track names for improved search results
-    5. Returns structured track data
+    4. Extracts genre information from track data
+    5. Cleans artist and track names for improved search results
+    6. Returns structured track data
 
     Args:
         playlist_url: Full SoundCloud playlist URL
@@ -244,9 +245,10 @@ def get_tracks_from_playlist(  # noqa: PLR0915
     Returns:
         Tuple containing:
             - playlist_name (str): The name of the playlist
-            - tracks (List[Tuple]): List of (track_id, artists, track_name) tuples.
+            - tracks (List[Tuple]): List of (track_id, artists, track_name, genre) tuples.
               Track ID is the URL slug (e.g., "artist/track-name").
               Artist names are cleaned for search optimization.
+              Genre is extracted from the track data, or None if not available.
 
     Raises:
         ValueError: If playlist URL is invalid or page cannot be parsed
@@ -259,7 +261,7 @@ def get_tracks_from_playlist(  # noqa: PLR0915
         >>> print(playlist_name)
         "donk and hard dance edits"
         >>> print(tracks[0])
-        ("lobsta-b/7th-element-vip", "LOBSTA B", "7TH ELEMENT VIP")
+        ("lobsta-b/7th-element-vip", "LOBSTA B", "7TH ELEMENT VIP", "HARD HOUSE")
 
     """
     write_log.info(
@@ -362,6 +364,9 @@ def get_tracks_from_playlist(  # noqa: PLR0915
             user_data = track.get("user", {})
             artist_name = user_data.get("username", "")
 
+            # Extract genre from track data
+            genre = track.get("genre") or None
+
             # Generate track ID from URL slug
             track_id = _extract_track_slug(permalink_url)
 
@@ -377,7 +382,7 @@ def get_tracks_from_playlist(  # noqa: PLR0915
             cleaned_artist = clean_name(artist_name)
             cleaned_title = clean_name(track_title)
 
-            cleaned_tracks.append((track_id, cleaned_artist, cleaned_title))
+            cleaned_tracks.append((track_id, cleaned_artist, cleaned_title, genre))
 
         except Exception as e:
             write_log.warn(

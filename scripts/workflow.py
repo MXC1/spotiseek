@@ -454,7 +454,12 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
     tracks_to_download = []
     for track in tracks:
         try:
-            track_id, artist, track_name = track
+            # Handle both 3-element (legacy) and 4-element (with genre) tuples
+            if len(track) >= 4:  # noqa: PLR2004
+                track_id, artist, track_name, genre = track[0], track[1], track[2], track[3]
+            else:
+                track_id, artist, track_name = track[0], track[1], track[2]
+                genre = None
 
             # Add track to database (INSERT OR IGNORE - won't duplicate)
             track_db.add_track(TrackData(
@@ -462,6 +467,7 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
                 track_name=track_name,
                 artist=artist,
                 source=source,
+                genre=genre,
             ))
 
             # Link track to playlist in database
@@ -476,7 +482,8 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
             }
 
             if current_status not in skip_statuses:
-                tracks_to_download.append(track)
+                # Pass only (track_id, artist, track_name) for download compatibility
+                tracks_to_download.append((track_id, artist, track_name))
 
         except Exception as e:
             track_name = track[2] if len(track) > 2 else str(track)  # noqa: PLR2004
@@ -899,6 +906,12 @@ def _handle_completed_download(file: dict, track_id: str) -> None:
 
     existing_path = track_db.get_local_file_path(track_id)
     track_db.update_local_file_path(track_id, final_path)
+
+    # Write genre metadata from Spotify/SoundCloud to the audio file
+    genre = track_db.get_track_genre(track_id)
+    if genre:
+        _write_genre_to_file(final_path, genre, track_id)
+
     write_log.debug(
         "DOWNLOAD_COMPLETE",
         "Download completed successfully.",
@@ -1074,6 +1087,205 @@ def _handle_corrupt_audio(track_id: str, file_path: str, extension: str, is_loss
                 "extension": extension,
             },
         )
+
+
+def _combine_genres(existing_genre: str, new_genre: str) -> str:
+    """Combine existing and new genre, avoiding duplicates.
+
+    Args:
+        existing_genre: Existing genre in the file
+        new_genre: New genre to add
+
+    Returns:
+        Combined genre string
+
+    """
+    if existing_genre and existing_genre.lower() != new_genre.lower():
+        return f"{existing_genre}; {new_genre}"
+    return new_genre
+
+
+def _write_genre_mp3(audio, genre: str, track_id: str) -> bool:
+    """Write genre to MP3 file using ID3 tags.
+
+    Args:
+        audio: Mutagen MP3 audio object
+        genre: Genre string to write
+        track_id: Track identifier for logging
+
+    Returns:
+        True if successful, False otherwise
+
+    """
+    from mutagen.id3 import TCON  # noqa: PLC0415
+
+    try:
+        tags = audio.tags
+        if tags is None:
+            audio.add_tags()
+            tags = audio.tags
+
+        existing_genre = ""
+        if "TCON" in tags and hasattr(tags["TCON"], "text") and tags["TCON"].text:
+            existing_genre = str(tags["TCON"].text[0])
+
+        combined_genre = _combine_genres(existing_genre, genre)
+        tags["TCON"] = TCON(encoding=3, text=[combined_genre])
+        audio.save()
+        write_log.debug(
+            "GENRE_WRITE_SUCCESS",
+            "Successfully wrote genre to MP3 file.",
+            {"track_id": track_id, "genre": combined_genre},
+        )
+        return True
+    except Exception as e:
+        write_log.warn(
+            "GENRE_WRITE_MP3_FAIL",
+            "Failed to write genre to MP3 file.",
+            {"track_id": track_id, "error": str(e)},
+        )
+        return False
+
+
+def _write_genre_flac(audio, genre: str, track_id: str) -> bool:
+    """Write genre to FLAC file using Vorbis comments.
+
+    Args:
+        audio: Mutagen FLAC audio object
+        genre: Genre string to write
+        track_id: Track identifier for logging
+
+    Returns:
+        True if successful, False otherwise
+
+    """
+    try:
+        if audio.tags is None:
+            audio.add_tags()
+
+        existing_genre = ""
+        if audio.tags.get("genre"):
+            existing_genre = audio.tags["genre"][0]
+
+        combined_genre = _combine_genres(existing_genre, genre)
+        audio.tags["genre"] = [combined_genre]
+        audio.save()
+        write_log.debug(
+            "GENRE_WRITE_SUCCESS",
+            "Successfully wrote genre to FLAC file.",
+            {"track_id": track_id, "genre": combined_genre},
+        )
+        return True
+    except Exception as e:
+        write_log.warn(
+            "GENRE_WRITE_FLAC_FAIL",
+            "Failed to write genre to FLAC file.",
+            {"track_id": track_id, "error": str(e)},
+        )
+        return False
+
+
+def _write_genre_generic(audio, genre: str, track_id: str, extension: str) -> bool:
+    """Write genre using generic tag format for other audio types.
+
+    Args:
+        audio: Mutagen audio object
+        genre: Genre string to write
+        track_id: Track identifier for logging
+        extension: File extension for logging
+
+    Returns:
+        True if successful, False otherwise
+
+    """
+    try:
+        if not hasattr(audio, "tags") or audio.tags is None:
+            write_log.debug(
+                "GENRE_WRITE_NO_TAGS",
+                "File has no tags container, skipping genre write.",
+                {"track_id": track_id, "format": extension},
+            )
+            return False
+
+        existing_genre = ""
+        for genre_key in ["genre", "GENRE", "Genre"]:
+            if audio.tags.get(genre_key):
+                tag_val = audio.tags[genre_key]
+                existing_genre = str(tag_val[0]) if isinstance(tag_val, list) else str(tag_val)
+                break
+
+        combined_genre = _combine_genres(existing_genre, genre)
+        audio.tags["genre"] = [combined_genre]
+        audio.save()
+        write_log.debug(
+            "GENRE_WRITE_SUCCESS",
+            "Successfully wrote genre to audio file.",
+            {"track_id": track_id, "genre": combined_genre, "format": extension},
+        )
+        return True
+    except Exception as e:
+        write_log.warn(
+            "GENRE_WRITE_GENERIC_FAIL",
+            "Failed to write genre to audio file.",
+            {"track_id": track_id, "format": extension, "error": str(e)},
+        )
+        return False
+
+
+def _write_genre_to_file(local_file_path: str, genre: str, track_id: str) -> None:
+    """Write genre metadata to an audio file.
+
+    Appends the genre from Spotify/SoundCloud to existing genre data in the file.
+    Supports MP3, FLAC, and other common audio formats via mutagen.
+
+    Args:
+        local_file_path: Path to the audio file
+        genre: Genre string to write
+        track_id: Track identifier for logging
+
+    """
+    if not genre:
+        return
+
+    if not os.path.exists(local_file_path):
+        write_log.warn(
+            "GENRE_WRITE_FILE_MISSING",
+            "Cannot write genre - file does not exist.",
+            {"track_id": track_id, "file_path": local_file_path},
+        )
+        return
+
+    try:
+        from mutagen import File as MutagenFile  # noqa: PLC0415
+        from mutagen.flac import FLAC  # noqa: PLC0415
+        from mutagen.mp3 import MP3  # noqa: PLC0415
+
+        audio = MutagenFile(local_file_path, easy=False)
+        if audio is None:
+            write_log.warn(
+                "GENRE_WRITE_UNSUPPORTED",
+                "Cannot write genre - unsupported file format.",
+                {"track_id": track_id, "file_path": local_file_path},
+            )
+            return
+
+        extension = local_file_path.rsplit(".", 1)[-1].lower() if "." in local_file_path else ""
+
+        if isinstance(audio, MP3) or extension == "mp3":
+            _write_genre_mp3(audio, genre, track_id)
+        elif isinstance(audio, FLAC) or extension == "flac":
+            _write_genre_flac(audio, genre, track_id)
+        else:
+            _write_genre_generic(audio, genre, track_id, extension)
+
+    except Exception as e:
+        write_log.warn(
+            "GENRE_WRITE_FAIL",
+            "Failed to write genre metadata.",
+            {"track_id": track_id, "file_path": local_file_path, "error": str(e)},
+        )
+
+
 def _remux_lossless_to_wav(local_file_path: str, track_id: str, extension: str) -> str:
     """Remux a lossless audio file (FLAC, ALAC, APE) to WAV.
     Update extension/bitrate in DB if successful.

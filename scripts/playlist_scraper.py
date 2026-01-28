@@ -131,7 +131,7 @@ def _clean_parens(match: re.Match) -> str:
     return ""
 
 
-def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, str, str]], str]:
+def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, str, str, str | None]], str]:
     """Extract track information and playlist name from a playlist URL.
 
     This function automatically detects the platform and dispatches to the
@@ -143,8 +143,9 @@ def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, st
     Returns:
         Tuple containing:
             - playlist_name (str): The name of the playlist
-            - tracks (List[Tuple]): List of (track_id, artists, track_name) tuples.
+            - tracks (List[Tuple]): List of (track_id, artists, track_name, genre) tuples.
               Artist names are space-concatenated and cleaned.
+              Genre is the genre from the platform, or None if not available.
             - source (str): Platform identifier ('spotify', 'soundcloud')
 
     Raises:
@@ -155,7 +156,7 @@ def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, st
         >>> print(playlist_name)
         "My Playlist Name"
         >>> print(tracks[0])
-        ("5ms8IkagrFWObtzSOahVrx", "MASTER BOOT RECORD", "Skynet")
+        ("5ms8IkagrFWObtzSOahVrx", "MASTER BOOT RECORD", "Skynet", "chiptune")
         >>> print(source)
         "spotify"
 
