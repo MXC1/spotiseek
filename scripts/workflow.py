@@ -587,12 +587,12 @@ def mark_tracks_for_quality_upgrade() -> None:
 
         if PREFER_MP3:
             # Target: MP3 320kbps
-            if all(
+            if all([
                 current_extension,
                 current_extension.lower() == "mp3",
                 current_bitrate,
                 current_bitrate >= MIN_BITRATE_KBPS
-                ):
+            ]):
                 # MP3 file: check if it's high quality (320kbps)
                 meets_requirements = True
         # Target: WAV (lossless)
