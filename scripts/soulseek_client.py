@@ -523,7 +523,9 @@ def select_best_file(
                 # Example: "Gorillaz Del The Funky Homosapien" -> check for "Gorillaz", "Del", "The", etc.
                 # We need at least one substantial artist name (> 2 chars) to match
                 artist_names = [name.strip() for name in required_artist.replace(',', ' ').split()]
-                artist_names = [name for name in artist_names if len(name) > 3]  # Filter out "The", "DJ", etc.
+                # Filter out "The", "DJ", etc. only if there are multiple words (preserve single-word artists like "AFI")
+                if len(artist_names) > 1:
+                    artist_names = [name for name in artist_names if len(name) > 3]
                 
                 # Check if any artist name appears in the filename
                 if not any(name.lower() in filename_lower for name in artist_names):
