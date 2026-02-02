@@ -858,6 +858,42 @@ class TrackDB:
         result = cursor.fetchone()
         return result[0] if result else None
 
+    def get_track_artist(self, track_id: str) -> str | None:
+        """Retrieve the artist name of a track.
+
+        Args:
+            track_id: Track identifier
+
+        Returns:
+            Artist name if track exists, None otherwise
+
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT artist FROM tracks WHERE track_id = ?",
+            (track_id,),
+        )
+        result = cursor.fetchone()
+        return result[0] if result else None
+
+    def get_track_name(self, track_id: str) -> str | None:
+        """Retrieve the track name.
+
+        Args:
+            track_id: Track identifier
+
+        Returns:
+            Track name if track exists, None otherwise
+
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT track_name FROM tracks WHERE track_id = ?",
+            (track_id,),
+        )
+        result = cursor.fetchone()
+        return result[0] if result else None
+
     def get_local_file_path(self, track_id: str) -> str | None:
         """Retrieve the local file path of a track.
 

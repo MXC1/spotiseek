@@ -440,7 +440,11 @@ def is_original_version(filename: str, allow_alternatives: bool) -> bool:
     return all(keyword not in filename_lower for keyword in EXCLUDED_VERSION_KEYWORDS)
 
 
-def select_best_file(responses: list[dict[str, Any]], search_text: str) -> tuple[dict[str, Any] | None, str | None]:
+def select_best_file(
+    responses: list[dict[str, Any]],
+    search_text: str,
+    required_artist: str | None = None,
+) -> tuple[dict[str, Any] | None, str | None]:
     """Select the best quality file from search responses.
 
     Selection process:
@@ -448,12 +452,14 @@ def select_best_file(responses: list[dict[str, Any]], search_text: str) -> tuple
     2. Filter out non-audio files
     3. Filter out low-bitrate files (< 320kbps for lossy formats)
     4. Filter out remixes/edits unless search text includes such terms
-    5. Prioritize by quality: WAV > FLAC > MP3 320 > other MP3 > others
-    6. Return best match or None if no suitable files found
+    5. If required_artist is provided, filter files that don't contain artist in filename
+    6. Prioritize by quality: WAV > FLAC > MP3 320 > other MP3 > others
+    7. Return best match or None if no suitable files found
 
     Args:
         responses: List of search response objects from slskd
         search_text: Original search query
+        required_artist: If provided, only accept files with this artist name in filename
 
     Returns:
         Tuple of (best_file_object, username) or (None, None) if no suitable files
@@ -464,12 +470,14 @@ def select_best_file(responses: list[dict[str, Any]], search_text: str) -> tuple
     allow_alternatives = any(keyword in search_text_lower for keyword in EXCLUDED_VERSION_KEYWORDS)
 
     write_log.debug("SLSKD_FILE_SELECTION_START", "Starting file selection process.",
-                   {"response_count": len(responses), "allow_alternatives": allow_alternatives})
+                   {"response_count": len(responses), "allow_alternatives": allow_alternatives,
+                    "required_artist": required_artist})
 
     # Collect all candidate files, skipping blacklisted username + filename combinations
     candidates = []
     non_audio_count = 0
     low_bitrate_count = 0
+    artist_filter_count = 0
     total_files = 0
 
     for response in responses:
@@ -506,7 +514,27 @@ def select_best_file(responses: list[dict[str, Any]], search_text: str) -> tuple
                 low_bitrate_count += 1
                 continue
 
+            # If required_artist is specified, ensure filename contains at least one artist name
+            if required_artist:
+                # Normalize both filename and artist for case-insensitive comparison
+                filename_lower = filename.lower() if filename else ""
+                
+                # Split artist string by common separators and check if ANY artist name appears
+                # Example: "Gorillaz Del The Funky Homosapien" -> check for "Gorillaz", "Del", "The", etc.
+                # We need at least one substantial artist name (> 2 chars) to match
+                artist_names = [name.strip() for name in required_artist.replace(',', ' ').split()]
+                artist_names = [name for name in artist_names if len(name) > 3]  # Filter out "The", "DJ", etc.
+                
+                # Check if any artist name appears in the filename
+                if not any(name.lower() in filename_lower for name in artist_names):
+                    artist_filter_count += 1
+                    continue
+
             candidates.append((file, username))
+
+    if artist_filter_count > 0:
+        write_log.debug("SLSKD_ARTIST_FILTER", "Filtered files without artist in filename.",
+                       {"filtered_count": artist_filter_count, "required_artist": required_artist})
 
     if not candidates:
         return None, None
@@ -796,18 +824,27 @@ def initiate_track_search(artist: str, track: str, track_id: str) -> tuple[str, 
 
 
 def process_search_results(
-    search_id: str, search_text: str, track_id: str, check_quality_upgrade: bool = False,
+    search_id: str,
+    search_text: str,
+    track_id: str,
+    check_quality_upgrade: bool = False,
+    is_fallback_search: bool = False,
 ) -> bool:
     """Check search results once and enqueue download if suitable file is found.
 
     This function does NOT poll - it checks the search status exactly once.
     For fire-and-forget workflow, call this after searches have had time to complete.
 
+    If the original "Artist Track" search returns 0 results, this function will
+    automatically attempt a fallback search using only the track name, while
+    ensuring the selected file contains the artist name in the filename.
+
     Args:
         search_id: UUID of the search to retrieve results for
         search_text: Original search query text
         track_id: Track identifier for database tracking
         check_quality_upgrade: If True, only download if quality is better than current file
+        is_fallback_search: Internal flag to prevent infinite recursion (True when searching track-only)
 
     Returns:
         True if search was completed and processed, False if still in progress
@@ -815,7 +852,7 @@ def process_search_results(
     """
     write_log.debug("SLSKD_SEARCH_PROCESS", "Processing search results.",
                   {"search_id": search_id, "track_id": track_id, "search_text": search_text,
-                   "check_quality": check_quality_upgrade})
+                   "check_quality": check_quality_upgrade, "is_fallback": is_fallback_search})
 
     try:
         # Check search status once (no polling)
@@ -834,9 +871,54 @@ def process_search_results(
         if not is_complete:
             return False
 
-        # Search is complete but no results
-        if not responses:
-            write_log.info("SLSKD_NO_RESULTS", "No search results found.",
+        # Search is complete but no results - try fallback search with track name only
+        if not responses and not is_fallback_search:
+            write_log.info("SLSKD_NO_RESULTS_ATTEMPTING_FALLBACK",
+                          "No results for artist+track search, attempting track-only fallback.",
+                          {"search_text": search_text, "track_id": track_id})
+
+            # Clean up the original search
+            remove_search_from_slskd(search_id, track_id)
+
+            # Get track name and artist from database
+            track_name = track_db.get_track_name(track_id)
+            artist = track_db.get_track_artist(track_id)
+
+            if not track_name:
+                write_log.warn("SLSKD_FALLBACK_NO_TRACK_NAME",
+                             "Cannot perform fallback search - track name not found in database.",
+                             {"track_id": track_id})
+                track_db.update_track_status(track_id, "not_found")
+                track_db.set_search_uuid(track_id, None)
+                return True
+
+            # Create new search with track name only
+            try:
+                fallback_search_id = create_search(track_name)
+                track_db.set_search_uuid(track_id, fallback_search_id)
+                # Keep status as 'searching' - will be processed on next workflow run
+                track_db.update_track_status(track_id, "searching")
+
+                write_log.info("SLSKD_FALLBACK_SEARCH_INITIATED",
+                             "Initiated fallback search with track name only (async, will process later).",
+                             {"track_id": track_id, "track_name": track_name,
+                              "artist": artist, "fallback_search_id": fallback_search_id})
+
+                # Return False to indicate search is still in progress (will be processed later)
+                return False
+
+            except Exception as e:
+                write_log.warn("SLSKD_FALLBACK_SEARCH_FAIL",
+                             "Failed to initiate fallback search.",
+                             {"track_id": track_id, "error": str(e)})
+                track_db.update_track_status(track_id, "not_found")
+                track_db.set_search_uuid(track_id, None)
+                return True
+
+        # Search is complete but no results (and this was already a fallback search)
+        if not responses and is_fallback_search:
+            write_log.info("SLSKD_FALLBACK_NO_RESULTS",
+                          "No search results found even with track-only fallback.",
                           {"search_text": search_text, "track_id": track_id})
             # If this was a quality upgrade attempt, revert to completed status
             if check_quality_upgrade:
@@ -847,12 +929,30 @@ def process_search_results(
             track_db.set_search_uuid(track_id, None)
             return True
 
-        # Select best file according to quality rules
-        best_file, username = select_best_file(responses, search_text)
+        # We have results - select best file
+        # If this is a fallback search, we need to filter by artist name
+        artist_filter = None
+        if is_fallback_search:
+            artist_filter = track_db.get_track_artist(track_id)
+            write_log.debug("SLSKD_FALLBACK_ARTIST_FILTER",
+                          "Filtering fallback search results by artist name.",
+                          {"artist_filter": artist_filter, "track_id": track_id})
+
+        # Select best file according to quality rules (with artist filter for fallback searches)
+        best_file, username = select_best_file(responses, search_text, required_artist=artist_filter)
 
         if not best_file:
-            write_log.info("SLSKD_NO_SUITABLE_FILE", "No suitable file found in results.",
-                          {"search_text": search_text, "track_id": track_id})
+            # If this was a fallback search and we couldn't find a file with artist in name,
+            # log it appropriately
+            if is_fallback_search:
+                write_log.info("SLSKD_FALLBACK_NO_SUITABLE_FILE",
+                             "No suitable file found in fallback results (no files with artist in filename).",
+                             {"search_text": search_text, "track_id": track_id,
+                              "artist_filter": artist_filter})
+            else:
+                write_log.info("SLSKD_NO_SUITABLE_FILE", "No suitable file found in results.",
+                              {"search_text": search_text, "track_id": track_id})
+
             # If this was a quality upgrade attempt, revert to completed status
             if check_quality_upgrade:
                 track_db.update_track_status(track_id, "completed")
@@ -986,15 +1086,36 @@ def process_pending_searches() -> None:
             track_db.update_track_status(track_id, "pending")
             continue
 
-        # Construct search text to pass to processor
-        search_text = f"{artist} {track_name}"
+        # Get the actual search text from slskd to detect if it's a fallback search
+        try:
+            search_resp = requests.get(
+                f"{SLSKD_URL}/searches/{slskd_uuid}",
+                headers={"X-API-Key": TOKEN},
+                timeout=10,
+            )
+            if search_resp.status_code == HTTP_OK:
+                search_data = search_resp.json()
+                actual_search_text = search_data.get("searchText", f"{artist} {track_name}")
+            else:
+                # Fallback if we can't fetch it
+                actual_search_text = f"{artist} {track_name}"
+        except Exception:
+            # Fallback if request fails
+            actual_search_text = f"{artist} {track_name}"
+
+        # Detect if this is a fallback search (track-only) by checking if artist is in search text
+        # Normalize for comparison: if artist name is NOT in the search text, it's a fallback
+        is_fallback = artist.lower() not in actual_search_text.lower()
 
         # Determine if this is a quality upgrade search (track has existing file)
         is_quality_upgrade = bool(local_file_path)
 
         # Process the search results (checks once, no polling)
-        was_completed = process_search_results(slskd_uuid, search_text, track_id,
-                                               check_quality_upgrade=is_quality_upgrade)
+        was_completed = process_search_results(
+            slskd_uuid, actual_search_text, track_id,
+            check_quality_upgrade=is_quality_upgrade,
+            is_fallback_search=is_fallback
+        )
 
         if was_completed:
             processed_count += 1
