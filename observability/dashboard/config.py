@@ -62,8 +62,8 @@ if ENV:
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     os.makedirs(M3U8_DIR, exist_ok=True)
     
-    # Initialize logging
-    setup_logging(log_name_prefix="combined_dashboard")
+    # Initialize logging - use task_scheduler logs for unified logging
+    setup_logging(log_name_prefix="task_scheduler", rotate_daily=True)
     
     # Initialize database
     try:

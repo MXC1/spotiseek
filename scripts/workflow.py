@@ -60,8 +60,8 @@ from scripts.soulseek_client import (  # noqa: E402
 )
 from scripts.xml_exporter import export_itunes_xml  # noqa: E402
 
-# Initialize logging with environment-specific directory
-setup_logging(log_name_prefix="workflow")
+# Initialize logging with environment-specific directory - use task_scheduler logs for unified logging
+setup_logging(log_name_prefix="task_scheduler", rotate_daily=True)
 write_log.debug("ENV_LOAD", "Environment variables loaded.", {"dotenv_path": dotenv_path})
 
 # Remuxing mode configuration from environment

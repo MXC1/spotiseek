@@ -83,11 +83,13 @@ All operations depend on the Dockerized slskd service and environment isolation.
 ## Code Patterns
 
 ### Logging Convention
+All logs (except FFMPEG) are consolidated in daily `task_scheduler.log.YYYY-MM-DD` files.
 Always use structured logging via `write_log`:
 ```python
 from scripts.logs_utils import setup_logging, write_log
 
-setup_logging(log_name_prefix="my_module")
+# For all modules, use task_scheduler prefix with daily rotation for unified logs
+setup_logging(log_name_prefix="task_scheduler", rotate_daily=True)
 write_log.info("EVENT_ID", "Human message.", {"key": "value"})
 write_log.error("DOWNLOAD_FAIL", "Download failed.", {"track_id": "abc", "error": str(e)})
 ```

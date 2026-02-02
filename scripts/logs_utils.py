@@ -716,7 +716,7 @@ def setup_logging(  # noqa: PLR0915
     Example:
         >>> os.environ['APP_ENV'] = 'test'
         >>> os.environ['LOG_LEVEL'] = 'WARNING'
-        >>> setup_logging(log_name_prefix="workflow")
+        >>> setup_logging(log_name_prefix="task_scheduler", rotate_daily=True)
         # File gets WARNING, ERROR, and dashboard events; console gets WARNING, ERROR
 
         >>> os.environ['LOG_LEVEL'] = 'DEBUG'
