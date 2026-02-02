@@ -4,6 +4,7 @@ Tasks tab for the dashboard.
 Contains functions for rendering the task scheduler management interface.
 """
 
+import threading
 import time
 from datetime import datetime
 from typing import List
@@ -73,15 +74,23 @@ def render_tasks_section():
     col1, col2, col3 = st.columns([1, 1, 2])
     
     with col1:
-        if st.button("▶️ Run All Tasks", type="primary", width="stretch"):
-            registry.run_all_tasks()
-            st.success("✅ All tasks have been started! Check task history below for progress.")
-            st.cache_data.clear()
-            time.sleep(1)
-            st.rerun()
+        if st.button("▶️ Run All Tasks", type="primary", use_container_width=True):
+            # Run in background thread to avoid blocking UI
+            def run_tasks_background():
+                try:
+                    registry.run_all_tasks()
+                except Exception as e:
+                    # Log error but don't crash the thread
+                    import traceback
+                    traceback.print_exc()
+            
+            thread = threading.Thread(target=run_tasks_background, daemon=True)
+            thread.start()
+            st.success("✅ All tasks have been started in the background!")
+            # Don't rerun - just show the message
     
     with col2:
-        if st.button("🔄 Refresh Status", width="stretch"):
+        if st.button("🔄 Refresh Status", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
     
