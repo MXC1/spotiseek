@@ -55,7 +55,10 @@ def write_playlist_m3u8(m3u8_path: str, tracks: list[tuple[str, str, str]]) -> N
             m3u8_file.write("#EXTM3U\n")
 
             # Write each track as a comment
-            for track_id, artist, track_name in tracks:
+            for track in tracks:
+                track_id = track[0] if len(track) > 0 else ""
+                artist = track[1] if len(track) > 1 else ""
+                track_name = track[2] if len(track) > 2 else ""
                 comment = f"# {track_id} - {artist} - {track_name}\n"
                 m3u8_file.write(comment)
 

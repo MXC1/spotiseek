@@ -454,7 +454,12 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
     tracks_to_download = []
     for track in tracks:
         try:
-            track_id, artist, track_name = track
+            # Handle both 3-element (legacy) and 4-element (with genre) tuples
+            if len(track) >= 4:  # noqa: PLR2004
+                track_id, artist, track_name, genre = track[0], track[1], track[2], track[3]
+            else:
+                track_id, artist, track_name = track[0], track[1], track[2]
+                genre = None
 
             # Add track to database (INSERT OR IGNORE - won't duplicate)
             track_db.add_track(TrackData(
@@ -462,6 +467,7 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
                 track_name=track_name,
                 artist=artist,
                 source=source,
+                genre=genre,
             ))
 
             # Link track to playlist in database
@@ -476,7 +482,8 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
             }
 
             if current_status not in skip_statuses:
-                tracks_to_download.append(track)
+                # Pass only (track_id, artist, track_name) for download compatibility
+                tracks_to_download.append((track_id, artist, track_name))
 
         except Exception as e:
             track_name = track[2] if len(track) > 2 else str(track)  # noqa: PLR2004
@@ -580,12 +587,12 @@ def mark_tracks_for_quality_upgrade() -> None:
 
         if PREFER_MP3:
             # Target: MP3 320kbps
-            if all(
+            if all([
                 current_extension,
                 current_extension.lower() == "mp3",
                 current_bitrate,
                 current_bitrate >= MIN_BITRATE_KBPS
-                ):
+            ]):
                 # MP3 file: check if it's high quality (320kbps)
                 meets_requirements = True
         # Target: WAV (lossless)
@@ -899,6 +906,7 @@ def _handle_completed_download(file: dict, track_id: str) -> None:
 
     existing_path = track_db.get_local_file_path(track_id)
     track_db.update_local_file_path(track_id, final_path)
+
     write_log.debug(
         "DOWNLOAD_COMPLETE",
         "Download completed successfully.",
@@ -1074,6 +1082,8 @@ def _handle_corrupt_audio(track_id: str, file_path: str, extension: str, is_loss
                 "extension": extension,
             },
         )
+
+
 def _remux_lossless_to_wav(local_file_path: str, track_id: str, extension: str) -> str:
     """Remux a lossless audio file (FLAC, ALAC, APE) to WAV.
     Update extension/bitrate in DB if successful.

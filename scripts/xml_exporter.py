@@ -287,7 +287,7 @@ def export_itunes_xml(xml_path: str, music_folder_url: str | None = None) -> Non
     # Fetch all tracks from database, excluding those marked for redownload, failed, or with no file path
     cursor.execute("""
         SELECT track_id, track_name, artist, download_status,
-               slskd_file_name, local_file_path, added_at
+               slskd_file_name, local_file_path, added_at, genre
         FROM tracks
         WHERE local_file_path IS NOT NULL
         AND download_status NOT IN ('redownload_pending', 'failed')
@@ -337,9 +337,9 @@ def export_itunes_xml(xml_path: str, music_folder_url: str | None = None) -> Non
     write_log.info("XML_DOWNLOADED_TRACKS", "Filtered downloaded tracks.",
                    {"total_tracks": len(tracks), "downloaded_tracks": len(downloaded_tracks)})
 
-    for idx, (track_id, track_name, artist, _, _, local_file_path, _) in enumerate(downloaded_tracks, 1):
+    for idx, (track_id, track_name, artist, _, _, local_file_path, _, genre) in enumerate(downloaded_tracks, 1):
         try:
-            _add_track_to_xml(tracks_dict, idx, track_name, artist, track_id, local_file_path)
+            _add_track_to_xml(tracks_dict, idx, track_name, artist, track_id, local_file_path, genre)
             source_id_to_track_id[track_id] = idx
         except Exception as e:
             write_log.error(
@@ -390,7 +390,7 @@ def _add_xml_key_value(parent: ET.Element, key: str, value: str, value_type: str
 
 def _add_track_to_xml(  # noqa: PLR0913
     tracks_dict: ET.Element, track_idx: int, track_name: str,
-    artist: str, track_id: str, local_file_path: str,
+    artist: str, track_id: str, local_file_path: str, genre: str | None = None,
 ) -> None:
     """Add a track entry to the tracks dictionary with file metadata."""
     track_key = ET.SubElement(tracks_dict, "key")
@@ -413,9 +413,9 @@ def _add_track_to_xml(  # noqa: PLR0913
     if file_metadata.get("year"):
         _add_xml_key_value(track_dict, "Year", str(file_metadata["year"]), "integer")
 
-    # Add genre if available
-    if file_metadata.get("genre"):
-        _add_xml_key_value(track_dict, "Genre", file_metadata["genre"], "string")
+    # Add genre from database if available (from Spotify/SoundCloud)
+    if genre:
+        _add_xml_key_value(track_dict, "Genre", genre, "string")
 
     # File type and format
     _add_xml_key_value(track_dict, "Kind", "MPEG audio file", "string")
