@@ -181,7 +181,7 @@ def _revert_track_to_comment_in_m3u8(
 def blacklist_track(track: dict) -> tuple[bool, str]:  # noqa: PLR0915
     """
     Blacklist a track by:
-    1. Adding username + slskd_file_name to blacklist table
+    1. Adding username + slskd_file_name to blacklist table (if downloaded from Soulseek)
     2. Deleting the local file
     3. Setting local_file_path, bitrate, and extension to NULL
     4. Setting status to 'blacklisted'
@@ -193,8 +193,8 @@ def blacklist_track(track: dict) -> tuple[bool, str]:  # noqa: PLR0915
             - track_name: Name of the track
             - artist: Artist name
             - local_file_path: Current file path on disk
-            - username: Soulseek username
-            - slskd_file_name: Normalized filename from slskd
+            - username: Soulseek username (optional, None for imported tracks)
+            - slskd_file_name: Normalized filename from slskd (optional, None for imported tracks)
             - extension: File extension (optional)
             - bitrate: Bitrate in kbps (optional)
 
