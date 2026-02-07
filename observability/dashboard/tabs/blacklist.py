@@ -431,7 +431,7 @@ def _render_track_selection_and_blacklist(rows: list[dict]) -> None:
     st.warning("""
     **⚠️ Warning:** This action will:
     - Delete the file from disk permanently
-    - Add this file to the blacklist
+    - Add this file to the blacklist (if from Soulseek)
     - Mark the track for re-download
 
     This action cannot be undone!
@@ -466,7 +466,7 @@ def render_blacklist_section():
     - Otherwise unsuitable
 
     **What happens when you blacklist a track:**
-    1. The username + file combination is added to the blacklist
+    1. The username + file combination is added to the blacklist (if downloaded from Soulseek)
     2. The local file is deleted from disk
     3. Track status is set to `blacklisted` for re-searching
     4. The track will be searched again in future search runs
