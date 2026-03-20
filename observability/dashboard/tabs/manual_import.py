@@ -121,6 +121,30 @@ def _get_playlists_with_incomplete_counts_cached(db_path: str) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=CACHE_TTL_MEDIUM)
+def _get_total_unique_incomplete_tracks_cached(db_path: str) -> int:
+    """
+    Return count of tracks without local files (matches Overall Stats "Not Downloaded" logic).
+    
+    Returns:
+        Total count of tracks without local_file_path
+    """
+    if not os.path.exists(db_path):
+        return 0
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    # Use same logic as Overall Stats "Not Downloaded" count
+    query = """
+        SELECT COUNT(*)
+        FROM tracks
+        WHERE local_file_path IS NULL OR TRIM(local_file_path) = ''
+    """
+    cursor.execute(query)
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+
+@st.cache_data(ttl=CACHE_TTL_MEDIUM)
 def _get_incomplete_tracks_for_playlist_cached(
     db_path: str,
     playlist_url: str,
@@ -286,8 +310,16 @@ def render_manual_import_section():
         st.info("No tracks require manual import.")
         return
 
-    total_tracks = int(playlists_df["incomplete_count"].sum())
-    st.metric("Total Tracks Needing Import", total_tracks)
+    # Count unique tracks (not track-playlist associations)
+    total_unique_tracks = _get_total_unique_incomplete_tracks_cached(DB_PATH)
+    total_associations = int(playlists_df["incomplete_count"].sum())
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Unique Tracks Needing Import", total_unique_tracks)
+    with col2:
+        st.metric("Total Track Occurrences", total_associations, 
+                  help="Same track counted once per playlist it appears in")
     st.markdown("---")
 
     # Playlist selection (store URL as value, show name + count)
