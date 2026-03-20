@@ -181,7 +181,7 @@ def _revert_track_to_comment_in_m3u8(
 def blacklist_track(track: dict) -> tuple[bool, str]:  # noqa: PLR0915
     """
     Blacklist a track by:
-    1. Adding username + slskd_file_name to blacklist table
+    1. Adding username + slskd_file_name to blacklist table (if downloaded from Soulseek)
     2. Deleting the local file
     3. Setting local_file_path, bitrate, and extension to NULL
     4. Setting status to 'blacklisted'
@@ -193,8 +193,8 @@ def blacklist_track(track: dict) -> tuple[bool, str]:  # noqa: PLR0915
             - track_name: Name of the track
             - artist: Artist name
             - local_file_path: Current file path on disk
-            - username: Soulseek username
-            - slskd_file_name: Normalized filename from slskd
+            - username: Soulseek username (optional, None for imported tracks)
+            - slskd_file_name: Normalized filename from slskd (optional, None for imported tracks)
             - extension: File extension (optional)
             - bitrate: Bitrate in kbps (optional)
 
@@ -226,23 +226,17 @@ def blacklist_track(track: dict) -> tuple[bool, str]:  # noqa: PLR0915
                 }
             )
         else:
-            write_log.warn(
-                "BLACKLIST_MISSING_INFO",
-                "Cannot blacklist track - missing username or slskd_file_name.",
+            write_log.info(
+                "BLACKLIST_IMPORTED_TRACK",
+                "Blacklisting imported track (no Soulseek metadata to add to blacklist table).",
                 {
                     "track_id": track_id,
                     "username": username,
                     "slskd_file_name": slskd_file_name,
                 }
             )
-            # Abort blacklist operation when required Soulseek metadata is missing
-            # to avoid re-downloading the same file from the same user without
-            # a corresponding blacklist entry.
-            return False, (
-                "Cannot blacklist track because Soulseek metadata is incomplete "
-                "(missing username or file name). The file and track status were "
-                "left unchanged. Try again after a new download attempt."
-            )
+            # For imported tracks without Soulseek metadata, skip blacklist table insertion
+            # but continue with file deletion, DB clearing, status update, and M3U8 reversion
 
         # Step 2: Delete the local file if it exists
         if local_file_path and os.path.exists(local_file_path):
@@ -437,7 +431,7 @@ def _render_track_selection_and_blacklist(rows: list[dict]) -> None:
     st.warning("""
     **⚠️ Warning:** This action will:
     - Delete the file from disk permanently
-    - Add this file to the blacklist
+    - Add this file to the blacklist (if from Soulseek)
     - Mark the track for re-download
 
     This action cannot be undone!
@@ -472,7 +466,7 @@ def render_blacklist_section():
     - Otherwise unsuitable
 
     **What happens when you blacklist a track:**
-    1. The username + file combination is added to the blacklist
+    1. The username + file combination is added to the blacklist (if downloaded from Soulseek)
     2. The local file is deleted from disk
     3. Track status is set to `blacklisted` for re-searching
     4. The track will be searched again in future search runs
