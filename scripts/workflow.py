@@ -311,18 +311,43 @@ def _rewrite_playlist_m3u8_from_db(playlist_url: str, m3u8_path: str) -> None:
         )
 
 
+# If more than this fraction of tracks would be removed, skip pruning as a safeguard
+# against scraper failures returning incomplete results.
+PRUNE_DROP_THRESHOLD = 0.75
+
+
 def _prune_removed_tracks_for_playlist(
     playlist_url: str,
     playlist_name: str,
     m3u8_path: str,
     current_tracks: list[tuple[str, str, str]],
 ) -> None:
-    """Remove tracks that are no longer present in the Spotify playlist."""
+    """Remove tracks that are no longer present in the playlist.
+
+    Includes a safeguard: if the number of tracks to remove exceeds
+    PRUNE_DROP_THRESHOLD of the existing count, the prune is skipped
+    to avoid data loss from incomplete scraper results.
+    """
     current_ids = {track[0] for track in current_tracks}
     existing_ids = set(track_db.get_track_ids_for_playlist(playlist_url))
     removed_ids = existing_ids - current_ids
 
     if not removed_ids:
+        return
+
+    # Safeguard: refuse to prune if the drop looks like a scraper failure
+    if existing_ids and len(removed_ids) / len(existing_ids) > PRUNE_DROP_THRESHOLD:
+        write_log.warn(
+            "PLAYLIST_PRUNE_SKIPPED",
+            "Skipping prune: too many tracks would be removed, likely a scraper failure.",
+            {
+                "playlist_url": playlist_url,
+                "playlist_name": playlist_name,
+                "existing": len(existing_ids),
+                "would_remove": len(removed_ids),
+                "threshold": PRUNE_DROP_THRESHOLD,
+            },
+        )
         return
 
     removed_count = 0

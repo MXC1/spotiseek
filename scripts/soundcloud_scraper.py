@@ -347,11 +347,15 @@ def get_tracks_from_playlist(  # noqa: PLR0915
                 "Fetched stub track details from API.",
                 {"requested": len(stub_track_ids), "received": len(api_tracks)},
             )
+            if len(api_tracks) == 0:
+                raise RuntimeError(
+                    f"SoundCloud API returned 0 of {len(stub_track_ids)} stub tracks "
+                    f"for playlist '{playlist_name}'. Aborting to prevent data loss."
+                )
         else:
-            write_log.warn(
-                "SOUNDCLOUD_NO_CLIENT_ID",
-                "Could not fetch stub tracks - no client_id available.",
-                {"stub_count": len(stub_track_ids)},
+            raise RuntimeError(
+                f"Could not extract client_id to fetch {len(stub_track_ids)} stub tracks "
+                f"for playlist '{playlist_name}'. Aborting to prevent data loss."
             )
 
     # Process all tracks
