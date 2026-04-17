@@ -321,8 +321,13 @@ def _prune_removed_tracks_for_playlist(
     playlist_name: str,
     m3u8_path: str,
     current_tracks: list[tuple[str, str, str]],
+    orphan_candidates: set[str],
 ) -> None:
-    """Remove tracks that are no longer present in the playlist.
+    """Unlink tracks no longer present in the playlist and mark them as orphan candidates.
+
+    Tracks are only unlinked from this playlist here; actual deletion of
+    orphaned tracks is deferred until all playlists have been processed so
+    that tracks moved between playlists are not accidentally deleted.
 
     Includes a safeguard: if the number of tracks to remove exceeds
     PRUNE_DROP_THRESHOLD of the existing count, the prune is skipped
@@ -352,9 +357,8 @@ def _prune_removed_tracks_for_playlist(
 
     removed_count = 0
     for track_id in removed_ids:
-        local_file_path = track_db.get_local_file_path(track_id)
         track_db.unlink_track_from_playlist(track_id, playlist_url)
-        _remove_track_if_orphaned(track_id, local_file_path)
+        orphan_candidates.add(track_id)
         removed_count += 1
 
     _rewrite_playlist_m3u8_from_db(playlist_url, m3u8_path)
@@ -366,8 +370,14 @@ def _prune_removed_tracks_for_playlist(
     )
 
 
-def _prune_missing_playlists(input_playlist_urls: list[str]) -> None:
-    """Remove playlists absent from input CSV and clean up orphaned tracks/files."""
+def _prune_missing_playlists(input_playlist_urls: list[str], orphan_candidates: set[str]) -> None:
+    """Remove playlists absent from input CSV and collect orphan candidates.
+
+    Tracks are not deleted here; they are added to *orphan_candidates* so
+    that the caller can perform a single orphan-cleanup pass after all new
+    playlists have been processed.  This prevents accidental deletion of
+    tracks that are simply being moved to a new playlist.
+    """
     desired = set(input_playlist_urls)
     existing = set(track_db.get_all_playlist_urls())
     missing = existing - desired
@@ -395,8 +405,8 @@ def _prune_missing_playlists(input_playlist_urls: list[str]) -> None:
                     {"playlist_url": playlist_url, "m3u8_path": m3u8_path, "error": str(e)},
                 )
 
-        for track_id, _, _, local_file_path in tracks:
-            _remove_track_if_orphaned(track_id, local_file_path)
+        for track_id, _, _, _local_file_path in tracks:
+            orphan_candidates.add(track_id)
 
     write_log.info(
         "PLAYLISTS_PRUNED",
@@ -405,7 +415,32 @@ def _prune_missing_playlists(input_playlist_urls: list[str]) -> None:
     )
 
 
-def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
+def _cleanup_orphaned_tracks(orphan_candidates: set[str]) -> None:
+    """Delete tracks that are no longer referenced by any playlist.
+
+    Called after all playlists have been (re-)processed and pruned so that
+    tracks moved between playlists are not accidentally deleted.
+    """
+    if not orphan_candidates:
+        return
+
+    deleted = 0
+    for track_id in orphan_candidates:
+        local_file_path = track_db.get_local_file_path(track_id)
+        remaining = track_db.get_playlist_usage_count(track_id)
+        if remaining == 0:
+            track_db.delete_track(track_id)
+            _delete_local_file(local_file_path, track_id)
+            deleted += 1
+
+    write_log.info(
+        "ORPHAN_CLEANUP",
+        "Cleaned up orphaned tracks after playlist processing.",
+        {"candidates": len(orphan_candidates), "deleted": deleted},
+    )
+
+
+def process_playlist(playlist_url: str, orphan_candidates: set[str] | None = None) -> list[tuple[str, str, str]]:
     """Process a single playlist: fetch tracks and add to database.
 
     This function:
@@ -418,6 +453,10 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
 
     Args:
         playlist_url: Playlist URL (Spotify or SoundCloud)
+        orphan_candidates: Optional set to collect track IDs that were
+            unlinked from this playlist and may now be orphans.  The
+            caller is responsible for running the final orphan cleanup
+            after all playlists have been processed.
 
     Returns:
         List of tracks to be downloaded: [(track_id, artist, track_name), ...]
@@ -456,7 +495,8 @@ def process_playlist(playlist_url: str) -> list[tuple[str, str, str]]:
         return None
 
     try:
-        _prune_removed_tracks_for_playlist(playlist_url, playlist_name, m3u8_path, tracks)
+        candidates = orphan_candidates if orphan_candidates is not None else set()
+        _prune_removed_tracks_for_playlist(playlist_url, playlist_name, m3u8_path, tracks, candidates)
     except Exception as e:
         write_log.error(
             "PLAYLIST_PRUNE_FAIL",
@@ -1276,14 +1316,23 @@ def task_scrape_playlists() -> bool:
                 {"error": str(e)},
             )
 
-        _prune_missing_playlists(playlists)
-
-        # Process each playlist
+        # Process each playlist first, collecting orphan candidates.
+        # Pruning is deferred until after all playlists are processed so
+        # that tracks moved between playlists are not accidentally deleted.
+        orphan_candidates: set[str] = set()
         total_tracks = 0
         for playlist_url in playlists:
-            tracks = process_playlist(playlist_url)
+            tracks = process_playlist(playlist_url, orphan_candidates)
             if tracks:
                 total_tracks += len(tracks)
+
+        # Now prune playlists that are no longer in the CSV and collect
+        # any additional orphan candidates.
+        _prune_missing_playlists(playlists, orphan_candidates)
+
+        # Finally, delete tracks that are truly orphaned (not referenced
+        # by any remaining playlist).
+        _cleanup_orphaned_tracks(orphan_candidates)
 
         write_log.info("TASK_SCRAPE_COMPLETE", "Playlist scrape task completed.",
                       {"playlists_processed": len(playlists), "tracks_found": total_tracks})
