@@ -108,7 +108,7 @@ class TestPruneRemovedTracksDeferred:
 
         assert "t1" in orphan_candidates
         # t1 should still exist in the DB (not deleted yet)
-        assert db.get_local_file_path("t1") is not None or db.get_playlist_usage_count("t1") >= 0
+        assert db.get_track_status("t1") is not None
 
     def test_track_not_deleted_from_db_during_prune(self, db):
         """Track row must survive the per-playlist prune step."""
