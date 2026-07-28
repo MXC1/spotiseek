@@ -72,6 +72,7 @@ Configure how often each automated task runs (in minutes). Set to `0` to disable
 | `TASK_PROCESS_UPGRADES_INTERVAL` | `60` | Process upgrade queue (hourly) |
 | `TASK_EXPORT_LIBRARY_INTERVAL` | `1440` | Export iTunes library (daily) |
 | `TASK_REMUX_EXISTING_FILES_INTERVAL` | `360` | Remux files to match preferences (6 hours) |
+| `TASK_ANALYZE_AUDIO_FEATURES_INTERVAL` | `360` | Compute local danceability/happiness/vocality scores (6 hours) |
 
 ---
 
@@ -108,6 +109,7 @@ TASK_MARK_QUALITY_UPGRADES_INTERVAL=1440
 TASK_PROCESS_UPGRADES_INTERVAL=60
 TASK_EXPORT_LIBRARY_INTERVAL=1440
 TASK_REMUX_EXISTING_FILES_INTERVAL=360
+TASK_ANALYZE_AUDIO_FEATURES_INTERVAL=360
 ```
 
 ---
@@ -174,6 +176,29 @@ invoke run-all-tasks                              # Execute all tasks immediatel
 | `process_upgrades` | Initiate upgrade searches |
 | `export_library` | Generate iTunes XML |
 | `remux_existing_files` | Convert to preferred formats |
+| `analyze_audio_features` | Compute danceability/happiness/vocality via local Essentia analysis |
+
+---
+
+## Local Audio-Feature Analysis (Danceability / Happiness / Vocality)
+
+Since Spotify restricted its `/audio-features` endpoint to apps with pre-approved Extended Quota Mode access (Nov 2024), Spotiseek computes equivalent metrics **locally** from each downloaded file using pretrained [Essentia](https://essentia.upf.edu/) classifier models (`danceability`, `mood_happy`, `voice_instrumental`, all built on a shared `discogs-effnet` embedding). This runs entirely inside the `workflow` container — nothing is uploaded to any third-party service.
+
+Rekordbox cannot import custom MyTags, so the three scores are instead written into three standard iTunes-XML fields it does import, each as a zero-padded 3-digit number (so Rekordbox's alphabetical column sort matches numeric order):
+
+| Metric | XML field | Rekordbox column |
+|---|---|---|
+| Danceability | `Comments` | Comments |
+| Happiness (valence proxy) | `Composer` | Composer |
+| Vocality (voice vs. instrumental) | `Grouping` | Label |
+
+> **One-time setup required in Rekordbox**: the `Grouping` → `Label` mapping only takes effect if you enable **Preferences → Bridge → "Convert iTunes Grouping to rekordbox Label"** before importing the XML. Comments and Composer import automatically with no extra setup.
+
+The `essentia-tensorflow` dependency and its model files are only installed in the `workflow` image (`requirements-audio-features.txt`, `infra/Dockerfile.workflow`) — the `dashboard` image and host test environment do not include it.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUDIO_FEATURES_BATCH_SIZE` | `50` | Max tracks analyzed per `analyze_audio_features` run (oldest-added first). Keeps a large existing library (e.g. a 3000+ track backlog) from being analyzed all in one run — it works through the backlog gradually across scheduled runs instead. |
 
 ---
 

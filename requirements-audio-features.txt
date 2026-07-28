@@ -1,0 +1,7 @@
+# Heavy dependency for local Essentia audio-feature analysis (danceability/happiness/vocality).
+# Installed only in the workflow image (see infra/Dockerfile.workflow) - deliberately kept out of
+# requirements.txt so the dashboard image and host test venv don't pay for it.
+#
+# Pinned to this specific pre-release: it is the latest essentia-tensorflow build that still
+# ships a cp311-manylinux2014_x86_64 wheel. Newer dev builds have dropped Python 3.11 wheels.
+essentia-tensorflow==2.1b6.dev1389

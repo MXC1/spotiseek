@@ -191,7 +191,7 @@ class TrackDB:
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self._create_tables()
 
-    def _create_tables(self) -> None:
+    def _create_tables(self) -> None:  # noqa: PLR0912
         """Create database schema if it doesn't already exist.
 
         Schema includes:
@@ -242,6 +242,12 @@ class TrackDB:
             cursor.execute("ALTER TABLE tracks ADD COLUMN source TEXT NOT NULL DEFAULT 'spotify'")
         if "genre" not in columns:
             cursor.execute("ALTER TABLE tracks ADD COLUMN genre TEXT")
+        if "danceability" not in columns:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN danceability INTEGER")
+        if "happiness" not in columns:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN happiness INTEGER")
+        if "vocality" not in columns:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN vocality INTEGER")
 
 
         # Playlists table: stores playlist information, m3u8 path, and playlist name
@@ -613,6 +619,31 @@ class TrackDB:
         )
         self.conn.commit()
 
+    def update_audio_features(
+        self, track_id: str, danceability: int, happiness: int, vocality: int,
+    ) -> None:
+        """Update the locally-computed audio-feature scores for a track.
+
+        Args:
+            track_id: Track identifier
+            danceability: 0-100 danceability score
+            happiness: 0-100 happiness (valence proxy) score
+            vocality: 0-100 vocality score
+
+        """
+        write_log.debug(
+            "TRACK_UPDATE_AUDIO_FEATURES",
+            "Updating audio features for track.",
+            {"track_id": track_id, "danceability": danceability,
+             "happiness": happiness, "vocality": vocality},
+        )
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE tracks SET danceability = ?, happiness = ?, vocality = ? WHERE track_id = ?",
+            (danceability, happiness, vocality, track_id),
+        )
+        self.conn.commit()
+
     def get_tracks_by_status(self, status: str) -> list[tuple]:
         """Retrieve all tracks with a specific download status.
 
@@ -629,6 +660,31 @@ class TrackDB:
             "SELECT * FROM tracks WHERE download_status = ?",
             (status,),
         )
+        return cursor.fetchall()
+
+    def get_tracks_needing_audio_analysis(self, limit: int | None = None) -> list[tuple]:
+        """Retrieve completed tracks that don't have local audio-feature scores yet.
+
+        Args:
+            limit: Maximum number of tracks to return, oldest-added first. None
+                returns all pending tracks.
+
+        Returns:
+            List of (track_id, local_file_path) tuples
+
+        """
+        cursor = self.conn.cursor()
+        query = (
+            "SELECT track_id, local_file_path FROM tracks "
+            "WHERE download_status = 'completed' "
+            "AND local_file_path IS NOT NULL AND TRIM(local_file_path) != '' "
+            "AND danceability IS NULL "
+            "ORDER BY added_at"
+        )
+        if limit is not None:
+            cursor.execute(f"{query} LIMIT ?", (limit,))
+        else:
+            cursor.execute(query)
         return cursor.fetchall()
 
     def set_search_uuid(self, track_id: str, slskd_search_uuid: str | None) -> None:
@@ -857,6 +913,27 @@ class TrackDB:
         )
         result = cursor.fetchone()
         return result[0] if result else None
+
+    def get_track_audio_features(self, track_id: str) -> tuple[int, int, int] | None:
+        """Retrieve the locally-computed audio-feature scores for a track.
+
+        Args:
+            track_id: Track identifier
+
+        Returns:
+            (danceability, happiness, vocality) tuple if the track exists and has
+            been analyzed, None otherwise
+
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT danceability, happiness, vocality FROM tracks WHERE track_id = ?",
+            (track_id,),
+        )
+        result = cursor.fetchone()
+        if not result or result[0] is None:
+            return None
+        return result
 
     def get_track_artist(self, track_id: str) -> str | None:
         """Retrieve the artist name of a track.

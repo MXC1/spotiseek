@@ -27,6 +27,7 @@ Task Functions (used by task_scheduler.py):
 - task_process_upgrades(): Initiate quality upgrade searches
 - task_export_library(): Generate iTunes-compatible XML
 - task_remux_existing_files(): Remux files to match format preferences
+- task_analyze_audio_features(): Compute local danceability/happiness/vocality scores
 """
 
 import os
@@ -44,6 +45,7 @@ sys.dont_write_bytecode = True
 dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(dotenv_path)
 
+from scripts.audio_features import compute_audio_features  # noqa: E402
 from scripts.constants import LOSSLESS_FORMATS, LOSSY_FORMATS, MIN_BITRATE_KBPS  # noqa: E402
 from scripts.database_management import TrackData, TrackDB  # noqa: E402
 from scripts.logs_utils import setup_logging, write_log  # noqa: E402
@@ -66,6 +68,13 @@ write_log.debug("ENV_LOAD", "Environment variables loaded.", {"dotenv_path": dot
 
 # Remuxing mode configuration from environment
 PREFER_MP3 = os.getenv("PREFER_MP3", "false").lower() in ("true", "1", "yes")
+
+# Max tracks analyzed per audio-features task run, to avoid a single run chewing
+# through an entire existing library (e.g. 3000+ backlog tracks) in one go.
+try:
+    AUDIO_FEATURES_BATCH_SIZE = int(os.getenv("AUDIO_FEATURES_BATCH_SIZE", "50"))
+except ValueError:
+    AUDIO_FEATURES_BATCH_SIZE = 50
 
 # Validate environment configuration
 ENV = os.getenv("APP_ENV")
@@ -1731,5 +1740,70 @@ def task_remux_existing_files() -> bool:
     except Exception as e:
         write_log.error("TASK_REMUX_EXISTING_FAILED",
                        "Existing files remux task failed.",
+                       {"error": str(e)})
+        return False
+
+
+def task_analyze_audio_features() -> bool:
+    """Task: Compute local danceability/happiness/vocality scores via Essentia.
+
+    Replaces Spotify's now-restricted `/audio-features` endpoint with local
+    analysis of the actual downloaded/remuxed file. Runs after remuxing so it
+    always analyzes the final, stable file rather than one about to be replaced.
+
+    Processes tracks one at a time; a failure analyzing one file (corrupt audio,
+    model error) is logged and skipped rather than aborting the whole batch, so
+    it's picked up again on the next run.
+
+    Only analyzes up to AUDIO_FEATURES_BATCH_SIZE tracks per run (default 50),
+    oldest-added first, so a large existing library backlogs in gradually
+    across multiple scheduled runs instead of all at once.
+
+    Returns:
+        True if successful, False if failed
+
+    """
+    write_log.info("TASK_ANALYZE_AUDIO_FEATURES_START", "Starting audio feature analysis task.",
+                   {"batch_size": AUDIO_FEATURES_BATCH_SIZE})
+
+    try:
+        pending_tracks = track_db.get_tracks_needing_audio_analysis(limit=AUDIO_FEATURES_BATCH_SIZE)
+
+        if not pending_tracks:
+            write_log.info("TASK_ANALYZE_AUDIO_FEATURES_NO_FILES", "No tracks need audio-feature analysis.")
+            return True
+
+        write_log.info("TASK_ANALYZE_AUDIO_FEATURES_CHECKING",
+                       f"Analyzing {len(pending_tracks)} tracks this run "
+                       f"(batch size {AUDIO_FEATURES_BATCH_SIZE}).")
+
+        analyzed_count = 0
+        error_count = 0
+
+        for track_id, local_file_path in pending_tracks:
+            try:
+                result = compute_audio_features(local_file_path)
+                if result is None:
+                    error_count += 1
+                    continue
+
+                danceability, happiness, vocality = result
+                track_db.update_audio_features(track_id, danceability, happiness, vocality)
+                analyzed_count += 1
+            except Exception as e:
+                error_count += 1
+                write_log.error("TASK_ANALYZE_AUDIO_FEATURES_TRACK_ERROR",
+                               "Failed to analyze audio features for track.",
+                               {"track_id": track_id, "local_file_path": local_file_path,
+                                "error": str(e)})
+
+        write_log.info("TASK_ANALYZE_AUDIO_FEATURES_COMPLETE",
+                      "Audio feature analysis task completed.",
+                      {"analyzed": analyzed_count, "errors": error_count, "total": len(pending_tracks)})
+        return True
+
+    except Exception as e:
+        write_log.error("TASK_ANALYZE_AUDIO_FEATURES_FAILED",
+                       "Audio feature analysis task failed.",
                        {"error": str(e)})
         return False

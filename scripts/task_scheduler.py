@@ -564,6 +564,7 @@ def _register_all_tasks(registry: TaskRegistry) -> None:
     """Register all workflow tasks."""
     # Import here to avoid circular imports
     from scripts.workflow import (  # noqa: PLC0415
+        task_analyze_audio_features,
         task_export_library,
         task_initiate_searches,
         task_mark_quality_upgrades,
@@ -660,6 +661,17 @@ def _register_all_tasks(registry: TaskRegistry) -> None:
         interval_env_var="TASK_REMUX_EXISTING_FILES_INTERVAL",
         default_interval_minutes=360,  # Every 6 hours
         dependencies=["sync_download_status"],
+    ))
+
+    # Task 9: Analyze Audio Features
+    registry.register_task(TaskDefinition(
+        name="analyze_audio_features",
+        display_name="Analyze Audio Features",
+        description="Compute danceability/happiness/vocality scores locally via Essentia",
+        function=task_analyze_audio_features,
+        interval_env_var="TASK_ANALYZE_AUDIO_FEATURES_INTERVAL",
+        default_interval_minutes=360,  # Every 6 hours
+        dependencies=["remux_existing_files"],
     ))
 
     write_log.info("TASKS_REGISTERED", "All tasks registered",

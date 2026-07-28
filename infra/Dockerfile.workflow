@@ -4,12 +4,35 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Install ffmpeg for audio processing
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+# Install ffmpeg for audio processing, curl for fetching Essentia model files
+RUN apt-get update && apt-get install -y ffmpeg curl && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install dependencies
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements-audio-features.txt ./
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir -r requirements-audio-features.txt
+
+# Download pretrained Essentia models for local audio-feature analysis
+# (danceability / mood_happy / voice_instrumental classifier heads on top of a
+# shared discogs-effnet embedding). -f makes curl fail the build on a bad download
+# rather than silently leaving a missing/partial model file.
+RUN mkdir -p /app/models/essentia \
+    && curl -f -L -o /app/models/essentia/discogs-effnet-bs64-1.pb \
+        https://essentia.upf.edu/models/feature-extractors/discogs-effnet/discogs-effnet-bs64-1.pb \
+    && curl -f -L -o /app/models/essentia/discogs-effnet-bs64-1.json \
+        https://essentia.upf.edu/models/feature-extractors/discogs-effnet/discogs-effnet-bs64-1.json \
+    && curl -f -L -o /app/models/essentia/danceability-discogs-effnet-1.pb \
+        https://essentia.upf.edu/models/classification-heads/danceability/danceability-discogs-effnet-1.pb \
+    && curl -f -L -o /app/models/essentia/danceability-discogs-effnet-1.json \
+        https://essentia.upf.edu/models/classification-heads/danceability/danceability-discogs-effnet-1.json \
+    && curl -f -L -o /app/models/essentia/mood_happy-discogs-effnet-1.pb \
+        https://essentia.upf.edu/models/classification-heads/mood_happy/mood_happy-discogs-effnet-1.pb \
+    && curl -f -L -o /app/models/essentia/mood_happy-discogs-effnet-1.json \
+        https://essentia.upf.edu/models/classification-heads/mood_happy/mood_happy-discogs-effnet-1.json \
+    && curl -f -L -o /app/models/essentia/voice_instrumental-discogs-effnet-1.pb \
+        https://essentia.upf.edu/models/classification-heads/voice_instrumental/voice_instrumental-discogs-effnet-1.pb \
+    && curl -f -L -o /app/models/essentia/voice_instrumental-discogs-effnet-1.json \
+        https://essentia.upf.edu/models/classification-heads/voice_instrumental/voice_instrumental-discogs-effnet-1.json
 
 # Copy application code
 COPY . .
