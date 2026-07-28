@@ -667,7 +667,7 @@ def _register_all_tasks(registry: TaskRegistry) -> None:
     registry.register_task(TaskDefinition(
         name="analyze_audio_features",
         display_name="Analyze Audio Features",
-        description="Compute danceability/happiness/vocality scores locally via Essentia",
+        description="Compute approachability/happiness/energy scores locally via Essentia",
         function=task_analyze_audio_features,
         interval_env_var="TASK_ANALYZE_AUDIO_FEATURES_INTERVAL",
         default_interval_minutes=360,  # Every 6 hours

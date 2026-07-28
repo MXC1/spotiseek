@@ -242,12 +242,12 @@ class TrackDB:
             cursor.execute("ALTER TABLE tracks ADD COLUMN source TEXT NOT NULL DEFAULT 'spotify'")
         if "genre" not in columns:
             cursor.execute("ALTER TABLE tracks ADD COLUMN genre TEXT")
-        if "danceability" not in columns:
-            cursor.execute("ALTER TABLE tracks ADD COLUMN danceability INTEGER")
+        if "approachability" not in columns:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN approachability INTEGER")
         if "happiness" not in columns:
             cursor.execute("ALTER TABLE tracks ADD COLUMN happiness INTEGER")
-        if "vocality" not in columns:
-            cursor.execute("ALTER TABLE tracks ADD COLUMN vocality INTEGER")
+        if "energy" not in columns:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN energy INTEGER")
 
 
         # Playlists table: stores playlist information, m3u8 path, and playlist name
@@ -620,27 +620,27 @@ class TrackDB:
         self.conn.commit()
 
     def update_audio_features(
-        self, track_id: str, danceability: int, happiness: int, vocality: int,
+        self, track_id: str, approachability: int, happiness: int, energy: int,
     ) -> None:
         """Update the locally-computed audio-feature scores for a track.
 
         Args:
             track_id: Track identifier
-            danceability: 0-100 danceability score
+            approachability: 0-100 approachability score
             happiness: 0-100 happiness (valence proxy) score
-            vocality: 0-100 vocality score
+            energy: 0-100 energy score
 
         """
         write_log.debug(
             "TRACK_UPDATE_AUDIO_FEATURES",
             "Updating audio features for track.",
-            {"track_id": track_id, "danceability": danceability,
-             "happiness": happiness, "vocality": vocality},
+            {"track_id": track_id, "approachability": approachability,
+             "happiness": happiness, "energy": energy},
         )
         cursor = self.conn.cursor()
         cursor.execute(
-            "UPDATE tracks SET danceability = ?, happiness = ?, vocality = ? WHERE track_id = ?",
-            (danceability, happiness, vocality, track_id),
+            "UPDATE tracks SET approachability = ?, happiness = ?, energy = ? WHERE track_id = ?",
+            (approachability, happiness, energy, track_id),
         )
         self.conn.commit()
 
@@ -678,7 +678,7 @@ class TrackDB:
             "SELECT track_id, local_file_path FROM tracks "
             "WHERE download_status = 'completed' "
             "AND local_file_path IS NOT NULL AND TRIM(local_file_path) != '' "
-            "AND danceability IS NULL "
+            "AND approachability IS NULL "
             "ORDER BY added_at"
         )
         if limit is not None:
@@ -921,13 +921,13 @@ class TrackDB:
             track_id: Track identifier
 
         Returns:
-            (danceability, happiness, vocality) tuple if the track exists and has
+            (approachability, happiness, energy) tuple if the track exists and has
             been analyzed, None otherwise
 
         """
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT danceability, happiness, vocality FROM tracks WHERE track_id = ?",
+            "SELECT approachability, happiness, energy FROM tracks WHERE track_id = ?",
             (track_id,),
         )
         result = cursor.fetchone()

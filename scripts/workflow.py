@@ -27,7 +27,7 @@ Task Functions (used by task_scheduler.py):
 - task_process_upgrades(): Initiate quality upgrade searches
 - task_export_library(): Generate iTunes-compatible XML
 - task_remux_existing_files(): Remux files to match format preferences
-- task_analyze_audio_features(): Compute local danceability/happiness/vocality scores
+- task_analyze_audio_features(): Compute local approachability/happiness/energy scores
 """
 
 import os
@@ -1745,7 +1745,7 @@ def task_remux_existing_files() -> bool:
 
 
 def task_analyze_audio_features() -> bool:
-    """Task: Compute local danceability/happiness/vocality scores via Essentia.
+    """Task: Compute local approachability/happiness/energy scores via Essentia.
 
     Replaces Spotify's now-restricted `/audio-features` endpoint with local
     analysis of the actual downloaded/remuxed file. Runs after remuxing so it
@@ -1787,8 +1787,8 @@ def task_analyze_audio_features() -> bool:
                     error_count += 1
                     continue
 
-                danceability, happiness, vocality = result
-                track_db.update_audio_features(track_id, danceability, happiness, vocality)
+                approachability, happiness, energy = result
+                track_db.update_audio_features(track_id, approachability, happiness, energy)
                 analyzed_count += 1
             except Exception as e:
                 error_count += 1

@@ -1,9 +1,10 @@
 """Local audio-feature analysis using pretrained Essentia models.
 
-Computes danceability / happiness / vocality scores directly from a downloaded
+Computes approachability / happiness / energy scores directly from a downloaded
 audio file, as a local replacement for Spotify's now-restricted `/audio-features`
 endpoint. Uses a shared discogs-effnet embedding plus three small classifier
-heads (danceability, mood_happy, voice_instrumental) — the standard two-stage
+heads (approachability, mood_happy, danceability as an energy proxy) — the
+standard two-stage
 inference pattern documented by the Essentia project.
 
 `essentia.standard` is only imported inside `compute_audio_features()`, not at
@@ -12,7 +13,7 @@ importable on hosts/images that don't have the heavy `essentia-tensorflow`
 dependency installed (e.g. the dashboard container, the host test venv).
 
 Public API:
-- compute_audio_features(): Analyze one audio file, returns (danceability, happiness, vocality)
+- compute_audio_features(): Analyze one audio file, returns (approachability, happiness, energy)
 """
 
 import json
@@ -26,10 +27,14 @@ _EMBEDDING_MODEL_NAME = "discogs-effnet-bs64-1"
 _EMBEDDING_OUTPUT_NODE = "PartitionedCall:1"  # "embeddings" output_purpose, per model metadata
 
 # (head model name, positive class label to look up in its classes list)
+# Note: the "energy" slot uses the danceability classifier as a proxy — Essentia
+# has no discogs-effnet-native energy/arousal model (the true arousal model uses
+# a different embedding entirely), and danceability is a reasonable stand-in for
+# a DJ-relevant sense of energy.
 _CLASSIFIER_HEADS = (
-    ("danceability-discogs-effnet-1", "danceable"),
+    ("approachability_2c-discogs-effnet-1", "approachable"),
     ("mood_happy-discogs-effnet-1", "happy"),
-    ("voice_instrumental-discogs-effnet-1", "voice"),
+    ("danceability-discogs-effnet-1", "danceable"),
 )
 
 # Lazily populated on first use; keyed by model name.
@@ -83,7 +88,7 @@ def _get_classifier_head(model_name: str, positive_class: str):
 
 
 def compute_audio_features(local_file_path: str) -> tuple[int, int, int] | None:
-    """Analyze an audio file and return (danceability, happiness, vocality) scores.
+    """Analyze an audio file and return (approachability, happiness, energy) scores.
 
     Each score is a 0-100 int derived from the corresponding Essentia classifier
     head's positive-class probability, averaged across all analysis patches in
@@ -93,7 +98,7 @@ def compute_audio_features(local_file_path: str) -> tuple[int, int, int] | None:
         local_file_path: Absolute path to the downloaded/imported audio file.
 
     Returns:
-        (danceability, happiness, vocality) tuple, or None if analysis failed
+        (approachability, happiness, energy) tuple, or None if analysis failed
         (missing/corrupt file, model load error, etc.) — caller should skip the
         track and try again on a later run.
 
@@ -115,8 +120,8 @@ def compute_audio_features(local_file_path: str) -> tuple[int, int, int] | None:
             avg_prob = sum(positive_probs) / len(positive_probs)
             scores.append(_prob_to_percent(avg_prob))
 
-        danceability, happiness, vocality = scores
-        return (danceability, happiness, vocality)
+        approachability, happiness, energy = scores
+        return (approachability, happiness, energy)
 
     except Exception as e:
         write_log.warn(

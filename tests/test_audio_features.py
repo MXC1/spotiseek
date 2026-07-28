@@ -1,4 +1,4 @@
-"""Tests for local audio-feature analysis (danceability/happiness/vocality).
+"""Tests for local audio-feature analysis (approachability/happiness/energy).
 
 Covers the database layer (tests/database_management.py additions) and the
 pure score-conversion helper in scripts/audio_features.py. Does NOT exercise

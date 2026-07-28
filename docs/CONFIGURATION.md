@@ -72,7 +72,7 @@ Configure how often each automated task runs (in minutes). Set to `0` to disable
 | `TASK_PROCESS_UPGRADES_INTERVAL` | `60` | Process upgrade queue (hourly) |
 | `TASK_EXPORT_LIBRARY_INTERVAL` | `1440` | Export iTunes library (daily) |
 | `TASK_REMUX_EXISTING_FILES_INTERVAL` | `360` | Remux files to match preferences (6 hours) |
-| `TASK_ANALYZE_AUDIO_FEATURES_INTERVAL` | `360` | Compute local danceability/happiness/vocality scores (6 hours) |
+| `TASK_ANALYZE_AUDIO_FEATURES_INTERVAL` | `360` | Compute local approachability/happiness/energy scores (6 hours) |
 
 ---
 
@@ -176,21 +176,23 @@ invoke run-all-tasks                              # Execute all tasks immediatel
 | `process_upgrades` | Initiate upgrade searches |
 | `export_library` | Generate iTunes XML |
 | `remux_existing_files` | Convert to preferred formats |
-| `analyze_audio_features` | Compute danceability/happiness/vocality via local Essentia analysis |
+| `analyze_audio_features` | Compute approachability/happiness/energy via local Essentia analysis |
 
 ---
 
-## Local Audio-Feature Analysis (Danceability / Happiness / Vocality)
+## Local Audio-Feature Analysis (Approachability / Happiness / Energy)
 
-Since Spotify restricted its `/audio-features` endpoint to apps with pre-approved Extended Quota Mode access (Nov 2024), Spotiseek computes equivalent metrics **locally** from each downloaded file using pretrained [Essentia](https://essentia.upf.edu/) classifier models (`danceability`, `mood_happy`, `voice_instrumental`, all built on a shared `discogs-effnet` embedding). This runs entirely inside the `workflow` container — nothing is uploaded to any third-party service.
+Since Spotify restricted its `/audio-features` endpoint to apps with pre-approved Extended Quota Mode access (Nov 2024), Spotiseek computes equivalent metrics **locally** from each downloaded file using pretrained [Essentia](https://essentia.upf.edu/) classifier models (`approachability`, `mood_happy`, `danceability`, all built on a shared `discogs-effnet` embedding). This runs entirely inside the `workflow` container — nothing is uploaded to any third-party service.
+
+> **Energy is a danceability proxy**: Essentia has no `discogs-effnet`-native energy/arousal model — the genuine arousal model (DEAM dataset) is built on a different embedding entirely, which would mean a second embedding-extraction pass just for this one metric. Danceability reuses the existing pipeline and is a reasonable stand-in for a DJ-relevant sense of energy.
 
 Rekordbox cannot import custom MyTags, so the three scores are instead written into three standard iTunes-XML fields it does import, each as a zero-padded 3-digit number (so Rekordbox's alphabetical column sort matches numeric order):
 
 | Metric | XML field | Rekordbox column |
 |---|---|---|
-| Danceability | `Comments` | Comments |
+| Approachability | `Comments` | Comments |
 | Happiness (valence proxy) | `Composer` | Composer |
-| Vocality (voice vs. instrumental) | `Grouping` | Label |
+| Energy (danceability proxy) | `Grouping` | Label |
 
 > **One-time setup required in Rekordbox**: the `Grouping` → `Label` mapping only takes effect if you enable **Preferences → Bridge → "Convert iTunes Grouping to rekordbox Label"** before importing the XML. Comments and Composer import automatically with no extra setup.
 

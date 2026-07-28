@@ -23,7 +23,7 @@ Extracted Metadata:
 - File Size: File size in bytes
 - Total Time: Duration in milliseconds
 
-Locally-computed audio-feature scores (danceability/happiness/vocality, see
+Locally-computed audio-feature scores (approachability/happiness/energy, see
 scripts/audio_features.py) are mapped onto Comments/Composer/Grouping
 respectively, since Rekordbox cannot import custom MyTags but does import
 these standard iTunes XML fields.
@@ -293,7 +293,7 @@ def export_itunes_xml(xml_path: str, music_folder_url: str | None = None) -> Non
     cursor.execute("""
         SELECT track_id, track_name, artist, download_status,
                slskd_file_name, local_file_path, added_at, genre,
-               danceability, happiness, vocality
+               approachability, happiness, energy
         FROM tracks
         WHERE local_file_path IS NOT NULL
         AND download_status NOT IN ('redownload_pending', 'failed')
@@ -344,10 +344,10 @@ def export_itunes_xml(xml_path: str, music_folder_url: str | None = None) -> Non
                    {"total_tracks": len(tracks), "downloaded_tracks": len(downloaded_tracks)})
 
     for idx, (track_id, track_name, artist, _, _, local_file_path, _, genre,
-              danceability, happiness, vocality) in enumerate(downloaded_tracks, 1):
+              approachability, happiness, energy) in enumerate(downloaded_tracks, 1):
         try:
             _add_track_to_xml(tracks_dict, idx, track_name, artist, track_id, local_file_path, genre,
-                               danceability, happiness, vocality)
+                               approachability, happiness, energy)
             source_id_to_track_id[track_id] = idx
         except Exception as e:
             write_log.error(
@@ -408,7 +408,7 @@ def _pad_score(value: int) -> str:
 def _add_track_to_xml(  # noqa: PLR0913, PLR0917
     tracks_dict: ET.Element, track_idx: int, track_name: str,
     artist: str, track_id: str, local_file_path: str, genre: str | None = None,
-    danceability: int | None = None, happiness: int | None = None, vocality: int | None = None,
+    approachability: int | None = None, happiness: int | None = None, energy: int | None = None,
 ) -> None:
     """Add a track entry to the tracks dictionary with file metadata."""
     track_key = ET.SubElement(tracks_dict, "key")
@@ -439,14 +439,14 @@ def _add_track_to_xml(  # noqa: PLR0913, PLR0917
     # Rekordbox-importable field so they're independently sortable (MyTags
     # cannot be imported into Rekordbox, so Comments/Composer/Grouping are
     # repurposed instead). Values are zero-padded so text sort == numeric sort.
-    if danceability is not None:
-        _add_xml_key_value(track_dict, "Comments", _pad_score(danceability), "string")
+    if approachability is not None:
+        _add_xml_key_value(track_dict, "Comments", _pad_score(approachability), "string")
     if happiness is not None:
         _add_xml_key_value(track_dict, "Composer", _pad_score(happiness), "string")
-    if vocality is not None:
+    if energy is not None:
         # Rekordbox only picks this up as "Label" if "Convert iTunes Grouping to
         # rekordbox Label" is enabled once in Preferences > Bridge.
-        _add_xml_key_value(track_dict, "Grouping", _pad_score(vocality), "string")
+        _add_xml_key_value(track_dict, "Grouping", _pad_score(energy), "string")
 
     # File type and format
     _add_xml_key_value(track_dict, "Kind", "MPEG audio file", "string")
