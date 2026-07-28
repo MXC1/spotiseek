@@ -182,9 +182,11 @@ invoke run-all-tasks                              # Execute all tasks immediatel
 
 ## Local Audio-Feature Analysis (Approachability / Happiness / Energy)
 
-Since Spotify restricted its `/audio-features` endpoint to apps with pre-approved Extended Quota Mode access (Nov 2024), Spotiseek computes equivalent metrics **locally** from each downloaded file using pretrained [Essentia](https://essentia.upf.edu/) classifier models (`approachability`, `mood_happy`, `danceability`, all built on a shared `discogs-effnet` embedding). This runs entirely inside the `workflow` container — nothing is uploaded to any third-party service.
+Since Spotify restricted its `/audio-features` endpoint to apps with pre-approved Extended Quota Mode access (Nov 2024), Spotiseek computes equivalent metrics **locally** from each downloaded file using pretrained [Essentia](https://essentia.upf.edu/) models. This runs entirely inside the `workflow` container — nothing is uploaded to any third-party service.
 
-> **Energy is a danceability proxy**: Essentia has no `discogs-effnet`-native energy/arousal model — the genuine arousal model (DEAM dataset) is built on a different embedding entirely, which would mean a second embedding-extraction pass just for this one metric. Danceability reuses the existing pipeline and is a reasonable stand-in for a DJ-relevant sense of energy.
+Two separate embedding pipelines are used:
+- `discogs-effnet` feeds the `approachability` and `mood_happy` classifier heads
+- `MusiCNN` feeds the DEAM arousal-valence regression model, whose `arousal` output is used as Energy — Essentia has no `discogs-effnet`-native energy/arousal model, so this metric needs its own embedding rather than reusing the other two's.
 
 Rekordbox cannot import custom MyTags, so the three scores are instead written into three standard iTunes-XML fields it does import, each as a zero-padded 3-digit number (so Rekordbox's alphabetical column sort matches numeric order):
 
@@ -192,7 +194,7 @@ Rekordbox cannot import custom MyTags, so the three scores are instead written i
 |---|---|---|
 | Approachability | `Comments` | Comments |
 | Happiness (valence proxy) | `Composer` | Composer |
-| Energy (danceability proxy) | `Grouping` | Label |
+| Energy (DEAM arousal) | `Grouping` | Label |
 
 > **One-time setup required in Rekordbox**: the `Grouping` → `Label` mapping only takes effect if you enable **Preferences → Bridge → "Convert iTunes Grouping to rekordbox Label"** before importing the XML. Comments and Composer import automatically with no extra setup.
 

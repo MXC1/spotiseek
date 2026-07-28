@@ -2,10 +2,14 @@
 
 Computes approachability / happiness / energy scores directly from a downloaded
 audio file, as a local replacement for Spotify's now-restricted `/audio-features`
-endpoint. Uses a shared discogs-effnet embedding plus three small classifier
-heads (approachability, mood_happy, danceability as an energy proxy) — the
-standard two-stage
-inference pattern documented by the Essentia project.
+endpoint. Runs two separate embedding pipelines:
+
+- discogs-effnet, feeding the approachability and mood_happy classifier heads
+- MusiCNN, feeding the DEAM arousal-valence regression head (energy = arousal)
+
+Essentia has no discogs-effnet-native energy/arousal model, so the genuine
+arousal model (DEAM dataset) needs its own embedding rather than reusing the
+discogs-effnet one shared by the other two metrics.
 
 `essentia.standard` is only imported inside `compute_audio_features()`, not at
 module import time, so this module (and anything that imports it) stays
@@ -23,28 +27,36 @@ from scripts.logs_utils import write_log
 
 MODEL_DIR = os.getenv("AUDIO_FEATURE_MODEL_DIR", "/app/models/essentia")
 
-_EMBEDDING_MODEL_NAME = "discogs-effnet-bs64-1"
-_EMBEDDING_OUTPUT_NODE = "PartitionedCall:1"  # "embeddings" output_purpose, per model metadata
+# embedding_key -> (embedding model name, essentia.standard algorithm class name, output node)
+_EMBEDDING_CONFIGS = {
+    "discogs_effnet": (
+        "discogs-effnet-bs64-1", "TensorflowPredictEffnetDiscogs", "PartitionedCall:1",
+    ),
+    "musicnn": (
+        "msd-musicnn-1", "TensorflowPredictMusiCNN", "model/dense/BiasAdd",
+    ),
+}
 
-# (head model name, positive class label to look up in its classes list)
-# Note: the "energy" slot uses the danceability classifier as a proxy — Essentia
-# has no discogs-effnet-native energy/arousal model (the true arousal model uses
-# a different embedding entirely), and danceability is a reasonable stand-in for
-# a DJ-relevant sense of energy.
+# (embedding_key, head model name, positive class label, (value_min, value_max))
+# The discogs-effnet heads are softmax classifiers, so their positive-class output
+# is a 0.0-1.0 probability. The DEAM arousal-valence model is a *regression* head
+# trained against a [1, 9] target scale (per Essentia's own model card) - treating
+# its raw output as a 0-1 probability would silently clamp every real score to 100.
 _CLASSIFIER_HEADS = (
-    ("approachability_2c-discogs-effnet-1", "approachable"),
-    ("mood_happy-discogs-effnet-1", "happy"),
-    ("danceability-discogs-effnet-1", "danceable"),
+    ("discogs_effnet", "approachability_2c-discogs-effnet-1", "approachable", (0.0, 1.0)),
+    ("discogs_effnet", "mood_happy-discogs-effnet-1", "happy", (0.0, 1.0)),
+    ("musicnn", "deam-msd-musicnn-2", "arousal", (1.0, 9.0)),
 )
 
-# Lazily populated on first use; keyed by model name.
-_embedding_extractor = None
+# Lazily populated on first use; keyed by embedding_key / model name.
+_embedding_extractors: dict[str, object] = {}
 _classifier_cache: dict[str, tuple] = {}
 
 
-def _prob_to_percent(prob: float) -> int:
-    """Convert a 0.0-1.0 model probability into a clamped 0-100 int percentage."""
-    return max(0, min(100, round(prob * 100)))
+def _value_to_percent(value: float, value_min: float = 0.0, value_max: float = 1.0) -> int:
+    """Normalize a raw model output to a clamped 0-100 int percentage given its value range."""
+    normalized = (value - value_min) / (value_max - value_min)
+    return max(0, min(100, round(normalized * 100)))
 
 
 def _load_metadata(model_name: str) -> dict:
@@ -53,16 +65,16 @@ def _load_metadata(model_name: str) -> dict:
         return json.load(f)
 
 
-def _get_embedding_extractor():
-    global _embedding_extractor  # noqa: PLW0603
-    if _embedding_extractor is None:
-        from essentia.standard import TensorflowPredictEffnetDiscogs  # noqa: PLC0415
+def _get_embedding_extractor(embedding_key: str):
+    """Return the (lazily loaded) embedding extractor algorithm for embedding_key."""
+    if embedding_key not in _embedding_extractors:
+        import essentia.standard as es  # noqa: PLC0415
 
-        graph_path = os.path.join(MODEL_DIR, f"{_EMBEDDING_MODEL_NAME}.pb")
-        _embedding_extractor = TensorflowPredictEffnetDiscogs(
-            graphFilename=graph_path, output=_EMBEDDING_OUTPUT_NODE,
-        )
-    return _embedding_extractor
+        model_name, algorithm_name, output_node = _EMBEDDING_CONFIGS[embedding_key]
+        algorithm_cls = getattr(es, algorithm_name)
+        graph_path = os.path.join(MODEL_DIR, f"{model_name}.pb")
+        _embedding_extractors[embedding_key] = algorithm_cls(graphFilename=graph_path, output=output_node)
+    return _embedding_extractors[embedding_key]
 
 
 def _get_classifier_head(model_name: str, positive_class: str):
@@ -91,8 +103,9 @@ def compute_audio_features(local_file_path: str) -> tuple[int, int, int] | None:
     """Analyze an audio file and return (approachability, happiness, energy) scores.
 
     Each score is a 0-100 int derived from the corresponding Essentia classifier
-    head's positive-class probability, averaged across all analysis patches in
-    the track.
+    head's positive-class value, averaged across all analysis patches in the
+    track. Energy comes from the DEAM arousal-valence regression model's
+    "arousal" output, on a separate MusiCNN embedding.
 
     Args:
         local_file_path: Absolute path to the downloaded/imported audio file.
@@ -106,19 +119,23 @@ def compute_audio_features(local_file_path: str) -> tuple[int, int, int] | None:
     try:
         from essentia.standard import MonoLoader  # noqa: PLC0415
 
-        # discogs-effnet family models expect 16kHz mono, per each model's own metadata.
+        # Both embedding families expect 16kHz mono, per each model's own metadata.
         audio = MonoLoader(filename=local_file_path, sampleRate=16000, resampleQuality=4)()
-        embeddings = _get_embedding_extractor()(audio)
 
+        embeddings_by_key: dict[str, object] = {}
         scores = []
-        for model_name, positive_class in _CLASSIFIER_HEADS:
+        for embedding_key, model_name, positive_class, (value_min, value_max) in _CLASSIFIER_HEADS:
+            if embedding_key not in embeddings_by_key:
+                embeddings_by_key[embedding_key] = _get_embedding_extractor(embedding_key)(audio)
+            embeddings = embeddings_by_key[embedding_key]
+
             algorithm, positive_index = _get_classifier_head(model_name, positive_class)
             predictions = algorithm(embeddings)
             # predictions is (num_patches, num_classes); average the positive-class
-            # probability across patches to get one track-level score.
-            positive_probs = [patch[positive_index] for patch in predictions]
-            avg_prob = sum(positive_probs) / len(positive_probs)
-            scores.append(_prob_to_percent(avg_prob))
+            # value across patches to get one track-level score.
+            positive_values = [patch[positive_index] for patch in predictions]
+            avg_value = sum(positive_values) / len(positive_values)
+            scores.append(_value_to_percent(avg_value, value_min, value_max))
 
         approachability, happiness, energy = scores
         return (approachability, happiness, energy)

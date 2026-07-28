@@ -15,7 +15,7 @@ import pytest
 # Ensure APP_ENV is set before importing project modules that read it at import time.
 os.environ.setdefault("APP_ENV", "test")
 
-from scripts.audio_features import _prob_to_percent
+from scripts.audio_features import _value_to_percent
 from scripts.database_management import TrackData, TrackDB
 
 # ---------------------------------------------------------------------------
@@ -122,10 +122,10 @@ class TestAudioFeaturesReadWrite:
 
 
 # ---------------------------------------------------------------------------
-# Tests - _prob_to_percent
+# Tests - _value_to_percent
 # ---------------------------------------------------------------------------
 
-class TestProbToPercent:
+class TestValueToPercent:
     @pytest.mark.parametrize(("prob", "expected"), [
         (0.0, 0),
         (1.0, 100),
@@ -133,9 +133,26 @@ class TestProbToPercent:
         (0.821, 82),
         (0.834, 83),
     ])
-    def test_converts_and_rounds(self, prob, expected):
-        assert _prob_to_percent(prob) == expected
+    def test_default_range_converts_and_rounds(self, prob, expected):
+        assert _value_to_percent(prob) == expected
 
-    def test_clamps_out_of_range_values(self):
-        assert _prob_to_percent(-0.1) == 0
-        assert _prob_to_percent(1.1) == 100
+    def test_default_range_clamps_out_of_range_values(self):
+        assert _value_to_percent(-0.1) == 0
+        assert _value_to_percent(1.1) == 100
+
+    @pytest.mark.parametrize(("value", "expected"), [
+        (1.0, 0),
+        (9.0, 100),
+        (5.0, 50),
+        (3.3587, 29),
+    ])
+    def test_custom_range_normalizes_deam_arousal_scale(self, value, expected):
+        # DEAM arousal-valence models are trained against a [1, 9] target scale,
+        # not a 0.0-1.0 probability - this is the exact bug that a bare
+        # _value_to_percent(value) call (implicit 0.0-1.0 range) would hide by
+        # silently clamping every real score to 100.
+        assert _value_to_percent(value, value_min=1.0, value_max=9.0) == expected
+
+    def test_custom_range_clamps_out_of_range_values(self):
+        assert _value_to_percent(0.5, value_min=1.0, value_max=9.0) == 0
+        assert _value_to_percent(9.5, value_min=1.0, value_max=9.0) == 100
