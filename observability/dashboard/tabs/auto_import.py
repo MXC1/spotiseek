@@ -358,6 +358,106 @@ def auto_import_track(track_id: str, source_file: str, track_info: Dict) -> Tupl
     )
 
 
+def _get_browse_roots() -> List[str]:
+    """Get filesystem roots available for browsing (platform-aware)."""
+    if os.name == 'nt':
+        import string
+        roots = [f"{d}:\\" for d in string.ascii_uppercase if os.path.exists(f"{d}:\\")]
+        if roots:
+            return roots
+    return ["/"]
+
+
+def _default_browse_dir(roots: List[str]) -> str:
+    """Pick a sensible starting directory for the browser."""
+    if IS_DOCKER:
+        for candidate in ("/mnt", "/app"):
+            if os.path.isdir(candidate):
+                return candidate
+    return roots[0]
+
+
+def _list_subdirectories(path: str) -> List[str]:
+    """List immediate subdirectory names of path, sorted case-insensitively."""
+    try:
+        entries = os.scandir(path)
+    except OSError:
+        return []
+    dirs = []
+    with entries:
+        for entry in entries:
+            try:
+                if entry.is_dir():
+                    dirs.append(entry.name)
+            except OSError:
+                continue
+    return sorted(dirs, key=str.lower)
+
+
+def render_directory_browser() -> None:
+    """
+    Render an in-page directory browser inside an expander.
+
+    Lets the user click through subdirectories instead of typing a full path.
+    On selection, writes the chosen path into the `auto_import_source_dir`
+    text input's session state (must be called before that widget is created).
+    """
+    roots = _get_browse_roots()
+
+    if "auto_import_browse_dir" not in st.session_state:
+        st.session_state["auto_import_browse_dir"] = _default_browse_dir(roots)
+
+    current_dir = st.session_state["auto_import_browse_dir"]
+    if not os.path.isdir(current_dir):
+        current_dir = _default_browse_dir(roots)
+        st.session_state["auto_import_browse_dir"] = current_dir
+
+    with st.expander("📂 Browse for a directory", expanded=False):
+        if len(roots) > 1:
+            root_cols = st.columns([2, 1])
+            with root_cols[0]:
+                root_choice = st.selectbox("Drive:", roots, key="auto_import_browse_root")
+            with root_cols[1]:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("Go to drive", key="auto_import_go_root"):
+                    st.session_state["auto_import_browse_dir"] = root_choice
+                    st.rerun()
+
+        st.markdown("**Current location:**")
+        st.code(current_dir, language=None)
+
+        nav_col1, nav_col2 = st.columns([1, 4])
+        with nav_col1:
+            parent_dir = os.path.dirname(current_dir.rstrip("\\/")) or current_dir
+            can_go_up = parent_dir != current_dir and os.path.isdir(parent_dir)
+            if st.button("⬆️ Up", key="auto_import_go_up", disabled=not can_go_up, width="stretch"):
+                st.session_state["auto_import_browse_dir"] = parent_dir
+                st.rerun()
+        with nav_col2:
+            if st.button("✅ Use this directory", key="auto_import_use_dir", type="primary", width="stretch"):
+                st.session_state["auto_import_source_dir"] = current_dir
+
+        name_filter = st.text_input(
+            "Filter subdirectories:", key="auto_import_browse_filter",
+            placeholder="Start typing to narrow the list..."
+        )
+
+        subdirs = _list_subdirectories(current_dir)
+        if name_filter:
+            subdirs = [d for d in subdirs if name_filter.lower() in d.lower()]
+
+        if not subdirs:
+            st.caption("No subdirectories here.")
+        else:
+            MAX_SHOWN = 200
+            suffix = f" (showing first {MAX_SHOWN})" if len(subdirs) > MAX_SHOWN else ""
+            st.caption(f"{len(subdirs)} subdirectories{suffix}:")
+            for name in subdirs[:MAX_SHOWN]:
+                if st.button(f"📁 {name}", key=f"auto_import_dir_btn::{current_dir}::{name}", width="stretch"):
+                    st.session_state["auto_import_browse_dir"] = os.path.join(current_dir, name)
+                    st.rerun()
+
+
 def get_score_color(score: float) -> str:
     """Get color for score display based on match quality."""
     if score >= 90:
@@ -425,10 +525,12 @@ def render_auto_import_section():
     # Directory input
     st.markdown("### 📁 Source Directory")
     if IS_DOCKER:
-        st.caption("Enter the **mounted path** inside the container (e.g., `/mnt/music/...`).")
+        st.caption("Enter the **mounted path** inside the container (e.g., `/mnt/music/...`), or browse below.")
     else:
-        st.caption("Enter the path to a directory containing audio files to match.")
-    
+        st.caption("Enter the path to a directory containing audio files to match, or browse below.")
+
+    render_directory_browser()
+
     source_dir = st.text_input(
         "Directory path:",
         placeholder="/mnt/music/folder" if IS_DOCKER else "e.g., E:\\Music\\MyFolder",
