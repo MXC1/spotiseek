@@ -347,10 +347,10 @@ def get_tracks_from_playlist(  # noqa: PLR0915
                 "Fetched stub track details from API.",
                 {"requested": len(stub_track_ids), "received": len(api_tracks)},
             )
-            if len(api_tracks) == 0:
+            if len(api_tracks) < len(stub_track_ids):
                 raise RuntimeError(
-                    f"SoundCloud API returned 0 of {len(stub_track_ids)} stub tracks "
-                    f"for playlist '{playlist_name}'. Aborting to prevent data loss."
+                    f"SoundCloud API returned only {len(api_tracks)} of {len(stub_track_ids)} "
+                    f"stub tracks for playlist '{playlist_name}'. Aborting to prevent data loss."
                 )
         else:
             raise RuntimeError(
