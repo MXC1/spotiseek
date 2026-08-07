@@ -403,19 +403,22 @@ def render_auto_import_section():
     # Show Docker warning if applicable
     if IS_DOCKER:
         with st.expander("📖 How to mount a directory in Docker", expanded=False):
-            st.markdown("""            
+            st.markdown("""
             **Add a volume mount to docker-compose.yml**
-            
-            Add your music directory to the `dashboard` service volumes:
+
+            Add your music directory to the `dashboard` service volumes. On Windows,
+            `invoke up` runs docker-compose inside WSL, so use the WSL-mounted-drive
+            path (`/mnt/<lowercase-drive-letter>/...`) — a raw Windows path like
+            `E:/Folder` breaks volume parsing:
             ```yaml
             dashboard:
               volumes:
                 # ... existing volumes ...
-                - E:/Folder:/mnt/music:ro  # Mount your music folder
+                - /mnt/e/Folder:/mnt/music:ro  # Mount your music folder
             ```
-            
+
             Then use `/mnt/music` as the path.
-            
+
             After editing, run `invoke up` to rebuild.
             """)
     

@@ -110,13 +110,13 @@ Since the dashboard runs inside Docker, you must mount your music directory into
 dashboard:
   volumes:
     # ... existing volumes ...
-    - E:/Music:/mnt/music:ro  # Add your music directory (read-only)
+    - /mnt/e/Music:/mnt/music:ro  # Add your music directory (read-only)
 ```
 
-> **Path Format**: Use forward slashes and the format `HOST_PATH:/CONTAINER_PATH:ro`
-> 
+> **Path Format**: `invoke up` runs `docker-compose` inside WSL on Windows hosts (see `wrap_docker_cmd` in `tasks.py`), so the host path is parsed by WSL, not Windows. A raw Windows path such as `E:/Music:/mnt/music:ro` fails with `invalid volume specification` — the drive-letter colon collides with docker's `host:container:mode` separator.
+>
 > Examples:
-> - Windows: `E:/Music/MyLibrary:/mnt/music:ro`
+> - Windows: use the WSL-mounted-drive path — `/mnt/e/Music/MyLibrary:/mnt/music:ro` (WSL2 auto-mounts fixed drives under `/mnt/<lowercase-drive-letter>`)
 > - Linux/Mac: `/home/user/Music:/mnt/music:ro`
 
 After editing, restart the services:
