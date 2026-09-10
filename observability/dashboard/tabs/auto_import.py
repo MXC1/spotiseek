@@ -148,7 +148,7 @@ def scan_directory_for_audio_files(directory: str) -> List[Dict]:
                 
                 # Extract bitrate (need non-easy mode for this)
                 audio_full = MutagenFile(file_path, easy=False)
-                if audio_full and hasattr(audio_full.info, 'bitrate') and audio_full.info.bitrate:
+                if audio_full is not None and hasattr(audio_full.info, 'bitrate') and audio_full.info.bitrate:
                     file_info['bitrate'] = int(audio_full.info.bitrate / 1000)  # Convert to kbps
                 
                 # Check quality

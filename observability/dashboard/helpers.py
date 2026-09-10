@@ -129,7 +129,7 @@ def extract_metadata_from_file(file_path: str) -> Dict[str, Optional[any]]:
         
         # Extract bitrate using mutagen
         audio = MutagenFile(file_path, easy=False)
-        if audio and hasattr(audio.info, 'bitrate') and audio.info.bitrate:
+        if audio is not None and hasattr(audio.info, 'bitrate') and audio.info.bitrate:
             metadata['bitrate'] = int(audio.info.bitrate / 1000)  # Convert to kbps
         
         write_log.debug("IMPORT_METADATA_EXTRACT", "Extracted metadata from file.", 
