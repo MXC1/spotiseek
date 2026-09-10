@@ -40,6 +40,52 @@ Required only if importing Spotify playlists:
 
 ---
 
+## Playlists CSV format
+
+Playlists are listed in `input_playlists/playlists_{APP_ENV}.csv`, one URL per line
+(Spotify and SoundCloud URLs can be mixed). Text after a `#` on a URL line is a
+human annotation and is ignored — playlist names come from the source platform.
+
+### Folders
+
+A **comment-only line** (starts with `#`) whose text is non-empty is a *folder
+heading*. Every playlist listed after it — until the next heading or the end of the
+file — is placed in that folder in the exported iTunes library, which Rekordbox
+shows as a folder in its playlist tree. Playlists listed *before* the first heading
+sit at the top level.
+
+```csv
+https://open.spotify.com/playlist/aaa        # top-level, no folder
+https://soundcloud.com/user/sets/bbb
+
+# Warmup
+https://open.spotify.com/playlist/ccc        # in "Warmup"
+https://open.spotify.com/playlist/ddd        # in "Warmup"
+
+# Peak Time
+https://open.spotify.com/playlist/ccc        # ALSO in "Peak Time" — list it again
+https://soundcloud.com/user/sets/eee
+```
+
+- The folder name is the **verbatim** text after the `#` (`# Warmup` → a folder
+  named `Warmup`). A bare `#` on its own is just a separator.
+- **Multiple folders:** list a playlist's URL again under each heading it belongs
+  to. It can also appear both at the top level and inside folders.
+- **Same name = same folder:** two headings with identical text add to one folder.
+- Blank lines are cosmetic and do not end a folder.
+- Renaming a heading is treated as a new folder (the old one disappears from the
+  export); the library mirror re-syncs this on its next import. Renaming a playlist
+  on Spotify/SoundCloud is safe — playlists are tracked by URL.
+
+Folders are flat (no folder-inside-a-folder) — see
+[docs/adr/0001-playlist-folders-in-itunes-xml.md](adr/0001-playlist-folders-in-itunes-xml.md).
+
+> **Rekordbox:** load the library through **Sync Manager**, not the default iTunes
+> tree view — the plain view has a bug where playlists inside a folder render
+> empty. See [docs/TROUBLESHOOTING.md](TROUBLESHOOTING.md#playlist-folders-show-in-rekordbox-but-appear-empty).
+
+---
+
 ## Remuxing Configuration
 
 | Variable | Default | Description |

@@ -34,6 +34,7 @@ import re
 import subprocess
 import sys
 from datetime import datetime
+from typing import NamedTuple
 
 from dotenv import load_dotenv
 
@@ -163,48 +164,89 @@ track_db = TrackDB()
 
 # Playlist Processing Functions
 
-def read_playlists_from_csv(csv_path: str) -> list[str]:
-    """Read playlist URLs from a CSV file.
+class PlaylistEntry(NamedTuple):
+    """One playlist occurrence in the Playlists CSV.
 
-    Each row should contain one playlist URL. Empty rows and comment lines (starting with #) are skipped.
-    Inline comments after URLs (using #) are also supported.
+    ``folder`` is the name of the folder this occurrence sits under, or ``""``
+    for a root occurrence (listed before the first folder heading). The same
+    URL may appear in several entries — once per folder it belongs to, plus
+    optionally once at root. ``csv_sequence`` is the 0-based position of this
+    occurrence among all playlist lines in the file; it preserves CSV order
+    for downstream ordering (XML export, dashboard).
+    """
+
+    url: str
+    folder: str
+    csv_sequence: int
+
+
+def read_playlist_entries_from_csv(csv_path: str) -> list[PlaylistEntry]:
+    """Parse the Playlists CSV into ordered playlist occurrences with folders.
+
+    Parsing rules:
+    - A comment-only line (starts with ``#``) whose text after the ``#`` is
+      non-empty is a *folder heading*: it opens a folder scope that runs until
+      the next heading or end of file. Blank lines do not close it.
+    - A bare ``#`` (nothing after it) is an ignored separator and leaves the
+      current folder scope unchanged.
+    - Any other non-empty line is a playlist URL (text after an inline ``#`` is
+      a decorative annotation and is stripped). It belongs to the folder whose
+      scope is currently open, or to root (``""``) if no heading has appeared.
+    - Two headings with the same text refer to the same folder; the later
+      block's playlists are appended to it.
 
     Args:
-        csv_path: Path to CSV file containing playlist URLs
+        csv_path: Path to the Playlists CSV file.
 
     Returns:
-        List of playlist URL strings
+        Playlist occurrences in file order. The same URL can occur multiple
+        times under different folders.
 
     Raises:
-        FileNotFoundError: If CSV file doesn't exist
-
-    Example:
-        >>> urls = read_playlists_from_csv("playlists/test/playlists_test.csv")
-        >>> len(urls)
-        5
+        FileNotFoundError: If the CSV file doesn't exist.
 
     """
     write_log.info("PLAYLISTS_READ", "Reading playlists from CSV.", {"csv_path": csv_path})
 
-    playlists = []
+    entries: list[PlaylistEntry] = []
+    current_folder = ""
     with open(csv_path, newline="", encoding="utf-8") as csvfile:
         for raw_line in csvfile:
-            # Strip whitespace
             stripped = raw_line.strip()
-
-            # Skip empty lines or lines starting with #
-            if not stripped or stripped.startswith("#"):
+            if not stripped:
                 continue
 
-            # Remove inline comments (text after #)
+            if stripped.startswith("#"):
+                heading = stripped[1:].strip()
+                if heading:
+                    current_folder = heading
+                continue
+
             url = stripped.split("#")[0].strip()
-
-            # Add URL if it's not empty after removing comments
             if url:
-                playlists.append(url)
+                entries.append(PlaylistEntry(url, current_folder, len(entries)))
 
-    write_log.info("PLAYLISTS_READ_SUCCESS", "Successfully read playlists.", {"count": len(playlists)})
-    return playlists
+    write_log.info(
+        "PLAYLISTS_READ_SUCCESS",
+        "Successfully read playlists.",
+        {"count": len(entries), "folders": len({e.folder for e in entries if e.folder})},
+    )
+    return entries
+
+
+def read_playlists_from_csv(csv_path: str) -> list[str]:
+    """Return unique playlist URLs from the CSV in first-appearance order.
+
+    Thin wrapper over :func:`read_playlist_entries_from_csv` for callers that
+    only need the set of playlists, not their folder placement.
+    """
+    seen: set[str] = set()
+    urls: list[str] = []
+    for entry in read_playlist_entries_from_csv(csv_path):
+        if entry.url not in seen:
+            seen.add(entry.url)
+            urls.append(entry.url)
+    return urls
 
 
 def sanitize_playlist_name(playlist_name: str) -> str:
@@ -1287,11 +1329,11 @@ def task_scrape_playlists() -> bool:
     write_log.info("TASK_SCRAPE_START", "Starting playlist scrape task.")
 
     try:
-        # Load playlists from CSV
+        # Load playlist entries (with folder placement) from CSV
         try:
-            playlists = read_playlists_from_csv(config.playlists_csv)
+            entries = read_playlist_entries_from_csv(config.playlists_csv)
             write_log.info("PLAYLISTS_LOADED", "Loaded playlists from CSV.",
-                          {"count": len(playlists)})
+                          {"count": len(entries)})
         except FileNotFoundError:
             fallback_csv = os.path.abspath(os.path.join(
                 os.path.dirname(os.path.dirname(__file__)),
@@ -1300,10 +1342,32 @@ def task_scrape_playlists() -> bool:
             write_log.warn("PLAYLISTS_CSV_MISSING",
                           "Primary playlists CSV not found, falling back to default.",
                           {"primary_csv": config.playlists_csv, "fallback_csv": fallback_csv})
-            playlists = read_playlists_from_csv(fallback_csv)
+            entries = read_playlist_entries_from_csv(fallback_csv)
             write_log.info("PLAYLISTS_LOADED_FALLBACK",
                           "Loaded playlists from fallback CSV.",
-                          {"count": len(playlists)})
+                          {"count": len(entries)})
+
+        # Unique playlist URLs in first-appearance order (for processing/pruning)
+        playlists: list[str] = []
+        seen_urls: set[str] = set()
+        for entry in entries:
+            if entry.url not in seen_urls:
+                seen_urls.add(entry.url)
+                playlists.append(entry.url)
+
+        # Rebuild folder memberships from the CSV. Folders are fully derived
+        # from the file, so wiping and re-inserting keeps membership correct
+        # after playlists are moved, merged, or removed between headings.
+        try:
+            track_db.replace_playlist_folder_memberships(
+                [(e.url, e.folder, e.csv_sequence) for e in entries],
+            )
+        except Exception as e:
+            write_log.error(
+                "PLAYLIST_FOLDERS_SET_FAIL",
+                "Failed to rebuild playlist folder memberships from CSV.",
+                {"error": str(e)},
+            )
 
         # Persist CSV order into database for downstream ordering (XML, dashboard)
         try:

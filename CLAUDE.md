@@ -69,7 +69,7 @@ Each service mounts `./output`, `./observability`, and the relevant `slskd_docke
 
 ### Data Flow
 
-1. Playlist URLs in `input_playlists/playlists_{APP_ENV}.csv` (Spotify and SoundCloud URLs can be mixed in one file) →
+1. Playlist URLs in `input_playlists/playlists_{APP_ENV}.csv` (Spotify and SoundCloud URLs can be mixed; `# Heading` lines group the playlists below them into folders — see `docs/CONFIGURATION.md`) →
 2. `playlist_scraper.get_tracks_from_playlist()` → track metadata →
 3. `TrackDB` (SQLite at `output/{APP_ENV}/database_{APP_ENV}.db`) →
 4. `soulseek_client` searches/downloads via slskd → files land in `slskd_docker_data/{APP_ENV}/downloads/` →
@@ -78,6 +78,8 @@ Each service mounts `./output`, `./observability`, and the relevant `slskd_docke
 7. `xml_exporter` regenerates `output/{APP_ENV}/library_{APP_ENV}.xml` for Rekordbox/iTunes import.
 
 Playlist pruning is deferred/two-phase (see `_prune_removed_tracks_for_playlist`, `_prune_missing_playlists`, `_cleanup_orphaned_tracks` in `workflow.py` and `tests/test_playlist_prune.py`): tracks removed from one playlist are only collected as *orphan candidates*, and only deleted from the DB/disk after all playlists have been reprocessed. This prevents mass re-downloads when playlists are split, merged, or reordered in the CSV.
+
+Folder membership (`playlist_folder_memberships` table) is fully derived from the CSV and rebuilt from scratch on every `task_scrape_playlists` run (`folder_name = ''` means top level). `xml_exporter` reads it to emit iTunes folder `<dict>`s (`Folder`/`Parent Persistent ID`); a playlist in N folders becomes N playlist entries with deterministic persistent IDs. Folders are XML/Rekordbox-only — m3u8 files and the dashboard stay flat. See `CONTEXT.md` for the glossary and `docs/adr/0001-playlist-folders-in-itunes-xml.md` for the rationale.
 
 ### Environment Isolation (`APP_ENV`)
 

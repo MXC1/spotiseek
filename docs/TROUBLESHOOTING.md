@@ -128,6 +128,23 @@ Structured JSON logs are stored in `observability/logs/{APP_ENV}/`.
 
 ---
 
+### Playlist folders show in Rekordbox but appear empty
+
+**Cause**: Rekordbox's default iTunes-library view (the "iTunes" node in the tree)
+has a long-standing bug where playlists *nested inside a folder* don't render —
+the folder appears but looks empty. This is a Rekordbox limitation, not a problem
+with the exported XML.
+
+**Solution**: Use Rekordbox's **Sync Manager** instead of the plain iTunes tree
+view. In `Preferences > Advanced > Database > rekordbox xml` / Sync Manager,
+enable it for the iTunes library (and the "Overwrite and update iTunes track
+information when synchronized with Sync Manager" option), then open Sync Manager
+and sync. Folders and their playlists then render correctly.
+
+See `docs/adr/0001-playlist-folders-in-itunes-xml.md` for background.
+
+---
+
 ## Resetting an Environment
 
 To completely reset an environment (⚠️ **DESTRUCTIVE**):
@@ -163,6 +180,7 @@ sqlite3 output/prod/database_prod.db
 | `playlists` | Imported playlist metadata |
 | `tracks` | Track information and download status |
 | `playlist_tracks` | Many-to-many playlist/track relationships |
+| `playlist_folder_memberships` | Which folder(s) each playlist sits under (rebuilt from the CSV each scrape) |
 | `task_runs` | Task execution history |
 | `task_state` | Current task scheduling state |
 
