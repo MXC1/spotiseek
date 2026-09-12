@@ -171,8 +171,9 @@ def _process_track_item(
                       {"index": idx, "track_name": track.get("name")})
         return None
 
-    # Concatenate and clean artist names (multiple artists separated by spaces)
-    artists = " ".join([clean_name(artist["name"]) for artist in track.get("artists", [])])
+    # Concatenate and clean artist names (multiple artists separated by commas,
+    # so multi-artist search text stays legible instead of running names together)
+    artists = ", ".join([clean_name(artist["name"]) for artist in track.get("artists", [])])
     track_name = clean_name(track.get("name", ""))
 
     # Get genre from the first artist that has genres
@@ -201,7 +202,7 @@ def get_tracks_from_playlist(playlist_url: str) -> tuple[str, list[tuple[str, st
             - playlist_name (str): The name of the playlist
             - tracks (List[Tuple]): List of (track_id, artists, track_name, genre) tuples.
               Track ID is the Spotify track ID.
-              Artist names are space-concatenated and cleaned.
+              Artist names are comma-concatenated and cleaned.
               Genre is the first genre from the first artist, or None.
 
     Raises:

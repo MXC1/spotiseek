@@ -159,6 +159,39 @@ EXCLUDED_VERSION_KEYWORDS: tuple[str, ...] = (
     "flip", "extended", "rework", "re-edit", "dub", "radio",
 )
 
+# "Original Mix" / "Radio Mix" are standard EDM naming for the default,
+# non-remixed release - not an alternate version - so the bare "mix" keyword
+# shouldn't fire on them (it still fires on "Club Mix", "VIP Mix", etc.).
+_MIX_KEYWORD_EXEMPT_PHRASES: tuple[str, ...] = ("original mix", "radio mix")
+
+
+def contains_excluded_version_keyword(text: str) -> bool:
+    """Check whether text contains any EXCLUDED_VERSION_KEYWORDS.
+
+    The "mix" keyword is ignored when it only appears as part of "original mix"
+    or "radio mix", since those denote the default release rather than an
+    alternate version.
+
+    Args:
+        text: Text to check (filename or search text)
+
+    Returns:
+        True if text contains an excluded-version keyword
+
+    """
+    text_lower = text.lower()
+    mix_stripped = text_lower
+    for phrase in _MIX_KEYWORD_EXEMPT_PHRASES:
+        mix_stripped = mix_stripped.replace(phrase, "")
+
+    for keyword in EXCLUDED_VERSION_KEYWORDS:
+        if keyword == "mix":
+            if "mix" in mix_stripped:
+                return True
+        elif keyword in text_lower:
+            return True
+    return False
+
 
 # Health Check Functions
 
@@ -436,8 +469,7 @@ def is_original_version(filename: str, allow_alternatives: bool) -> bool:
     if allow_alternatives:
         return True
 
-    filename_lower = filename.lower()
-    return all(keyword not in filename_lower for keyword in EXCLUDED_VERSION_KEYWORDS)
+    return not contains_excluded_version_keyword(filename)
 
 
 def select_best_file(
@@ -466,8 +498,7 @@ def select_best_file(
 
     """
     # Determine if user is explicitly searching for alternatives
-    search_text_lower = search_text.lower()
-    allow_alternatives = any(keyword in search_text_lower for keyword in EXCLUDED_VERSION_KEYWORDS)
+    allow_alternatives = contains_excluded_version_keyword(search_text)
 
     write_log.debug("SLSKD_FILE_SELECTION_START", "Starting file selection process.",
                    {"response_count": len(responses), "allow_alternatives": allow_alternatives,
