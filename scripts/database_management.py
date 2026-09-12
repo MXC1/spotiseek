@@ -271,6 +271,19 @@ class TrackDB:
             )
         """)
 
+        # Folder memberships: which folder(s) each playlist sits under in the
+        # exported iTunes tree. folder_name = '' means the playlist is at the
+        # root. A playlist can have several rows (one per folder + optionally
+        # root). Fully derived from the Playlists CSV and rebuilt on each scrape.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS playlist_folder_memberships (
+                playlist_url TEXT NOT NULL,
+                folder_name TEXT NOT NULL,
+                csv_sequence INTEGER NOT NULL,
+                PRIMARY KEY (playlist_url, folder_name)
+            )
+        """)
+
         # Blacklist table: stores blacklisted username + slskd_file_name combinations
         # Migration: Handle old blacklist schema (slskd_uuid -> username + slskd_file_name)
         cursor.execute("PRAGMA table_info(slskd_blacklist)")
@@ -306,6 +319,7 @@ class TrackDB:
             ("idx_tracks_download_uuid", "tracks", "slskd_download_uuid"),
             ("idx_playlist_tracks_playlist_url", "playlist_tracks", "playlist_url"),
             ("idx_playlist_tracks_track_id", "playlist_tracks", "track_id"),
+            ("idx_pfm_folder_name", "playlist_folder_memberships", "folder_name"),
         ]
 
         for index_name, table_name, column_name in indexes:
@@ -507,6 +521,46 @@ class TrackDB:
             (display_order, playlist_url),
         )
         self.conn.commit()
+
+    def replace_playlist_folder_memberships(
+        self, memberships: list[tuple[str, str, int]],
+    ) -> None:
+        """Replace every playlist -> folder membership row with the given set.
+
+        Args:
+            memberships: ``(playlist_url, folder_name, csv_sequence)`` tuples.
+                ``folder_name == ""`` places the playlist at the root of the
+                exported tree. Memberships are fully derived from the Playlists
+                CSV, so the whole table is rebuilt on every call. Repeated
+                ``(playlist_url, folder_name)`` pairs collapse to the first seen.
+
+        """
+        write_log.info(
+            "PLAYLIST_FOLDERS_REPLACE",
+            "Rebuilding playlist folder memberships.",
+            {"count": len(memberships)},
+        )
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM playlist_folder_memberships")
+        cursor.executemany(
+            "INSERT OR IGNORE INTO playlist_folder_memberships "
+            "(playlist_url, folder_name, csv_sequence) VALUES (?, ?, ?)",
+            memberships,
+        )
+        self.conn.commit()
+
+    def get_playlist_folder_memberships(self) -> list[tuple[str, str, int]]:
+        """Return ``(playlist_url, folder_name, csv_sequence)`` rows in CSV order.
+
+        ``folder_name == ""`` marks a root-level occurrence. Ordered by
+        ``csv_sequence`` so callers can reproduce the CSV's playlist order.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT playlist_url, folder_name, csv_sequence FROM playlist_folder_memberships "
+            "ORDER BY csv_sequence, folder_name, playlist_url",
+        )
+        return cursor.fetchall()
 
     def link_track_to_playlist(self, track_id: str, playlist_url: str) -> None:
         """Create an association between a track and a playlist.
@@ -1020,6 +1074,7 @@ class TrackDB:
         )
         cursor = self.conn.cursor()
         cursor.execute("DELETE FROM playlist_tracks WHERE playlist_url = ?", (playlist_url,))
+        cursor.execute("DELETE FROM playlist_folder_memberships WHERE playlist_url = ?", (playlist_url,))
         cursor.execute("DELETE FROM playlists WHERE playlist_url = ?", (playlist_url,))
         self.conn.commit()
 

@@ -42,6 +42,9 @@ https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M
 https://soundcloud.com/courtjester-uk/sets/donk-and-bits
 ```
 
+Group playlists into Rekordbox folders with `# Heading` lines — see
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md#playlists-csv-format).
+
 ### 3. Start Services
 
 ```bash

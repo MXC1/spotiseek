@@ -28,9 +28,11 @@ Public API:
 - extract_file_metadata(): Extract metadata from an audio file
 """
 
+import hashlib
 import io
 import os
 import xml.etree.ElementTree as ET
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 from urllib.parse import quote
@@ -349,17 +351,7 @@ def export_itunes_xml(xml_path: str, music_folder_url: str | None = None) -> Non
             )
 
     # Build playlists array
-    ET.SubElement(dict_root, "key").text = "Playlists"
-    playlists_array = ET.SubElement(dict_root, "array")
-
-    for playlist_idx, (playlist_url, playlist_name) in enumerate(playlists, 1):
-        _add_playlist_to_xml(
-            playlists_array,
-            playlist_idx,
-            playlist_name or playlist_url,
-            playlist_tracks.get(playlist_url, []),
-            source_id_to_track_id,
-        )
+    _build_playlists_array(dict_root, playlists, playlist_tracks, source_id_to_track_id, db)
 
     # Write XML to file with proper formatting
     tree = ET.ElementTree(plist)
@@ -451,17 +443,139 @@ def _add_track_to_xml(  # noqa: PLR0913
     _add_xml_key_value(track_dict, "Location", format_file_location_url(local_file_path), "string")
 
 
-def _add_playlist_to_xml(playlists_array: ET.Element, playlist_id: int,
-                        playlist_name: str, track_ids: list,
-                        source_id_to_track_id: dict) -> None:
-    """Add a playlist entry to the playlists array."""
+def _build_playlists_array(
+    dict_root: ET.Element,
+    playlists: list[tuple[str, str]],
+    playlist_tracks: dict[str, list],
+    source_id_to_track_id: dict,
+    db: TrackDB,
+) -> None:
+    """Append the ``Playlists`` key + array to the library dict.
+
+    Uses folder memberships when present; falls back to a flat list (one entry
+    per playlist, no folders) when none are recorded yet.
+    """
+    ET.SubElement(dict_root, "key").text = "Playlists"
+    playlists_array = ET.SubElement(dict_root, "array")
+
+    playlist_name_by_url = {url: (name or url) for url, name in playlists}
+    memberships = db.get_playlist_folder_memberships()
+
+    if memberships:
+        _add_foldered_playlists_to_xml(
+            playlists_array, memberships, playlist_name_by_url,
+            playlist_tracks, source_id_to_track_id,
+        )
+        return
+
+    # No folder data yet (e.g. DB upgraded but not re-scraped) — flat export.
+    for playlist_idx, (playlist_url, playlist_name) in enumerate(playlists, 1):
+        _add_playlist_to_xml(
+            playlists_array, playlist_idx, playlist_name or playlist_url,
+            playlist_tracks.get(playlist_url, []), source_id_to_track_id,
+            persistent_id=_persistent_id("playlist", "", playlist_url),
+        )
+
+
+def _persistent_id(*parts: str) -> str:
+    """Derive a stable 16-hex-char persistent ID from the given parts.
+
+    iTunes persistent IDs are 64-bit hex strings. Deriving them deterministically
+    (rather than from an export-time counter) keeps a folder's or playlist's
+    identity stable across re-exports as long as the CSV is unchanged, so the
+    consuming library mirror doesn't churn.
+    """
+    joined = "\x00".join(parts)
+    return hashlib.sha1(joined.encode("utf-8")).hexdigest()[:16].upper()
+
+
+def _union_track_ids(track_id_lists: Iterable[list]) -> list:
+    """Flatten track-id lists into one list, first occurrence wins, order kept."""
+    seen: set = set()
+    union: list = []
+    for track_ids in track_id_lists:
+        for track_id in track_ids:
+            if track_id not in seen:
+                seen.add(track_id)
+                union.append(track_id)
+    return union
+
+
+def _add_foldered_playlists_to_xml(
+    playlists_array: ET.Element,
+    memberships: list[tuple[str, str, int]],
+    playlist_name_by_url: dict[str, str],
+    playlist_tracks: dict[str, list],
+    source_id_to_track_id: dict,
+) -> None:
+    """Emit root playlists, then each folder followed by its member playlists.
+
+    A playlist that belongs to several folders is emitted once per folder, each
+    copy with its own persistent ID and ``Parent Persistent ID``. The iTunes
+    format has a single-valued parent, so duplicate entries are the only way to
+    place one playlist under more than one folder. Folders are ordered by the
+    CSV position of their first member; members keep CSV order within a folder.
+    """
+    known = set(playlist_name_by_url)
+    root_urls = [url for url, folder, _ in memberships if folder == "" and url in known]
+
+    folder_members: dict[str, list[str]] = {}
+    folder_first_seq: dict[str, int] = {}
+    for url, folder, seq in memberships:
+        if folder == "" or url not in known:
+            continue
+        folder_members.setdefault(folder, []).append(url)
+        folder_first_seq.setdefault(folder, seq)
+
+    next_id = 1
+
+    for url in root_urls:
+        _add_playlist_to_xml(
+            playlists_array, next_id, playlist_name_by_url[url],
+            playlist_tracks.get(url, []), source_id_to_track_id,
+            persistent_id=_persistent_id("playlist", "", url),
+        )
+        next_id += 1
+
+    for folder in sorted(folder_members, key=lambda f: folder_first_seq[f]):
+        member_urls = folder_members[folder]
+        folder_pid = _persistent_id("folder", folder)
+        _add_playlist_to_xml(
+            playlists_array, next_id, folder,
+            _union_track_ids(playlist_tracks.get(u, []) for u in member_urls),
+            source_id_to_track_id, persistent_id=folder_pid, is_folder=True,
+        )
+        next_id += 1
+        for url in member_urls:
+            _add_playlist_to_xml(
+                playlists_array, next_id, playlist_name_by_url[url],
+                playlist_tracks.get(url, []), source_id_to_track_id,
+                persistent_id=_persistent_id("playlist", folder, url),
+                parent_persistent_id=folder_pid,
+            )
+            next_id += 1
+
+
+def _add_playlist_to_xml(  # noqa: PLR0913
+    playlists_array: ET.Element, playlist_id: int,
+    playlist_name: str, track_ids: list,
+    source_id_to_track_id: dict, *, persistent_id: str | None = None,
+    parent_persistent_id: str | None = None, is_folder: bool = False,
+) -> None:
+    """Add a playlist or folder entry to the playlists array."""
     playlist_dict = ET.SubElement(playlists_array, "dict")
 
     _add_xml_key_value(playlist_dict, "Playlist ID", str(playlist_id), "integer")
 
-    # Generate persistent ID
-    persistent_id = f"PL{playlist_id:014X}"
+    if persistent_id is None:
+        persistent_id = f"PL{playlist_id:014X}"
     _add_xml_key_value(playlist_dict, "Playlist Persistent ID", persistent_id, "string")
+
+    if parent_persistent_id is not None:
+        _add_xml_key_value(playlist_dict, "Parent Persistent ID", parent_persistent_id, "string")
+
+    if is_folder:
+        _add_xml_key_value(playlist_dict, "Folder", "", "true")
 
     _add_xml_key_value(playlist_dict, "All Items", "", "true")
     _add_xml_key_value(playlist_dict, "Name", playlist_name, "string")
