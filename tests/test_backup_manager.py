@@ -9,8 +9,10 @@ runtime rather than here, since Windows path semantics don't let that logic
 be exercised meaningfully from this (Windows) test host.
 """
 
+import json
 import os
 import sqlite3
+import subprocess
 
 import pytest
 
@@ -39,6 +41,7 @@ def repo_root(tmp_path, monkeypatch):
     monkeypatch.setattr(backup_manager, "LOGS_ROOT", str(logs_root))
     monkeypatch.setattr(backup_manager, "ENV_FILE", str(env_file))
     monkeypatch.setattr(backup_manager, "SHARED_SLSKD_YML", str(shared_slskd_yml))
+    monkeypatch.setattr(backup_manager, "PAUSE_MARKER_FILE", str(logs_root / "_scheduler" / ".hot_pause_state.json"))
 
     return tmp_path
 
@@ -202,3 +205,142 @@ def test_rewrite_cloned_db_paths_does_not_touch_unrelated_substrings(cloned_db):
     # "old_env_archive" is a different environment name and must be left alone;
     # only the exact "/old_env/" path segment is a match.
     assert untouched == "/app/slskd_docker_data/old_env_archive/imported/other.mp3"
+
+
+# ---------------------------------------------------------------------------
+# Orphaned pause self-healing
+# ---------------------------------------------------------------------------
+#
+# Regression coverage for the 2026-09-12 incident: a hot backup stopped
+# slskd/workflow, then the backup container itself got recreated mid-pause
+# (an `invoke up --build` collided with the pause window) before it could
+# resume them -- leaving both containers stopped indefinitely and, this time,
+# leading to real DB corruption. See docs/adr/0001-backup-restore-architecture.md.
+
+def test_stop_hot_containers_updates_marker_after_each_container(repo_root, monkeypatch):
+    """A kill between the two stops must still leave an accurate marker --
+    not no marker, and not one claiming a container was stopped when it
+    wasn't yet.
+    """
+    (repo_root / ".env").write_text("APP_ENV=prod\n")
+    seen_markers_at_stop_time = []
+
+    def fake_ids_for_service(service):
+        return {"slskd": ["cid1"], "workflow": ["cid2"]}[service]
+
+    def fake_run(cmd, **_kwargs):
+        if cmd[:2] == ["docker", "stop"]:
+            marker = None
+            if os.path.exists(backup_manager.PAUSE_MARKER_FILE):
+                with open(backup_manager.PAUSE_MARKER_FILE, encoding="utf-8") as f:
+                    marker = json.load(f)
+            seen_markers_at_stop_time.append(marker)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(backup_manager, "_container_ids_for_service", fake_ids_for_service)
+    monkeypatch.setattr(backup_manager.subprocess, "run", fake_run)
+
+    stopped = backup_manager.stop_hot_containers("prod")
+
+    assert stopped == ["cid1", "cid2"]
+    # Before stopping cid1, nothing had been recorded yet; before stopping
+    # cid2, cid1's stop was already durably marked.
+    assert seen_markers_at_stop_time == [
+        None,
+        {"env": "prod", "container_ids": ["cid1"]},
+    ]
+    with open(backup_manager.PAUSE_MARKER_FILE, encoding="utf-8") as f:
+        assert json.load(f) == {"env": "prod", "container_ids": ["cid1", "cid2"]}
+
+
+def test_paused_if_hot_clears_marker_on_clean_exit(repo_root, monkeypatch):
+    (repo_root / ".env").write_text("APP_ENV=prod\n")
+    calls = []
+
+    def fake_stop_hot_containers(env):
+        calls.append(("stop", env))
+        backup_manager._write_pause_marker(env, ["cid1", "cid2"])
+        return ["cid1", "cid2"]
+
+    def fake_start_containers(container_ids):
+        calls.append(("start", container_ids))
+
+    monkeypatch.setattr(backup_manager, "stop_hot_containers", fake_stop_hot_containers)
+    monkeypatch.setattr(backup_manager, "start_containers", fake_start_containers)
+
+    with backup_manager._PausedIfHot("prod") as hot:
+        assert hot is True
+        assert os.path.exists(backup_manager.PAUSE_MARKER_FILE)
+
+    assert calls == [("stop", "prod"), ("start", ["cid1", "cid2"])]
+    assert not os.path.exists(backup_manager.PAUSE_MARKER_FILE)
+
+
+def test_paused_if_hot_leaves_marker_behind_on_abrupt_exit(repo_root, monkeypatch):
+    """Simulates the actual incident: __exit__ never runs (process killed),
+    so the marker must survive on disk for the next process to find.
+    """
+    (repo_root / ".env").write_text("APP_ENV=prod\n")
+
+    def fake_stop_hot_containers(env):
+        backup_manager._write_pause_marker(env, ["cid1"])
+        return ["cid1"]
+
+    monkeypatch.setattr(backup_manager, "stop_hot_containers", fake_stop_hot_containers)
+    monkeypatch.setattr(backup_manager, "start_containers", lambda _ids: None)
+
+    ctx = backup_manager._PausedIfHot("prod")
+    ctx.__enter__()  # no matching __exit__ -- simulates a hard kill mid-pause
+
+    assert os.path.exists(backup_manager.PAUSE_MARKER_FILE)
+    with open(backup_manager.PAUSE_MARKER_FILE, encoding="utf-8") as f:
+        assert json.load(f) == {"env": "prod", "container_ids": ["cid1"]}
+
+
+def test_paused_if_hot_writes_no_marker_when_env_is_not_hot(repo_root):
+    (repo_root / ".env").write_text("APP_ENV=staging\n")
+
+    with backup_manager._PausedIfHot("prod") as hot:
+        assert hot is False
+        assert not os.path.exists(backup_manager.PAUSE_MARKER_FILE)
+
+
+def test_resume_orphaned_pause_does_nothing_without_a_marker(repo_root, monkeypatch):  # noqa: ARG001
+    calls = []
+    monkeypatch.setattr(backup_manager.subprocess, "run", lambda *a, **k: calls.append((a, k)))
+
+    backup_manager.resume_orphaned_pause()
+
+    assert calls == []
+
+
+def test_resume_orphaned_pause_starts_marked_containers_and_clears_marker(repo_root, monkeypatch):  # noqa: ARG001
+    backup_manager._write_pause_marker("prod", ["cid1", "cid2"])
+    started = []
+
+    def fake_run(cmd, **_kwargs):
+        started.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(backup_manager.subprocess, "run", fake_run)
+
+    backup_manager.resume_orphaned_pause()
+
+    assert started == [["docker", "start", "cid1"], ["docker", "start", "cid2"]]
+    assert not os.path.exists(backup_manager.PAUSE_MARKER_FILE)
+
+
+def test_resume_orphaned_pause_clears_marker_even_if_a_container_is_gone(repo_root, monkeypatch):  # noqa: ARG001
+    """A stale container ID (e.g. it was recreated too) must not block cleanup
+    or crash the caller -- log it and move on rather than retry forever.
+    """
+    backup_manager._write_pause_marker("prod", ["cid1"])
+
+    def fake_run(cmd, **_kwargs):
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="No such container: cid1")
+
+    monkeypatch.setattr(backup_manager.subprocess, "run", fake_run)
+
+    backup_manager.resume_orphaned_pause()  # must not raise
+
+    assert not os.path.exists(backup_manager.PAUSE_MARKER_FILE)

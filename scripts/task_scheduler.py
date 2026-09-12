@@ -724,7 +724,7 @@ def main():
 
     if args.daemon:
         # Run as daemon with scheduler
-        def signal_handler():
+        def signal_handler(signum, frame):  # noqa: ARG001
             print("\nShutdown signal received...")
             registry.stop_scheduler()
             sys.exit(0)

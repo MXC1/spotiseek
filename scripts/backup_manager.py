@@ -18,6 +18,7 @@ CLI:
 """
 
 import argparse
+import json
 import os
 import shutil
 import signal
@@ -47,6 +48,12 @@ INPUT_PLAYLISTS_ROOT = os.path.join(APP_ROOT, "input_playlists")
 LOGS_ROOT = os.path.join(APP_ROOT, "observability", "logs")
 ENV_FILE = os.path.join(APP_ROOT, ".env")
 SHARED_SLSKD_YML = os.path.join(SLSKD_DATA_ROOT, "slskd.yml")
+
+# Marks containers currently stopped for a hot pause/resume operation, so an
+# abrupt exit (the backup container getting killed or recreated mid-pause --
+# see docs/adr/0001-backup-restore-architecture.md) can be recovered from on
+# the next daemon start/loop tick instead of leaving them stopped forever.
+PAUSE_MARKER_FILE = os.path.join(APP_ROOT, "observability", "logs", "_scheduler", ".hot_pause_state.json")
 
 # Fixed container-side mount point for BACKUP_DEST (see docker-compose.yml);
 # the host path a user configures in .env is only ever used on the compose
@@ -172,9 +179,14 @@ def _container_ids_for_service(service: str) -> list[str]:
     return [cid for cid in result.stdout.split() if cid]
 
 
-def stop_hot_containers() -> list[str]:
-    """Stop slskd + workflow so the active environment's files are quiescent."""
-    stopped = []
+def stop_hot_containers(env: str) -> list[str]:
+    """Stop slskd + workflow so the active environment's files are quiescent.
+
+    Updates PAUSE_MARKER_FILE after *each* container stop, not just once at
+    the end -- a kill between the two stops must still leave an accurate,
+    resumable marker rather than no marker at all.
+    """
+    stopped: list[str] = []
     for service in HOT_CONTAINER_SERVICES:
         for cid in _container_ids_for_service(service):
             write_log.info(
@@ -184,6 +196,7 @@ def stop_hot_containers() -> list[str]:
             )
             subprocess.run(["docker", "stop", cid], check=True, capture_output=True, text=True)
             stopped.append(cid)
+            _write_pause_marker(env, stopped)
     return stopped
 
 
@@ -191,6 +204,61 @@ def start_containers(container_ids: list[str]) -> None:
     for cid in container_ids:
         write_log.info("BACKUP_CONTAINER_START", "Restarting container.", {"container_id": cid})
         subprocess.run(["docker", "start", cid], check=True, capture_output=True, text=True)
+
+
+def _write_pause_marker(env: str, container_ids: list[str]) -> None:
+    os.makedirs(os.path.dirname(PAUSE_MARKER_FILE), exist_ok=True)
+    with open(PAUSE_MARKER_FILE, "w", encoding="utf-8") as f:
+        json.dump({"env": env, "container_ids": container_ids}, f)
+
+
+def _clear_pause_marker() -> None:
+    if os.path.exists(PAUSE_MARKER_FILE):
+        os.remove(PAUSE_MARKER_FILE)
+
+
+def resume_orphaned_pause() -> None:
+    """Resume any containers a previous abrupt exit left paused.
+
+    _PausedIfHot writes PAUSE_MARKER_FILE right before stopping containers and
+    clears it right after resuming them. If the process dies in between --
+    SIGKILLed, crashed, or the backup container itself getting recreated
+    mid-operation -- the marker survives (it lives under the logs volume, not
+    inside the container) and names exactly which containers need resuming.
+    Call this on daemon startup and on every scheduler tick so an orphaned
+    pause self-heals within seconds instead of leaving slskd/workflow stopped
+    indefinitely, which is what turned a routine backup pause into hours of
+    downtime and DB corruption on 2026-09-12.
+    """
+    if not os.path.exists(PAUSE_MARKER_FILE):
+        return
+    try:
+        with open(PAUSE_MARKER_FILE, encoding="utf-8") as f:
+            state = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        write_log.error(
+            "BACKUP_ORPHANED_PAUSE_UNREADABLE",
+            "Found a pause marker but could not read it; leaving it for manual inspection.",
+            {"error": str(e)},
+        )
+        return
+
+    container_ids = state.get("container_ids", [])
+    write_log.warn(
+        "BACKUP_ORPHANED_PAUSE_FOUND",
+        "Found containers left paused by a previous abrupt exit; resuming them.",
+        {"env": state.get("env"), "container_ids": container_ids},
+    )
+    for cid in container_ids:
+        result = subprocess.run(["docker", "start", cid], check=False, capture_output=True, text=True)
+        if result.returncode != 0:
+            write_log.error(
+                "BACKUP_ORPHANED_PAUSE_RESUME_FAILED",
+                "Could not resume a container from an orphaned pause; it may have been recreated "
+                "since -- check its status manually.",
+                {"container_id": cid, "error": result.stderr.strip()},
+            )
+    _clear_pause_marker()
 
 
 class _PausedIfHot:
@@ -209,12 +277,13 @@ class _PausedIfHot:
                 "Environment is hot; pausing containers for a consistent operation.",
                 {"env": self.env},
             )
-            self._stopped_ids = stop_hot_containers()
+            self._stopped_ids = stop_hot_containers(self.env)
         return self.hot
 
     def __exit__(self, exc_type, exc, tb) -> None:
         if self._stopped_ids:
             start_containers(self._stopped_ids)
+            _clear_pause_marker()
 
 
 # ---------------------------------------------------------------------------
@@ -514,6 +583,8 @@ def run_scheduler_daemon() -> None:
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
+    resume_orphaned_pause()
+
     schedule_envs = [e.strip() for e in os.getenv("BACKUP_SCHEDULE_ENVS", "").split(",") if e.strip()]
     interval_minutes = int(os.getenv("BACKUP_INTERVAL_MINUTES", "1440"))
 
@@ -537,6 +608,7 @@ def run_scheduler_daemon() -> None:
                 write_log.info("BACKUP_SCHEDULER_TRIGGER", "Triggering scheduled backup.", {"env": env})
                 _run_backup_subprocess(env)
                 next_run_at[env] = time.time() + interval_minutes * 60
+        resume_orphaned_pause()
         _shutdown.wait(timeout=30)
 
 
@@ -567,12 +639,14 @@ def main() -> None:
     if args.command == "backup":
         os.environ["APP_ENV"] = args.env
         setup_logging(log_name_prefix="backup", rotate_daily=True)
+        resume_orphaned_pause()
         success = backup_environment(args.env)
         sys.exit(0 if success else 1)
 
     if args.command == "restore":
         os.environ["APP_ENV"] = args.clone_as or args.env
         setup_logging(log_name_prefix="backup", rotate_daily=True)
+        resume_orphaned_pause()
         success = restore_environment(args.env, snapshot=args.snapshot, clone_as=args.clone_as)
         sys.exit(0 if success else 1)
 
