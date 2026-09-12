@@ -248,6 +248,13 @@ def ensure_repo(env: str) -> None:
 
 
 def apply_retention(env: str) -> None:
+    # `forget --prune` needs an exclusive lock, so a lock file orphaned by an
+    # earlier interrupted run (e.g. the backup container getting recreated by
+    # `invoke up --build` mid-operation) would otherwise block every future
+    # prune forever. restic's own `unlock` only removes locks it verifies are
+    # stale (owning PID/host no longer alive), so this is safe even if a
+    # concurrent restic operation is genuinely in progress.
+    _restic(env, "unlock", check=False)
     result = _restic(
         env, "forget", "--prune",
         "--keep-daily", KEEP_DAILY,
