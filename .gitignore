@@ -29,7 +29,7 @@ htmlcov/
 
 # Logs
 *.log
-*task_scheduler.log.*
+*.log.*
 
 # OS
 Thumbs.db
@@ -56,3 +56,6 @@ input_playlists/*
 !input_playlists/_init
 .cache
 dev
+
+# Backups (restic repositories; default BACKUP_DEST)
+backups/

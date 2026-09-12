@@ -1,0 +1,27 @@
+# Dockerfile for the backup/restore service
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# restic: backup engine. docker-cli: gives us the `docker` client so this
+# container can pause/resume slskd + workflow (via the mounted socket)
+# around a consistent copy of whichever environment is currently active.
+RUN apt-get update && apt-get install -y --no-install-recommends restic docker-cli \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code (runtime data is mounted as volumes)
+COPY scripts/ /app/scripts/
+
+# Set PYTHONPATH so 'scripts' is importable as a package
+ENV PYTHONPATH="/app"
+
+# Disable Python output buffering to ensure logs appear immediately in Docker
+ENV PYTHONUNBUFFERED=1
+
+# Run the self-scheduling backup daemon; on-demand backups/restores are
+# triggered via `docker compose exec backup python -m scripts.backup_manager ...`
+CMD ["python", "-m", "scripts.backup_manager", "daemon"]

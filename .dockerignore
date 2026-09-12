@@ -38,6 +38,7 @@ slskd_docker_data/
 output/
 input_playlists/
 observability/logs/
+backups/
 
 # MusicBee dev files
 dev/musicbee_spotiseek/

@@ -73,6 +73,9 @@ This starts:
 | `invoke logs --service workflow` | Follow logs for a service |
 | `invoke run-all-tasks` | Execute all tasks immediately |
 | `invoke setenv test` | Switch environment and restart |
+| `invoke backup [--env=X\|--all]` | Back up an environment (defaults to current `APP_ENV`) |
+| `invoke restore --env=X [--as-env=Y]` | Restore an environment in place, or clone it into a new one |
+| `invoke backup-forget --env=X` | **DESTRUCTIVE**: Permanently delete all backups for an environment |
 | `invoke nuke --env=test` | **DESTRUCTIVE**: Remove all data for an environment |
 
 ---
@@ -101,8 +104,9 @@ Remux & Import
 | `slskd` | 5030, 5031 | Soulseek P2P daemon |
 | `workflow` | - | Task scheduler daemon |
 | `dashboard` | 8501 | Streamlit web UI |
+| `backup` | - | Backup/restore daemon (restic, one repo per environment) |
 
-See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for all task scheduler intervals and settings.
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for all task scheduler intervals, backup settings, and `invoke backup`/`invoke restore` usage.
 
 ### Directory Structure
 

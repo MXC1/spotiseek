@@ -63,3 +63,31 @@ services:
     depends_on:
       - slskd
     restart: unless-stopped
+
+  backup:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.backup
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL}
+      - BACKUP_RESTIC_PASSWORD=${BACKUP_RESTIC_PASSWORD}
+      - BACKUP_SCHEDULE_ENVS=${BACKUP_SCHEDULE_ENVS}
+      - BACKUP_INTERVAL_MINUTES=${BACKUP_INTERVAL_MINUTES}
+      - BACKUP_KEEP_DAILY=${BACKUP_KEEP_DAILY}
+      - BACKUP_KEEP_WEEKLY=${BACKUP_KEEP_WEEKLY}
+      - BACKUP_KEEP_MONTHLY=${BACKUP_KEEP_MONTHLY}
+    volumes:
+      # Docker socket: lets this container pause/resume slskd + workflow
+      # around a consistent copy of whichever environment is currently hot.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Every environment's data, read-write (restore needs to write back).
+      - ./slskd_docker_data:/app/slskd_docker_data:rw
+      - ./output:/app/output:rw
+      - ./observability/logs:/app/observability/logs:rw
+      - ./input_playlists:/app/input_playlists:rw
+      # Shared config, backed up verbatim into every environment's repo.
+      - ./.env:/app/.env:ro
+      # Restic repositories, one per environment. Host path is BACKUP_DEST;
+      # the container always sees it at the fixed /backups mount point.
+      - ${BACKUP_DEST}:/backups:rw
+    restart: unless-stopped

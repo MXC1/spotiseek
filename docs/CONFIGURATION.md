@@ -75,6 +75,50 @@ Configure how often each automated task runs (in minutes). Set to `0` to disable
 
 ---
 
+## Backup Configuration
+
+Each environment is backed up into its own [restic](https://restic.net/) repository by the always-on `backup` service. See `docs/adr/0001-backup-restore-architecture.md` for the design.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BACKUP_DEST` | `./backups` | Host path for restic repositories (one subfolder per environment). Used only in `docker-compose.yml`'s volume mount. |
+| `BACKUP_RESTIC_PASSWORD` | — | Password protecting every environment's restic repository. Required. |
+| `BACKUP_SCHEDULE_ENVS` | *(empty)* | Comma-separated environments to back up automatically, e.g. `prod,all_playlists`. Empty = no scheduled backups; `invoke backup` still works on demand. |
+| `BACKUP_INTERVAL_MINUTES` | `1440` | How often each scheduled environment is backed up (daily by default). |
+| `BACKUP_KEEP_DAILY` | `7` | Retention: daily snapshots to keep. |
+| `BACKUP_KEEP_WEEKLY` | `4` | Retention: weekly snapshots to keep. |
+| `BACKUP_KEEP_MONTHLY` | `6` | Retention: monthly snapshots to keep. |
+
+A backup includes, per environment: `downloads/`, `imported/`, the exported database/XML/M3U8s, the environment's playlist CSV and `slskd.yml`, and its logs — plus the shared `.env` and shared `slskd_docker_data/slskd.yml` (for disaster recovery). It excludes slskd's own runtime `data/` and `incomplete/` (both regenerable). Whichever environment currently matches `APP_ENV` has its `slskd`/`workflow` containers briefly paused for a consistent copy; every other environment's data is already inert and is copied without any pause.
+
+### Backing Up
+
+```bash
+invoke backup                  # back up the current APP_ENV
+invoke backup --env=prod       # back up a specific environment
+invoke backup --all            # back up every environment with data on disk
+```
+
+### Restoring
+
+```bash
+invoke restore --env=prod                            # restore prod from its latest backup, in place
+invoke restore --env=prod --from-snapshot=abc123      # restore a specific snapshot (see `restic snapshots`)
+invoke restore --env=prod --as-env=prod_recovered     # clone prod's latest backup into a new environment
+```
+
+In-place restore overwrites the named environment's files with the snapshot's; it does not delete files created since that snapshot. A clone (`--as-env`) restores into a brand-new environment name and rewrites the database's environment-scoped paths accordingly, but does **not** carry over `library.xml` or the `.m3u8` files (both are fully derived from the database) — after cloning, run `invoke setenv <new_env>` followed by `invoke run-all-tasks` (or use the dashboard) to regenerate them.
+
+### Deleting Backups
+
+```bash
+invoke backup-forget --env=old_test_env   # permanently deletes ALL backups for that environment
+```
+
+This deletes the entire restic repository for one environment (no per-snapshot deletion) and asks for a typed `YES` confirmation first. `invoke nuke` never touches `backups/` — deleting environment data and deleting its backup history are always separate, deliberate actions.
+
+---
+
 ## Example .env File
 
 ```env
@@ -108,6 +152,15 @@ TASK_MARK_QUALITY_UPGRADES_INTERVAL=1440
 TASK_PROCESS_UPGRADES_INTERVAL=60
 TASK_EXPORT_LIBRARY_INTERVAL=1440
 TASK_REMUX_EXISTING_FILES_INTERVAL=360
+
+# Backups
+BACKUP_DEST=./backups
+BACKUP_RESTIC_PASSWORD=your_restic_repository_password
+BACKUP_SCHEDULE_ENVS=
+BACKUP_INTERVAL_MINUTES=1440
+BACKUP_KEEP_DAILY=7
+BACKUP_KEEP_WEEKLY=4
+BACKUP_KEEP_MONTHLY=6
 ```
 
 ---
