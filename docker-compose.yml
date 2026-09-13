@@ -57,8 +57,12 @@ services:
       - "8502:8502"
     environment:
       - APP_ENV=${APP_ENV}
+      - HOST_BASE_PATH=${HOST_BASE_PATH}
+      - SLSKD_BASE_URL=http://slskd:5030
+      - TOKEN=${TOKEN}
     volumes:
       - ./output:/app/output:rw
+      - ./slskd_docker_data/${APP_ENV}/imported:/app/slskd_docker_data/${APP_ENV}/imported:rw
       - ./observability/dashboard_next:/app/observability/dashboard_next:ro
       - ./observability/logs:/app/observability/logs:rw
       - ./docs:/app/docs:ro

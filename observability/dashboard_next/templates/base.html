@@ -6,6 +6,7 @@
   <title>Spotiseek Dashboard ({{ env_name }})</title>
   <link rel="stylesheet" href="/static/css/style.css">
   <script src="/static/vendor/htmx.min.js"></script>
+  <script defer src="/static/vendor/alpine.min.js"></script>
 </head>
 <body>
   <header class="app-header">
@@ -26,6 +27,11 @@
          hx-get="/execution-inspection"
          hx-target="#tab-content"
          hx-push-url="true">&#128269; Execution Inspection</a>
+      <a class="tab-link{% if active_tab == 'manual-import' %} active{% endif %}"
+         href="/manual-import"
+         hx-get="/manual-import"
+         hx-target="#tab-content"
+         hx-push-url="true">&#128229; Manual Import</a>
       <a class="tab-link{% if active_tab == 'docs' %} active{% endif %}"
          href="/docs/overview"
          hx-get="/docs/overview"

@@ -1,0 +1,11 @@
+<p class="stats-caption">Selected: <code>{{ filename }}</code></p>
+{% if quality_warning %}
+<p class="flash flash-error">Quality Warning: {{ quality_warning }}. Consider uploading a higher quality version for better audio fidelity.</p>
+{% endif %}
+<button type="button" class="btn btn-primary"
+  hx-post="/manual-import/import/{{ track_id }}"
+  hx-target="#manual-import-body"
+  hx-swap="innerHTML"
+  hx-indicator="#manual-import-body"
+  hx-include="[name='playlist_url'],[name='search'],[name='page'],[name='page_size']"
+  hx-disabled-elt="this">Import Track</button>

@@ -1,0 +1,17 @@
+<section class="manual-import-tab">
+  <div id="manual-import-body">
+    {% include "tabs/_manual_import_body.html" %}
+  </div>
+
+  <hr class="section-divider">
+  <p class="stats-caption">Tip: Files will be saved to <code>slskd_docker_data/{{ env_value }}/imported/</code></p>
+  <p class="stats-caption">M3U8 playlists update automatically after import. Export iTunes XML manually when needed.</p>
+  <div id="manual-import-export-status">
+    <button class="btn"
+      hx-post="/manual-import/export-xml"
+      hx-target="#manual-import-export-status"
+      hx-swap="innerHTML"
+      hx-indicator="#manual-import-export-status"
+      hx-disabled-elt="this">Export iTunes XML now</button>
+  </div>
+</section>

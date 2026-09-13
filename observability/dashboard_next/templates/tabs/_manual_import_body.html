@@ -1,0 +1,100 @@
+{% if db_error %}
+<p class="stats-error">{{ db_error }}</p>
+{% else %}
+<p class="stats-caption"><strong>Environment:</strong> <code>{{ env_value }}</code></p>
+
+{% if flash %}
+<p class="flash flash-{{ flash.type }}">{{ flash.text }}</p>
+{% endif %}
+
+{% if not playlists %}
+<p class="stats-empty">All tracks have been successfully downloaded! No tracks require manual import.</p>
+{% else %}
+<div class="metric-grid manual-import-metrics">
+  <div class="metric-card">
+    <div class="metric"><span class="metric-value">{{ total_incomplete }}</span><span class="metric-label">Unique Tracks Needing Import</span></div>
+  </div>
+  <div class="metric-card">
+    <div class="metric"><span class="metric-value">{{ total_associations }}</span><span class="metric-label">Total Track Occurrences (same track counted once per playlist)</span></div>
+  </div>
+</div>
+
+<form hx-get="/manual-import/body" hx-target="#manual-import-body" hx-swap="innerHTML" hx-trigger="change">
+  <label class="field-label">Choose a playlist to view its incomplete tracks:
+    <select name="playlist_url">
+      {% for name, url, count in playlists %}
+      <option value="{{ url }}" {% if url == selected_playlist_url %}selected{% endif %}>{{ name }} ({{ count }} tracks)</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label class="field-label">Search (artist or track contains):
+    <input type="text" name="search" value="{{ search }}"
+      hx-trigger="input changed delay:500ms"
+      hx-get="/manual-import/body"
+      hx-target="#manual-import-body"
+      hx-swap="innerHTML"
+      hx-include="closest form">
+  </label>
+
+  <div class="tasks-actions">
+    <label class="field-label">Rows per page
+      <select name="page_size">
+        {% for size in page_sizes %}
+        <option value="{{ size }}" {% if size == page_size %}selected{% endif %}>{{ size }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field-label">Page
+      <input type="number" name="page" min="1" value="{{ page }}" style="width:5rem">
+    </label>
+    <span class="stats-caption">of {{ max_page }}</span>
+  </div>
+</form>
+
+<h3>Tracks in: {{ selected_playlist_name }}</h3>
+
+{% if tracks %}
+<table class="stats-table">
+  <thead><tr><th>Artist</th><th>Track</th><th>Status</th><th>Track ID</th></tr></thead>
+  <tbody>
+    {% for t in tracks %}
+    <tr><td>{{ t.artist }}</td><td>{{ t.track_name }}</td><td>{{ t.status }}</td><td>{{ t.track_id }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="manual-import-uploader" x-data="{ selected: '{{ tracks[0].track_id }}' }">
+  <label class="field-label">Select a track to import:
+    <select x-model="selected">
+      {% for t in tracks %}
+      <option value="{{ t.track_id }}">{{ t.artist }} - {{ t.track_name }} &bull; {{ t.status }} [{{ t.track_id }}]</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  {% for t in tracks %}
+  <div x-show="selected === '{{ t.track_id }}'" class="upload-panel">
+    <form>
+      <input type="hidden" name="track_id" value="{{ t.track_id }}">
+      <input type="hidden" name="artist" value="{{ t.artist }}">
+      <input type="hidden" name="track_name" value="{{ t.track_name }}">
+      <label class="field-label">Select audio file
+        <input type="file" name="audio_file" accept=".mp3,.flac,.wav,.m4a,.ogg,.wma"
+          hx-post="/manual-import/precheck"
+          hx-trigger="change"
+          hx-target="#upload-result-{{ loop.index }}"
+          hx-swap="innerHTML"
+          hx-encoding="multipart/form-data"
+          hx-include="closest form">
+      </label>
+    </form>
+    <div id="upload-result-{{ loop.index }}"></div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="stats-empty">No matching tracks on this page.</p>
+{% endif %}
+{% endif %}
+{% endif %}

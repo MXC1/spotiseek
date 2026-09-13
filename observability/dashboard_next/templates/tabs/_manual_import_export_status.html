@@ -1,0 +1,9 @@
+{% if flash %}
+<p class="flash flash-{{ flash.type }}">{{ flash.text }}</p>
+{% endif %}
+<button class="btn"
+  hx-post="/manual-import/export-xml"
+  hx-target="#manual-import-export-status"
+  hx-swap="innerHTML"
+  hx-indicator="#manual-import-export-status"
+  hx-disabled-elt="this">Export iTunes XML now</button>

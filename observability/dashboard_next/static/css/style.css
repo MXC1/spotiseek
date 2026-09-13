@@ -545,3 +545,37 @@ main#tab-content {
   font-size: 0.75rem;
   color: var(--muted);
 }
+
+/* Manual Import tab */
+
+.manual-import-metrics {
+  margin-bottom: 1.5rem;
+}
+
+.manual-import-tab h3 {
+  font-size: 0.95rem;
+  margin: 1.5rem 0 0.75rem;
+}
+
+.manual-import-uploader {
+  margin-top: 1rem;
+}
+
+.upload-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  margin-top: 0.75rem;
+}
+
+.upload-panel input[type="file"] {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.section-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2rem 0 1.25rem;
+}

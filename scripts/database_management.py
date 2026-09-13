@@ -1207,6 +1207,64 @@ class TrackDB:
         )
         return cursor.fetchall()
 
+    def get_playlists_with_incomplete_counts(self) -> list[tuple[str, str, int]]:
+        """Return (playlist_name, playlist_url, incomplete_count) for playlists that
+        have at least one track missing a local file, most-incomplete first."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT p.playlist_name, p.playlist_url, COUNT(*) AS incomplete_count
+            FROM playlists p
+            JOIN playlist_tracks pt ON p.playlist_url = pt.playlist_url
+            JOIN tracks t ON t.track_id = pt.track_id
+            WHERE t.local_file_path IS NULL OR TRIM(t.local_file_path) = ''
+            GROUP BY p.playlist_name, p.playlist_url
+            ORDER BY incomplete_count DESC, p.playlist_name
+            """,
+        )
+        return cursor.fetchall()
+
+    def get_total_incomplete_tracks(self) -> int:
+        """Return the count of tracks without a local file (unique tracks, not playlist rows)."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) FROM tracks WHERE local_file_path IS NULL OR TRIM(local_file_path) = ''",
+        )
+        return cursor.fetchone()[0]
+
+    def get_incomplete_tracks_for_playlist(
+        self, playlist_url: str, search: str | None, offset: int, limit: int,
+    ) -> tuple[list[tuple[str, str, str, str, str]], int]:
+        """Paginated (playlist_url, track_id, track_name, artist, status) rows missing a
+        local file for one playlist, optionally filtered by artist/track substring.
+
+        Returns (rows, total_count_before_pagination).
+        """
+        cursor = self.conn.cursor()
+        where_search = ""
+        params: list[str] = [playlist_url]
+        if search:
+            where_search = " AND (LOWER(t.track_name) LIKE ? OR LOWER(t.artist) LIKE ?)"
+            like = f"%{search.lower()}%"
+            params.extend([like, like])
+
+        cursor.execute(
+            "SELECT COUNT(*) FROM playlist_tracks pt JOIN tracks t ON t.track_id = pt.track_id "
+            "WHERE pt.playlist_url = ? AND (t.local_file_path IS NULL OR TRIM(t.local_file_path) = '')"
+            + where_search,
+            params,
+        )
+        total = cursor.fetchone()[0]
+
+        cursor.execute(
+            "SELECT pt.playlist_url, t.track_id, t.track_name, t.artist, t.download_status "
+            "FROM playlist_tracks pt JOIN tracks t ON t.track_id = pt.track_id "
+            "WHERE pt.playlist_url = ? AND (t.local_file_path IS NULL OR TRIM(t.local_file_path) = '')"
+            + where_search + " ORDER BY t.track_name LIMIT ? OFFSET ?",
+            [*params, limit, offset],
+        )
+        return cursor.fetchall(), total
+
     def close(self) -> None:
         """Close the database connection."""
         write_log.info("DB_CLOSE", "Closing database connection.")

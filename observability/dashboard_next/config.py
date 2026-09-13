@@ -30,6 +30,10 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 OUTPUT_ENV_DIR = os.path.join(BASE_DIR, "output", ENV or "default")
 DB_PATH = os.path.join(OUTPUT_ENV_DIR, f"database_{ENV}.db") if ENV else ""
 LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", ENV or "default")
+XML_DIR = OUTPUT_ENV_DIR
+IMPORTED_DIR = os.path.join(BASE_DIR, "slskd_docker_data", ENV or "default", "imported")
+DOWNLOADS_ROOT = os.path.join(BASE_DIR, "slskd_docker_data", ENV or "default", "downloads")
+IS_DOCKER = os.path.exists("/.dockerenv")
 
 # Documentation paths -- slug -> (display name, file path)
 DOCS_DIR = os.path.join(BASE_DIR, "docs")
@@ -45,6 +49,7 @@ DEFAULT_DOC_SLUG = "overview"
 track_db = None
 if ENV:
     os.makedirs(OUTPUT_ENV_DIR, exist_ok=True)
+    os.makedirs(IMPORTED_DIR, exist_ok=True)
     setup_logging(log_name_prefix="task_scheduler", rotate_daily=True)
     try:
         track_db = TrackDB()
