@@ -1,3 +1,5 @@
+# DEPRECATED: superseded by infra/Dockerfile.dashboard-next. Kept only as a manual
+# rollback path -- see docs/adr/0005-defer-dashboard-cutover-keep-streamlit-as-rollback.md.
 # Dockerfile for Combined Spotiseek Dashboard (Observability + Manual Import)
 FROM python:3.11-slim
 

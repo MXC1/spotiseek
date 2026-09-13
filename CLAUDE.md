@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Spotiseek automates downloading playlists from **Spotify and SoundCloud** via Soulseek. It scrapes playlist metadata, searches/downloads tracks through the [slskd](https://github.com/slskd/slskd) API, remuxes files to preferred formats (lossless → WAV, lossy → MP3 320kbps), and exports iTunes-compatible XML libraries for use in Rekordbox/iTunes.
 
-The whole system runs as three Docker Compose services (`slskd`, `workflow`, `dashboard`) and is driven by a Radarr-style task scheduler rather than a single linear script.
+The whole system runs as Docker Compose services (`slskd`, `workflow`, `dashboard-next`, `backup`, plus the deprecated `dashboard`) and is driven by a Radarr-style task scheduler rather than a single linear script.
 
 ## Common Commands
 
@@ -58,24 +58,32 @@ Ruff config lives in `pyproject.toml`, targeting Python 3.10+. Enabled rule grou
 | `logs_utils.py` | JSON-structured logging (`write_log` static class) plus log-parsing helpers reused by the dashboard |
 | `constants.py` | Shared audio format sets (`LOSSLESS_FORMATS`, `LOSSY_FORMATS`) and `MIN_BITRATE_KBPS` |
 
-`observability/` holds the Streamlit dashboard: `combined_dashboard.py` is the entry point, with feature tabs under `observability/dashboard/tabs/` (`auto_import`, `blacklist`, `docs`, `execution_inspection`, `manual_import`, `overall_stats`, `tasks`).
+`observability/dashboard_next/` holds the **active** dashboard (FastAPI + HTMX, see
+`docs/adr/0003-dashboard-rewrite-fastapi-htmx.md`): `app.py` is the entry point, with one
+route module per tab under `observability/dashboard_next/routes/` (`auto_import`,
+`blacklist`, `docs`, `execution_inspection`, `manual_import`, `stats`, `tasks`).
+`observability/` also still holds the **deprecated** Streamlit dashboard
+(`combined_dashboard.py` + `observability/dashboard/tabs/`) as a manual rollback path —
+see `docs/adr/0005-defer-dashboard-cutover-keep-streamlit-as-rollback.md`. Don't add
+features to the Streamlit code; port them to `dashboard_next` instead.
 
 ### Docker Services (`docker-compose.yml`)
 
 - **slskd** — the Soulseek P2P daemon (ports 5030/5031), configured via `slskd_docker_data/slskd.yml` and `SLSKD_USERNAME`/`SLSKD_PASSWORD`.
 - **workflow** — runs `scripts.task_scheduler --daemon` (built from `infra/Dockerfile.workflow`); this is where all downloading/processing happens.
-- **dashboard** — Streamlit UI on port 8501 (built from `infra/Dockerfile.dashboard`), for monitoring, manual imports, and triggering tasks.
+- **dashboard-next** — the active dashboard UI on port 8502 (built from `infra/Dockerfile.dashboard-next`), for monitoring, manual imports, and triggering tasks.
 - **backup** — the always-on restic backup/restore daemon (built from `infra/Dockerfile.backup`); singleton, not scoped to any one environment.
+- **dashboard** *(deprecated)* — the old Streamlit UI on port 8501 (built from `infra/Dockerfile.dashboard`). Requires the `deprecated` Compose profile, so it's not started by `invoke up`/plain `docker-compose up`; bring it back manually with `docker compose --profile deprecated up -d dashboard` if `dashboard-next` needs a rollback. See `docs/adr/0005-defer-dashboard-cutover-keep-streamlit-as-rollback.md`.
 
-Each service mounts `./output`, `./observability/logs`, and the relevant `slskd_docker_data/${APP_ENV}` subfolders as volumes, so data persists on the host across restarts. Code (`scripts/`, the dashboard code under `observability/`) is bind-mounted from `${CODE_ROOT}` for `workflow`/`dashboard` — normally the working tree, so `invoke up`/`invoke build` (which always pass `--build`) pick up code changes immediately — see **Gated Environment Deploys** below for the one exception.
+Each service mounts `./output`, `./observability/logs`, and the relevant `slskd_docker_data/${APP_ENV}` subfolders as volumes, so data persists on the host across restarts. `scripts/` and the deprecated dashboard's code under `observability/` are bind-mounted from `${CODE_ROOT}` for `workflow`/`dashboard` — normally the working tree, so `invoke up`/`invoke build` (which always pass `--build`) pick up code changes immediately — see **Gated Environment Deploys** below for the one exception. `dashboard-next` always mounts straight from the working tree regardless of `${CODE_ROOT}` (it isn't part of the gated deploy snapshot).
 
 ### Gated Environment Deploys
 
 The environment named by `DEPLOY_GATED_ENV` in `.env` (currently `all_playlists`) is the **gated environment** — see `CONTEXT.md` for the glossary and `docs/adr/0002-gated-environment-deploys-via-git-archive.md` for the full rationale. Only its `workflow`/`dashboard` code changes exclusively through `invoke deploy [--ref=<ref>]` (default `origin/main`, fetched first), never just by being the hot environment or by running `invoke up`/`invoke setenv` against whatever's on disk. `invoke deploy`:
 
-1. Resolves `ref` to a commit and `git archive`s exactly `scripts/`, `observability/dashboard/`, `observability/combined_dashboard.py`, `requirements.txt`, and `infra/Dockerfile.backup` into `.deploy/deployed-code/` (wiped and recreated from scratch each time), recording the commit in `.deploy/DEPLOYED_SHA`.
+1. Resolves `ref` to a commit and `git archive`s exactly `scripts/`, `observability/dashboard/`, `observability/combined_dashboard.py`, `requirements.txt`, and `infra/Dockerfile.backup` into `.deploy/deployed-code/` (wiped and recreated from scratch each time), recording the commit in `.deploy/DEPLOYED_SHA`. (`observability/dashboard/`/`combined_dashboard.py` here are the deprecated Streamlit code — still archived for when that service is manually brought back, per ADR-0005.)
 2. Rebuilds the `backup` service from that snapshot — `backup` is a singleton touching every environment's real data, so its build context is *always* `.deploy/deployed-code`, regardless of which environment is hot.
-3. If the gated environment is currently hot, restarts `workflow`/`dashboard` (a plain restart, not a rebuild — their code is bind-mounted, not baked into the image) so they pick up the new snapshot.
+3. If the gated environment is currently hot, restarts `workflow` (a plain restart, not a rebuild — its code is bind-mounted, not baked into the image) so it picks up the new snapshot. `dashboard` isn't restarted here since it's stopped by default, and `dashboard-next` isn't either since its code was never part of the deployed snapshot to begin with.
 
 `invoke up`/`invoke build`/`invoke setenv` compute `CODE_ROOT` (`./.deploy/deployed-code` when the gated environment is hot, `.` otherwise) into `.env` before every run, and refuse to proceed if `.deploy/deployed-code/` doesn't exist yet — there's no auto-bootstrap; run `invoke deploy` once first. Everything besides `scripts/`/dashboard code/`backup`'s build inputs (infra, Dockerfiles, `.env` itself) still takes effect immediately via ordinary `invoke up --build`, for every environment including the gated one.
 

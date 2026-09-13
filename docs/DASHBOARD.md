@@ -1,5 +1,13 @@
 # Spotiseek Dashboard Guide
 
+> **This guide describes the deprecated Streamlit dashboard**, kept only as a manual
+> rollback (`docker compose --profile deprecated up -d dashboard`) and not running by
+> default — see [ADR-0005](adr/0005-defer-dashboard-cutover-keep-streamlit-as-rollback.md).
+> The active dashboard is at **http://localhost:8502**, built on FastAPI + HTMX
+> ([ADR-0003](adr/0003-dashboard-rewrite-fastapi-htmx.md)). Every tab and feature
+> described below has been ported there with the same behavior, just a different UI
+> stack — this document stays accurate as a feature reference for either one.
+
 The Streamlit dashboard provides a web interface for monitoring and managing Spotiseek. Access it at **http://localhost:8501** after starting the services.
 
 ## 📊 Stats Tab

@@ -426,8 +426,11 @@ def deploy(c, ref="origin/main"):
     Only scripts/, the dashboard code under observability/, requirements.txt, and
     infra/Dockerfile.backup are extracted -- see
     docs/adr/0002-gated-environment-deploys-via-git-archive.md. The 'backup' service
-    always builds from this snapshot; workflow/dashboard only mount from it while the
-    gated environment (DEPLOY_GATED_ENV) is hot.
+    always builds from this snapshot; workflow only mounts from it while the gated
+    environment (DEPLOY_GATED_ENV) is hot. The deprecated 'dashboard' (Streamlit)
+    service would too, but it's stopped by default -- see
+    docs/adr/0005-defer-dashboard-cutover-keep-streamlit-as-rollback.md. The active
+    dashboard-next service always mounts the working tree directly, gated deploy or not.
     """
     print("Fetching origin...")
     subprocess.run(["git", "fetch", "origin"], check=True)
@@ -466,9 +469,15 @@ def deploy(c, ref="origin/main"):
 
     gated_env = get_deploy_gated_env()
     if gated_env and get_app_env() == gated_env:
-        print(f"'{gated_env}' is the hot environment -- restarting workflow/dashboard...")
+        # 'dashboard' (Streamlit) is deprecated and not restarted here -- it's stopped
+        # by default (see docs/adr/0005-defer-dashboard-cutover-keep-streamlit-as-rollback.md)
+        # and restarting a stopped, profile-gated service would just fail. dashboard-next
+        # isn't restarted either: its code isn't part of the deployed snapshot (it mounts
+        # the working tree directly, not ${CODE_ROOT}), so a restart wouldn't pick up
+        # anything a deploy just changed.
+        print(f"'{gated_env}' is the hot environment -- restarting workflow...")
         subprocess.run(
-            wrap_docker_cmd(["docker-compose", "restart", "workflow", "dashboard"]),
+            wrap_docker_cmd(["docker-compose", "restart", "workflow"]),
             check=True,
         )
 

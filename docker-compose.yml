@@ -16,7 +16,14 @@ services:
     image: slskd/slskd:latest
     restart: unless-stopped
 
+  # Deprecated: the old Streamlit dashboard, superseded by dashboard-next (see
+  # docs/adr/0005-defer-dashboard-cutover-keep-streamlit-as-rollback.md). Not started by
+  # `invoke up`/plain `docker-compose up` -- the "deprecated" profile keeps its
+  # definition (and this service's code) around as a manual rollback path without
+  # running it day to day. Bring it back with:
+  #   docker compose --profile deprecated up -d dashboard
   dashboard:
+    profiles: ["deprecated"]
     build:
       context: .
       dockerfile: infra/Dockerfile.dashboard
@@ -44,11 +51,12 @@ services:
       - slskd
     restart: unless-stopped
 
-  # Temporary, alongside `dashboard` during the tab-by-tab migration off Streamlit --
-  # see docs/adr/0003-dashboard-rewrite-fastapi-htmx.md and
-  # docs/adr/0004-dashboard-migration-parallel-service-cutover.md. Code is mounted
-  # straight from the working tree (never ${CODE_ROOT}): it isn't part of the gated
-  # deploy's archived paths (docs/adr/0002-*), and isn't meant to be until cutover.
+  # The active dashboard -- see docs/adr/0003-dashboard-rewrite-fastapi-htmx.md. The
+  # full cutover described in docs/adr/0004-dashboard-migration-parallel-service-cutover.md
+  # (delete Streamlit, move this code into observability/dashboard/, promote to :8501)
+  # is deliberately deferred; see docs/adr/0005-defer-dashboard-cutover-keep-streamlit-as-rollback.md.
+  # Code is mounted straight from the working tree (never ${CODE_ROOT}): it isn't part
+  # of the gated deploy's archived paths (docs/adr/0002-*) until that cutover happens.
   dashboard-next:
     build:
       context: .

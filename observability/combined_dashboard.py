@@ -1,4 +1,10 @@
 """
+DEPRECATED: superseded by observability/dashboard_next/ (FastAPI + HTMX), served by the
+`dashboard-next` compose service. Kept only as a manual rollback path -- not started by
+default (the `dashboard` service now requires the "deprecated" compose profile). See
+docs/adr/0005-defer-dashboard-cutover-keep-streamlit-as-rollback.md. Do not add features
+here; port them to dashboard_next instead.
+
 Combined Spotiseek Dashboard.
 
 Unified Streamlit application combining:
