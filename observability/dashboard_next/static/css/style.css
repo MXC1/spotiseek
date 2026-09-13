@@ -503,3 +503,45 @@ main#tab-content {
   overflow-x: auto;
   margin: 0.35rem 0 0;
 }
+
+/* Execution Inspection tab */
+
+.execution-inspection-tab h2 {
+  font-size: 1.1rem;
+  margin: 0 0 0.35rem;
+}
+
+.execution-inspection-tab h3 {
+  font-size: 0.95rem;
+  margin: 1.5rem 0 0.75rem;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 1rem;
+}
+
+.metric-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+}
+
+.metric-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.metric-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+}

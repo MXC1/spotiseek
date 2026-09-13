@@ -1,0 +1,19 @@
+<section class="execution-inspection-tab">
+  {% if not runs %}
+  <p class="stats-empty">No workflow runs found.</p>
+  {% else %}
+  <form hx-get="/execution-inspection/run" hx-target="#run-summary-panel" hx-swap="innerHTML" hx-trigger="change">
+    <label class="field-label">Select a workflow run to inspect:
+      <select name="run_id">
+        {% for run in runs %}
+        <option value="{{ run.run_id }}" {% if run.run_id == selected_run_id %}selected{% endif %}>{{ run.display_name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </form>
+
+  <div id="run-summary-panel">
+    {% include "tabs/_execution_inspection_summary.html" %}
+  </div>
+  {% endif %}
+</section>
