@@ -29,6 +29,7 @@ ENV = os.getenv("APP_ENV")
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 OUTPUT_ENV_DIR = os.path.join(BASE_DIR, "output", ENV or "default")
 DB_PATH = os.path.join(OUTPUT_ENV_DIR, f"database_{ENV}.db") if ENV else ""
+LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", ENV or "default")
 
 # Documentation paths -- slug -> (display name, file path)
 DOCS_DIR = os.path.join(BASE_DIR, "docs")

@@ -7,6 +7,9 @@
   --accent: #1db954;
   --accent-fg: #ffffff;
   --code-bg: #f4f4f5;
+  --danger: #dc2626;
+  --danger-bg: #fee2e2;
+  --success-bg: #dcfce7;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -16,6 +19,9 @@
     --muted: #9aa0a6;
     --border: #2c2f34;
     --code-bg: #23262b;
+    --danger: #f87171;
+    --danger-bg: #3f1d1d;
+    --success-bg: #16321f;
   }
 }
 
@@ -308,4 +314,192 @@ main#tab-content {
   .bar-row {
     grid-template-columns: 5rem 1fr 2rem;
   }
+}
+
+/* Buttons + htmx loading indicator */
+
+.btn {
+  display: inline-block;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--code-bg);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.btn-small {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+.htmx-indicator {
+  opacity: 0;
+  transition: opacity 100ms ease-in;
+}
+
+.htmx-request.htmx-indicator,
+.htmx-request .htmx-indicator {
+  opacity: 1;
+}
+
+.spinner {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  vertical-align: middle;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Tasks tab */
+
+.tasks-tab h2 {
+  font-size: 1rem;
+  margin: 1.5rem 0 0.75rem;
+}
+
+.tasks-tab h2:first-child {
+  margin-top: 0;
+}
+
+.flash {
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.85rem;
+}
+
+.flash-success {
+  background: var(--success-bg);
+}
+
+.flash-error {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.tasks-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.field-label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 0.75rem;
+}
+
+.field-label select {
+  display: block;
+  margin-top: 0.25rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 0.85rem;
+}
+
+.tasks-level-filter {
+  border: none;
+  padding: 0;
+  margin: 0 0 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.tasks-level-filter legend {
+  font-size: 0.85rem;
+  color: var(--muted);
+  padding: 0;
+}
+
+.level-checkbox {
+  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.tasks-failed {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+}
+
+.tasks-failed pre {
+  background: var(--code-bg);
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+  white-space: pre-wrap;
+}
+
+.tasks-log-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.log-entry {
+  border-bottom: 1px solid var(--border);
+  padding: 0.35rem 0;
+  font-size: 0.82rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.log-level {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.log-event {
+  color: var(--muted);
+}
+
+.log-message {
+  flex: 1 1 300px;
+}
+
+.log-context {
+  flex-basis: 100%;
+}
+
+.log-context pre {
+  background: var(--code-bg);
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.35rem 0 0;
 }

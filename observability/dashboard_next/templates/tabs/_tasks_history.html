@@ -1,0 +1,43 @@
+<div class="tasks-history">
+  <h2>Recent Task History</h2>
+  <form hx-get="/tasks/history" hx-target="#task-history-panel" hx-swap="innerHTML" hx-trigger="change">
+    <label class="field-label">Filter by task:
+      <select name="task">
+        <option value="" {% if not selected_task %}selected{% endif %}>All Tasks</option>
+        {% for name in task_names %}
+        <option value="{{ name }}" {% if name == selected_task %}selected{% endif %}>{{ name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </form>
+
+  {% if not history_rows %}
+  <p class="stats-empty">No task execution history found.</p>
+  {% else %}
+  <table class="stats-table">
+    <thead><tr><th>Task</th><th>Status</th><th>Started</th><th>Completed</th><th>Tracks</th></tr></thead>
+    <tbody>
+      {% for row in history_rows %}
+      <tr>
+        <td>{{ row.task_name }}</td>
+        <td>{{ row.status_display }}</td>
+        <td>{{ row.started_display }}</td>
+        <td>{{ row.completed_display }}</td>
+        <td>{{ row.tracks_processed }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if failed_runs %}
+  <details class="tasks-failed">
+    <summary>Failed Runs ({{ failed_runs | length }})</summary>
+    {% for run in failed_runs %}
+    <pre>Task: {{ run.task_name }}
+Time: {{ run.started_display }}
+Error: {{ run.error_message }}</pre>
+    {% endfor %}
+  </details>
+  {% endif %}
+  {% endif %}
+</div>

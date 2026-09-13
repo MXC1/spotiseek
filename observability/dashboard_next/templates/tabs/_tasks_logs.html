@@ -1,0 +1,46 @@
+<div class="tasks-logs">
+  <h2>Task Scheduler Logs</h2>
+  {% if not log_files %}
+  <p class="stats-empty">No task scheduler logs found.</p>
+  {% else %}
+  <form hx-get="/tasks/logs" hx-target="#task-logs-panel" hx-swap="innerHTML" hx-trigger="change">
+    <label class="field-label">Select a log file to view:
+      <select name="log_id">
+        {% for log in log_files %}
+        <option value="{{ log.log_id }}" {% if log.log_id == selected_log_id %}selected{% endif %}>{{ log.display_name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <fieldset class="tasks-level-filter">
+      <legend>Filter by level:</legend>
+      {% for level in ["INFO", "WARNING", "ERROR", "DEBUG"] %}
+      <label class="level-checkbox">
+        <input type="checkbox" name="level" value="{{ level }}" {% if level in selected_levels %}checked{% endif %}>
+        {{ level }}
+      </label>
+      {% endfor %}
+    </fieldset>
+  </form>
+
+  {% if not log_entries %}
+  <p class="stats-empty">No log entries found in selected file.</p>
+  {% else %}
+  <p class="stats-caption">
+    Showing {{ shown_count }} of {{ total_count }} entries
+    {%- if truncated %} (most recent {{ shown_count }} only){% endif %}
+  </p>
+  <div class="tasks-log-entries">
+    {% for entry in log_entries %}
+    <div class="log-entry">
+      <span class="log-level log-level-{{ entry.level | lower }}">{{ entry.level_emoji }} {{ entry.display_time }}</span>
+      <span class="log-event">[{{ entry.event_id }}]</span>
+      <span class="log-message">{{ entry.message }}</span>
+      {% if entry.context_json %}
+      <details class="log-context"><summary>Context</summary><pre>{{ entry.context_json }}</pre></details>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endif %}
+</div>

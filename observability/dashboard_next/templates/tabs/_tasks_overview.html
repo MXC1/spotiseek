@@ -1,0 +1,60 @@
+<div class="tasks-overview">
+  {% if flash %}
+  <p class="flash flash-{{ flash.type }}">{{ flash.text }}</p>
+  {% endif %}
+
+  <h2>Quick Actions</h2>
+  <div class="tasks-actions">
+    <button
+      class="btn btn-primary"
+      hx-post="/tasks/run-all"
+      hx-target="#task-overview-panel"
+      hx-swap="innerHTML"
+      hx-indicator="#task-overview-panel"
+      hx-disabled-elt="this">Run All Tasks</button>
+    <button
+      class="btn"
+      hx-get="/tasks/overview"
+      hx-target="#task-overview-panel"
+      hx-swap="innerHTML"
+      hx-indicator="#task-overview-panel"
+      hx-disabled-elt="this">Refresh Status</button>
+    <span class="htmx-indicator spinner" aria-hidden="true"></span>
+  </div>
+
+  <h2>Task Overview</h2>
+  {% if not tasks %}
+  <p class="stats-empty">No tasks registered.</p>
+  {% else %}
+  <table class="stats-table tasks-table">
+    <thead>
+      <tr><th>Task</th><th>Interval</th><th>Last Run</th><th>Next Run</th><th>Status</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for t in tasks %}
+      <tr>
+        <td>
+          <strong>{{ t.status_emoji }} {{ t.display_name }}</strong>
+          {% if t.dependencies %}<br><span class="stats-caption">Depends on: {{ t.dependencies | join(", ") }}</span>{% endif %}
+        </td>
+        <td>{{ t.interval_display }}</td>
+        <td>{{ t.last_run_display }}</td>
+        <td>{{ t.next_run_display }}</td>
+        <td>{{ t.status_text }}</td>
+        <td>
+          <button
+            class="btn btn-small"
+            hx-post="/tasks/run/{{ t.task_name }}"
+            hx-target="#task-overview-panel"
+            hx-swap="innerHTML"
+            hx-indicator="#task-overview-panel"
+            hx-disabled-elt="this"
+            {% if t.is_running %}disabled{% endif %}
+            title="Run {{ t.display_name }} now">Run Now</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
