@@ -204,7 +204,6 @@ def manual_import_tab(request: Request):
     if request.headers.get("HX-Request") == "true":
         return templates.TemplateResponse(request, "tabs/manual_import_tab.html", context)
 
-    context["active_tab"] = "manual-import"
     context["env_name"] = (ENV or "default").upper()
     context["content_template"] = "tabs/manual_import_tab.html"
     return templates.TemplateResponse(request, "base.html", context)

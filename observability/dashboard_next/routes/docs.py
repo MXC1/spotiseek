@@ -50,7 +50,6 @@ def docs_tab(request: Request, slug: str = DEFAULT_DOC_SLUG):
     if request.headers.get("HX-Request") == "true":
         return templates.TemplateResponse(request, "tabs/docs_tab.html", context)
 
-    context["active_tab"] = "docs"
     context["env_name"] = (ENV or "default").upper()
     context["content_template"] = "tabs/docs_tab.html"
     return templates.TemplateResponse(request, "base.html", context)

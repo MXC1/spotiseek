@@ -12,37 +12,37 @@
   <header class="app-header">
     <h1>&#127925; Spotiseek Dashboard <span class="env-badge">{{ env_name }}</span></h1>
     <nav class="tab-nav">
-      <a class="tab-link{% if active_tab == 'stats' %} active{% endif %}"
+      <a class="tab-link"
          href="/stats"
          hx-get="/stats"
          hx-target="#tab-content"
          hx-push-url="true">&#128202; Overall Stats</a>
-      <a class="tab-link{% if active_tab == 'tasks' %} active{% endif %}"
+      <a class="tab-link"
          href="/tasks"
          hx-get="/tasks"
          hx-target="#tab-content"
          hx-push-url="true">&#9203; Tasks</a>
-      <a class="tab-link{% if active_tab == 'execution-inspection' %} active{% endif %}"
+      <a class="tab-link"
          href="/execution-inspection"
          hx-get="/execution-inspection"
          hx-target="#tab-content"
          hx-push-url="true">&#128269; Execution Inspection</a>
-      <a class="tab-link{% if active_tab == 'manual-import' %} active{% endif %}"
+      <a class="tab-link"
          href="/manual-import"
          hx-get="/manual-import"
          hx-target="#tab-content"
          hx-push-url="true">&#128229; Manual Import</a>
-      <a class="tab-link{% if active_tab == 'auto-import' %} active{% endif %}"
+      <a class="tab-link"
          href="/auto-import"
          hx-get="/auto-import"
          hx-target="#tab-content"
          hx-push-url="true">&#129302; Auto Import</a>
-      <a class="tab-link{% if active_tab == 'blacklist' %} active{% endif %}"
+      <a class="tab-link"
          href="/blacklist"
          hx-get="/blacklist"
          hx-target="#tab-content"
          hx-push-url="true">&#128683; Blacklist</a>
-      <a class="tab-link{% if active_tab == 'docs' %} active{% endif %}"
+      <a class="tab-link"
          href="/docs/overview"
          hx-get="/docs/overview"
          hx-target="#tab-content"
@@ -52,5 +52,25 @@
   <main id="tab-content">
     {% include content_template %}
   </main>
+  <script>
+    // The nav bar lives in this shell, which HTMX never re-renders on a tab click (only
+    // #tab-content is swapped, deliberately, to avoid the full-page-rerun jank this
+    // dashboard replaced Streamlit over) -- so "active tab" highlighting has to be
+    // driven by the current URL client-side instead of a server-rendered class that
+    // would otherwise freeze at whichever tab was active on the last full page load.
+    (function () {
+      function updateActiveTab() {
+        var path = window.location.pathname;
+        document.querySelectorAll(".tab-link").forEach(function (link) {
+          var segment = "/" + link.getAttribute("href").split("/")[1];
+          var active = path === segment || path.indexOf(segment + "/") === 0;
+          link.classList.toggle("active", active);
+        });
+      }
+      document.addEventListener("DOMContentLoaded", updateActiveTab);
+      document.body.addEventListener("htmx:pushedIntoHistory", updateActiveTab);
+      window.addEventListener("popstate", updateActiveTab);
+    })();
+  </script>
 </body>
 </html>

@@ -219,7 +219,6 @@ def blacklist_tab(request: Request):
     if request.headers.get("HX-Request") == "true":
         return templates.TemplateResponse(request, "tabs/blacklist_tab.html", context)
 
-    context["active_tab"] = "blacklist"
     context["env_name"] = (ENV or "default").upper()
     context["content_template"] = "tabs/blacklist_tab.html"
     return templates.TemplateResponse(request, "base.html", context)

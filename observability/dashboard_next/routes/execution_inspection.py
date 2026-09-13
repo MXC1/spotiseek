@@ -106,7 +106,6 @@ def execution_inspection_tab(request: Request):
     if request.headers.get("HX-Request") == "true":
         return templates.TemplateResponse(request, "tabs/execution_inspection_tab.html", context)
 
-    context["active_tab"] = "execution-inspection"
     context["env_name"] = (ENV or "default").upper()
     context["content_template"] = "tabs/execution_inspection_tab.html"
     return templates.TemplateResponse(request, "base.html", context)

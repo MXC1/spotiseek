@@ -219,7 +219,6 @@ def tasks_tab(request: Request):
     if request.headers.get("HX-Request") == "true":
         return templates.TemplateResponse(request, "tabs/tasks_tab.html", context)
 
-    context["active_tab"] = "tasks"
     context["env_name"] = (ENV or "default").upper()
     context["content_template"] = "tabs/tasks_tab.html"
     return templates.TemplateResponse(request, "base.html", context)

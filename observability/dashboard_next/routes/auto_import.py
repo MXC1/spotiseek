@@ -506,7 +506,6 @@ def auto_import_tab(request: Request):
     if request.headers.get("HX-Request") == "true":
         return templates.TemplateResponse(request, "tabs/auto_import_tab.html", context)
 
-    context["active_tab"] = "auto-import"
     context["env_name"] = (ENV or "default").upper()
     context["content_template"] = "tabs/auto_import_tab.html"
     return templates.TemplateResponse(request, "base.html", context)

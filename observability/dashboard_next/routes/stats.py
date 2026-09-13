@@ -121,7 +121,6 @@ def stats_tab(request: Request):
     if request.headers.get("HX-Request") == "true":
         return templates.TemplateResponse(request, "tabs/stats_tab.html", context)
 
-    context["active_tab"] = "stats"
     context["env_name"] = (ENV or "default").upper()
     context["content_template"] = "tabs/stats_tab.html"
     return templates.TemplateResponse(request, "base.html", context)
