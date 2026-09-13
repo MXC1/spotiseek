@@ -4,7 +4,7 @@ dashboard_next configuration module.
 Temporary FastAPI replacement for observability/dashboard/config.py -- see
 docs/adr/0003-dashboard-rewrite-fastapi-htmx.md and
 docs/adr/0004-dashboard-migration-parallel-service-cutover.md. Grows one tab's worth of
-config at a time as the migration progresses; only the Docs tab's paths exist so far.
+config at a time as the migration progresses.
 This module should be imported first by other dashboard_next modules.
 """
 
@@ -20,12 +20,15 @@ load_dotenv(_dotenv_path)
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), ".."))
 
-from scripts.logs_utils import setup_logging  # noqa: E402
+from scripts.database_management import TrackDB  # noqa: E402
+from scripts.logs_utils import setup_logging, write_log  # noqa: E402
 
 ENV = os.getenv("APP_ENV")
 
 # Environment-specific paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+OUTPUT_ENV_DIR = os.path.join(BASE_DIR, "output", ENV or "default")
+DB_PATH = os.path.join(OUTPUT_ENV_DIR, f"database_{ENV}.db") if ENV else ""
 
 # Documentation paths -- slug -> (display name, file path)
 DOCS_DIR = os.path.join(BASE_DIR, "docs")
@@ -37,5 +40,13 @@ DOC_FILES = {
 }
 DEFAULT_DOC_SLUG = "overview"
 
+# Database singleton (None if ENV not set, mirroring observability/dashboard/config.py)
+track_db = None
 if ENV:
+    os.makedirs(OUTPUT_ENV_DIR, exist_ok=True)
     setup_logging(log_name_prefix="task_scheduler", rotate_daily=True)
+    try:
+        track_db = TrackDB()
+    except Exception as e:
+        write_log.error("DASHBOARD_NEXT_DB_INIT_FAIL", "Failed to initialize database.", {"db_path": DB_PATH, "error": str(e)})
+        track_db = None

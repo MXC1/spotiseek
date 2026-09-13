@@ -1,0 +1,129 @@
+<section class="stats-tab">
+  {% if db_error %}
+  <p class="stats-error">{{ db_error }}</p>
+  {% else %}
+  <div class="stats-grid">
+    <div class="stats-col">
+      <div class="stats-panel">
+        <h2>Unique Playlists</h2>
+        {% if playlists %}
+        <table class="stats-table">
+          <thead><tr><th>Playlist Name</th><th>Playlist URL</th></tr></thead>
+          <tbody>
+            {% for name, url in playlists %}
+            <tr><td>{{ name }}</td><td class="url-cell">{{ url }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="stats-empty">No playlists found in the database.</p>
+        {% endif %}
+      </div>
+
+      <div class="stats-panel">
+        <h2>Track Extension, Bitrate, and Download Status Breakdown</h2>
+        <div class="stats-subgrid">
+          <div>
+            <h3>File Extension Breakdown</h3>
+            {% if extension_rows %}
+            <table class="stats-table">
+              <thead><tr><th>Extension</th><th>Count</th></tr></thead>
+              <tbody>
+                {% for ext, count in extension_rows %}
+                <tr><td>{{ ext or "(none)" }}</td><td>{{ count }}</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            {% else %}
+            <p class="stats-empty">No extension data found.</p>
+            {% endif %}
+          </div>
+          <div>
+            <h3>Bitrate Breakdown (Enhanced)</h3>
+            {% if bitrate_rows %}
+            <table class="stats-table">
+              <thead><tr><th>Bitrate</th><th>Count</th></tr></thead>
+              <tbody>
+                {% for label, count in bitrate_rows %}
+                <tr><td>{{ label }}</td><td>{{ count }}</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            <p class="stats-caption">Known numeric bitrates, aggregated Lossless, and Unknown files with computed effective bitrate.</p>
+            {% else %}
+            <p class="stats-empty">No bitrate data found.</p>
+            {% endif %}
+          </div>
+          <div>
+            <h3>Download Status Breakdown</h3>
+            {% if download_status_rows %}
+            <table class="stats-table">
+              <thead><tr><th>Status</th><th>Count</th></tr></thead>
+              <tbody>
+                {% for status, count in download_status_rows %}
+                <tr><td>{{ status }}</td><td>{{ count }}</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            {% else %}
+            <p class="stats-empty">No download status data found.</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stats-col">
+      <div class="stats-panel">
+        <h2>Track Download Status Breakdown</h2>
+        {% if chart_rows %}
+        <div class="bar-chart" role="img" aria-label="Track download status, excluding completed">
+          {% for status, count, pct in chart_rows %}
+          <div class="bar-row">
+            <span class="bar-label">{{ status }}</span>
+            <div class="bar-track">
+              <div class="bar-fill" style="width: {{ pct }}%"></div>
+            </div>
+            <span class="bar-count">{{ count }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="stats-empty">No non-completed track statuses to display in the graph.</p>
+        {% endif %}
+
+        {% if status_rows %}
+        <table class="stats-table">
+          <thead><tr><th>Download Status</th><th>Count</th></tr></thead>
+          <tbody>
+            {% for status, count in status_rows %}
+            <tr><td>{{ status }}</td><td>{{ count }}</td></tr>
+            {% endfor %}
+            <tr class="stats-total-row"><td>Total</td><td>{{ total_status_count }}</td></tr>
+          </tbody>
+        </table>
+        {% else %}
+        <p class="stats-empty">No track status data found in the database.</p>
+        {% endif %}
+      </div>
+
+      <div class="stats-panel">
+        <h2>Tracks Without Local Files</h2>
+        <p class="stats-caption">Breakdown by status and reason for tracks that haven't been downloaded</p>
+        {% if failed_reason_rows %}
+        <table class="stats-table">
+          <thead><tr><th>Status</th><th>Reason</th><th>Count</th></tr></thead>
+          <tbody>
+            {% for status, reason, count in failed_reason_rows %}
+            <tr><td>{{ status }}</td><td>{{ reason }}</td><td>{{ count }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="stats-empty">All tracks have local files!</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</section>

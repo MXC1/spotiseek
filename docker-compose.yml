@@ -58,6 +58,7 @@ services:
     environment:
       - APP_ENV=${APP_ENV}
     volumes:
+      - ./output:/app/output:rw
       - ./observability/dashboard_next:/app/observability/dashboard_next:ro
       - ./observability/logs:/app/observability/logs:rw
       - ./docs:/app/docs:ro

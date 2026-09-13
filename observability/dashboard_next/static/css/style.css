@@ -82,7 +82,7 @@ body {
 
 main#tab-content {
   padding: 1.5rem;
-  max-width: 960px;
+  max-width: 1200px;
   margin: 0 auto;
 }
 
@@ -186,5 +186,134 @@ main#tab-content {
 
   .docs-selector {
     flex-basis: auto;
+  }
+}
+
+.stats-error {
+  color: var(--muted);
+}
+
+.stats-grid {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.stats-col {
+  flex: 1 1 400px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.stats-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+}
+
+.stats-panel h2 {
+  font-size: 1rem;
+  margin: 0 0 0.75rem;
+}
+
+.stats-panel h3 {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0 0 0.4rem;
+}
+
+.stats-subgrid {
+  display: flex;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.stats-subgrid > div {
+  flex: 1 1 150px;
+  min-width: 0;
+}
+
+.stats-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.85rem;
+}
+
+.stats-table th,
+.stats-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+}
+
+.stats-table .url-cell {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-total-row td {
+  font-weight: 600;
+  border-top: 2px solid var(--border);
+  border-bottom: none;
+}
+
+.stats-empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.stats-caption {
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin-top: 0.4rem;
+}
+
+.bar-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: 7rem 1fr 2.5rem;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.bar-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bar-track {
+  background: var(--code-bg);
+  border-radius: 4px;
+  height: 0.9rem;
+  overflow: hidden;
+}
+
+.bar-fill {
+  background: var(--accent);
+  height: 100%;
+  border-radius: 4px;
+}
+
+.bar-count {
+  text-align: right;
+  color: var(--muted);
+}
+
+@media (max-width: 640px) {
+  .bar-row {
+    grid-template-columns: 5rem 1fr 2rem;
   }
 }

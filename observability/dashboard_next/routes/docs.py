@@ -10,14 +10,11 @@ import os
 
 import markdown
 from fastapi import APIRouter, Request
-from fastapi.templating import Jinja2Templates
 
 from observability.dashboard_next.config import DEFAULT_DOC_SLUG, DOC_FILES, DOCS_DIR, ENV
+from observability.dashboard_next.templating import templates
 
 router = APIRouter()
-
-_templates_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates")
-templates = Jinja2Templates(directory=_templates_dir)
 
 _MARKDOWN_EXTENSIONS = ["fenced_code", "tables"]
 

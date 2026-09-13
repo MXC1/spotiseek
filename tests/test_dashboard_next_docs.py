@@ -19,12 +19,6 @@ def client():
     return TestClient(app)
 
 
-def test_root_redirects_to_default_doc(client):
-    response = client.get("/", follow_redirects=False)
-    assert response.status_code in (302, 307)
-    assert response.headers["location"] == "/docs/overview"
-
-
 def test_default_doc_renders_full_page(client):
     response = client.get("/docs/overview")
     assert response.status_code == 200

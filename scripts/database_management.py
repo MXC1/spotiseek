@@ -1132,6 +1132,81 @@ class TrackDB:
         result = cursor.fetchone()
         return result[0] if result else None
 
+    # --- dashboard_next Overall Stats queries ---
+    # Routed through the singleton connection instead of an ad-hoc sqlite3.connect,
+    # per docs/adr/0003-dashboard-rewrite-fastapi-htmx.md.
+
+    def get_playlists(self) -> list[tuple[str, str]]:
+        """Return (playlist_name, playlist_url) for every playlist, in CSV/display order."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT playlist_name, playlist_url FROM playlists "
+            "ORDER BY display_order IS NULL, display_order",
+        )
+        return cursor.fetchall()
+
+    def get_track_status_breakdown(self) -> list[tuple[str, int]]:
+        """Return (download_status, count) for every status value in the tracks table."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT download_status, COUNT(*) FROM tracks GROUP BY download_status")
+        return cursor.fetchall()
+
+    def get_download_status_breakdown(self) -> list[tuple[str, int]]:
+        """Return ("Downloaded"|"Not Downloaded", count); NULL/blank paths count as not downloaded."""
+        # GROUP BY repeats the CASE expression rather than referencing the "local_file_status"
+        # alias: aliasing it "download_status" once collided with the tracks table's own
+        # download_status column, so SQLite grouped by the granular per-track status instead
+        # of this collapsed label.
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                CASE WHEN local_file_path IS NOT NULL AND TRIM(local_file_path) != ''
+                     THEN 'Downloaded' ELSE 'Not Downloaded' END AS local_file_status,
+                COUNT(*)
+            FROM tracks
+            GROUP BY
+                CASE WHEN local_file_path IS NOT NULL AND TRIM(local_file_path) != ''
+                     THEN 'Downloaded' ELSE 'Not Downloaded' END
+            ORDER BY COUNT(*) DESC
+            """,
+        )
+        return cursor.fetchall()
+
+    def get_extension_breakdown(self) -> list[tuple[str, int]]:
+        """Return (extension, count) for tracks that have a local file, most common first."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT extension, COUNT(*) FROM tracks "
+            "WHERE local_file_path IS NOT NULL AND TRIM(local_file_path) != '' "
+            "GROUP BY extension ORDER BY COUNT(*) DESC",
+        )
+        return cursor.fetchall()
+
+    def get_tracks_with_local_files(self) -> list[tuple[str | None, int | None, str]]:
+        """Return (extension, bitrate, local_file_path) for every track with a local file.
+
+        Raw rows, not a GROUP BY: the enhanced bitrate breakdown needs a per-file
+        effective-bitrate computation (from file size/duration) that SQL can't express.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT extension, bitrate, local_file_path FROM tracks "
+            "WHERE local_file_path IS NOT NULL AND TRIM(local_file_path) != ''",
+        )
+        return cursor.fetchall()
+
+    def get_failed_reason_breakdown(self) -> list[tuple[str, str, int]]:
+        """Return (download_status, failed_reason, count) for tracks with no local file."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT download_status, COALESCE(NULLIF(failed_reason, ''), 'N/A'), COUNT(*) "
+            "FROM tracks WHERE local_file_path IS NULL OR TRIM(local_file_path) = '' "
+            "GROUP BY download_status, COALESCE(NULLIF(failed_reason, ''), 'N/A') "
+            "ORDER BY COUNT(*) DESC",
+        )
+        return cursor.fetchall()
+
     def close(self) -> None:
         """Close the database connection."""
         write_log.info("DB_CLOSE", "Closing database connection.")
