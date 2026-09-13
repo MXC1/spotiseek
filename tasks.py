@@ -1,24 +1,101 @@
 # ruff: noqa: ARG001
+import io
 import os
 import platform
 import subprocess
+import tarfile
 from pathlib import Path
 
 from invoke import task
 
+ENV_PATH = Path(__file__).parent / ".env"
+
+# Files extracted by `invoke deploy` -- see docs/adr/0002-gated-environment-deploys-via-git-archive.md
+DEPLOY_DIR = Path(".deploy")
+DEPLOYED_CODE_RELPATH = ".deploy/deployed-code"  # forward slashes: written into .env for docker-compose
+DEPLOYED_CODE_DIR = Path(DEPLOYED_CODE_RELPATH)
+DEPLOYED_SHA_FILE = DEPLOY_DIR / "DEPLOYED_SHA"
+DEPLOY_ARCHIVE_PATHS = [
+    "scripts",
+    "observability/dashboard",
+    "observability/combined_dashboard.py",
+    "requirements.txt",
+    "infra/Dockerfile.backup",
+]
+
+
+def _read_env_var(key: str) -> str | None:
+    """Read a single KEY=value line from .env."""
+    if not ENV_PATH.exists():
+        return None
+    with open(ENV_PATH) as f:
+        for line in f:
+            if line.strip().startswith(f"{key}="):
+                return line.strip().split("=", 1)[1]
+    return None
+
+
+def _write_env_var(key: str, value: str) -> None:
+    """Set (or append) a single KEY=value line in .env."""
+    lines = []
+    if ENV_PATH.exists():
+        with open(ENV_PATH) as f:
+            lines = f.readlines()
+
+    found = False
+    for i, line in enumerate(lines):
+        if line.strip().startswith(f"{key}="):
+            lines[i] = f"{key}={value}\n"
+            found = True
+            break
+    if not found:
+        lines.append(f"{key}={value}\n")
+
+    with open(ENV_PATH, "w") as f:
+        f.writelines(lines)
+
 
 def get_app_env():
     """Read APP_ENV from .env file."""
-    env_path = Path(__file__).parent / ".env"
-    if not env_path.exists():
+    if not ENV_PATH.exists():
         print(".env file not found!")
         return None
-    with open(env_path) as f:
-        for line in f:
-            if line.strip().startswith("APP_ENV="):
-                return line.strip().split("=", 1)[1]
-    print("APP_ENV not found in .env!")
-    return None
+    value = _read_env_var("APP_ENV")
+    if value is None:
+        print("APP_ENV not found in .env!")
+    return value
+
+
+def get_deploy_gated_env():
+    """Read DEPLOY_GATED_ENV from .env -- the environment whose workflow/dashboard/backup
+    code only changes via `invoke deploy`, never just by being the hot environment.
+    """
+    return _read_env_var("DEPLOY_GATED_ENV")
+
+
+def _sync_code_root() -> None:
+    """Point CODE_ROOT (read by docker-compose.yml for workflow/dashboard's code volume
+    mounts) at the deployed snapshot when the gated environment is hot, otherwise at the
+    working tree.
+    """
+    app_env = get_app_env()
+    gated_env = get_deploy_gated_env()
+    code_root = f"./{DEPLOYED_CODE_RELPATH}" if (gated_env and app_env == gated_env) else "."
+    _write_env_var("CODE_ROOT", code_root)
+
+
+def _require_deployed_code() -> bool:
+    """The `backup` service always builds from .deploy/deployed-code/, for every
+    environment, so it must exist before docker-compose can bring anything up.
+    """
+    if not DEPLOYED_CODE_DIR.exists():
+        print(
+            f"No deployed code found at {DEPLOYED_CODE_RELPATH}/ -- run `invoke deploy` first.\n"
+            "The 'backup' service (and the gated environment's workflow/dashboard, if it's "
+            "the one currently hot) build/mount from that snapshot.",
+        )
+        return False
+    return True
 
 
 def running_inside_wsl() -> bool:
@@ -145,6 +222,9 @@ def exec(c, service, command):
 @task
 def build(c):
     """Build all Docker images"""
+    if not _require_deployed_code():
+        return
+    _sync_code_root()
     subprocess.run(wrap_docker_cmd(["docker-compose", "build"]), check=True)
 
 @task
@@ -153,6 +233,9 @@ def up(c, service=None):
 
     Use --build to force image rebuild. Optionally specify a service (e.g. invoke up streamlit).
     """
+    if not _require_deployed_code():
+        return
+    _sync_code_root()
     cmd = ["docker-compose", "up", "-d", "--build"]
     if service:
         cmd.append(service)
@@ -319,33 +402,77 @@ def lint_fix(c):
 @task
 def setenv(c, env):
     """Change the APP_ENV variable in .env file. Usage: invoke setenv <environment>"""
-    env_path = Path(__file__).parent / ".env"
-    if not env_path.exists():
+    if not ENV_PATH.exists():
         print(".env file not found!")
         return
 
-    # Read current .env content
-    with open(env_path) as f:
-        lines = f.readlines()
-
-    # Update or add APP_ENV
-    found = False
-    for i, line in enumerate(lines):
-        if line.strip().startswith("APP_ENV="):
-            lines[i] = f"APP_ENV={env}\n"
-            found = True
-            break
-
-    if not found:
-        lines.append(f"APP_ENV={env}\n")
-
-    # Write back to .env
-    with open(env_path, "w") as f:
-        f.writelines(lines)
+    _write_env_var("APP_ENV", env)
 
     print(f"APP_ENV set to '{env}'")
     print("Running 'invoke up' to apply environment change...")
     subprocess.run(["invoke", "up"], check=True)
+
+
+@task(help={
+    "ref": "Git ref to deploy (default: origin/main, fetched first)",
+})
+def deploy(c, ref="origin/main"):
+    """Extract a curated code snapshot into .deploy/deployed-code/ for the gated environment.
+
+    Usage:
+      invoke deploy                # deploy origin/main (fetches first)
+      invoke deploy --ref=<ref>    # deploy an arbitrary branch, tag, or commit
+
+    Only scripts/, the dashboard code under observability/, requirements.txt, and
+    infra/Dockerfile.backup are extracted -- see
+    docs/adr/0002-gated-environment-deploys-via-git-archive.md. The 'backup' service
+    always builds from this snapshot; workflow/dashboard only mount from it while the
+    gated environment (DEPLOY_GATED_ENV) is hot.
+    """
+    print("Fetching origin...")
+    subprocess.run(["git", "fetch", "origin"], check=True)
+
+    resolved = subprocess.run(
+        ["git", "rev-parse", ref], check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+    previous_sha = DEPLOYED_SHA_FILE.read_text().strip() if DEPLOYED_SHA_FILE.exists() else None
+    if previous_sha == resolved:
+        print(f"Already deployed at {resolved} -- nothing to do.")
+        return
+
+    change = f" (was {previous_sha})" if previous_sha else ""
+    print(f"Deploying {ref} -> {resolved}{change}")
+
+    if DEPLOYED_CODE_DIR.exists():
+        _force_remove_dir(c, DEPLOYED_CODE_DIR)
+    DEPLOYED_CODE_DIR.mkdir(parents=True, exist_ok=True)
+
+    archive = subprocess.run(
+        ["git", "archive", resolved, "--", *DEPLOY_ARCHIVE_PATHS],
+        check=True, capture_output=True,
+    )
+    with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tf:
+        tf.extractall(DEPLOYED_CODE_DIR, filter="data")
+
+    DEPLOYED_SHA_FILE.write_text(resolved + "\n")
+    print(f"Deployed {resolved} to {DEPLOYED_CODE_RELPATH}/")
+
+    print("Rebuilding 'backup' from the deployed snapshot...")
+    subprocess.run(
+        wrap_docker_cmd(["docker-compose", "up", "-d", "--build", "backup"]),
+        check=True,
+    )
+
+    gated_env = get_deploy_gated_env()
+    if gated_env and get_app_env() == gated_env:
+        print(f"'{gated_env}' is the hot environment -- restarting workflow/dashboard...")
+        subprocess.run(
+            wrap_docker_cmd(["docker-compose", "restart", "workflow", "dashboard"]),
+            check=True,
+        )
+
+    print("Deploy complete.")
 
 @task(default=True)
 def help(c):

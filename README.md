@@ -49,6 +49,7 @@ Group playlists into Rekordbox folders with `# Heading` lines — see
 
 ```bash
 pip install invoke  # If not installed
+invoke deploy       # One-time bootstrap: the backup service always builds from this snapshot
 invoke up
 ```
 
@@ -76,6 +77,7 @@ This starts:
 | `invoke logs --service workflow` | Follow logs for a service |
 | `invoke run-all-tasks` | Execute all tasks immediately |
 | `invoke setenv test` | Switch environment and restart |
+| `invoke deploy [--ref=X]` | Deploy a git ref (default `origin/main`) into the gated environment's code snapshot |
 | `invoke backup [--env=X\|--all]` | Back up an environment (defaults to current `APP_ENV`) |
 | `invoke restore --env=X [--as-env=Y]` | Restore an environment in place, or clone it into a new one |
 | `invoke backup-forget --env=X` | **DESTRUCTIVE**: Permanently delete all backups for an environment |

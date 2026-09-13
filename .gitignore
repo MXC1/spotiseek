@@ -59,3 +59,6 @@ dev
 
 # Backups (restic repositories; default BACKUP_DEST)
 backups/
+
+# Deployed code snapshot (extracted fresh by `invoke deploy`; never edited directly)
+.deploy/

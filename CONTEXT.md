@@ -27,6 +27,20 @@ Replacing an environment's on-disk data with one of its own backup snapshots, ke
 Restoring a backup snapshot into a *new* environment name. The database's environment-scoped path columns are rewritten to the new name; the exported XML and `.m3u8` playlists are regenerated from the database rather than copied, since both are fully derived from it.
 _Avoid_: fork, copy environment
 
+### Deployment
+
+**Gated environment**:
+The environment named by `DEPLOY_GATED_ENV` (currently `all_playlists`) — the only one whose `workflow`/`dashboard`/`backup` code changes exclusively through a deploy, never just by being the hot environment or by running `invoke up` against whatever is on disk. Every other environment always runs whatever code is currently on disk.
+_Avoid_: prod, production, live environment
+
+**Deploy**:
+Extracting one git ref's `scripts/`, dashboard code, and `backup`'s build inputs into the deployed code snapshot, so that's what the gated environment's containers run from next. Triggered only by `invoke deploy`; never happens implicitly.
+_Avoid_: release, ship, promote
+
+**Deployed code**:
+The on-disk snapshot of one specific git ref — extracted fresh on every deploy, never edited directly — that the gated environment's containers read from instead of the working tree. Its ref is recorded so the next deploy can show what's changing.
+_Avoid_: worktree, build artifact
+
 ### Playlists & folders
 
 **Playlist**:

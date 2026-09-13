@@ -20,6 +20,7 @@ invoke logs --service workflow  # Follow logs for a specific service (or all if 
 invoke exec --service <svc> --command '<cmd>'  # Run a command inside a running container
 invoke run-all-tasks            # Run all scheduler tasks once, in dependency order, inside the workflow container
 invoke setenv <env>             # Change APP_ENV in .env, then re-runs `invoke up`
+invoke deploy [--ref=<ref>]     # Extract a git ref (default origin/main, fetched first) into .deploy/deployed-code/ for the gated environment
 invoke nuke [--env=<env>]       # DESTRUCTIVE: docker-compose down + system prune + delete that env's data dirs
 invoke lint                     # ruff check scripts/ tasks.py
 invoke lint-fix                 # ruff check --fix scripts/ tasks.py
@@ -64,8 +65,19 @@ Ruff config lives in `pyproject.toml`, targeting Python 3.10+. Enabled rule grou
 - **slskd** — the Soulseek P2P daemon (ports 5030/5031), configured via `slskd_docker_data/slskd.yml` and `SLSKD_USERNAME`/`SLSKD_PASSWORD`.
 - **workflow** — runs `scripts.task_scheduler --daemon` (built from `infra/Dockerfile.workflow`); this is where all downloading/processing happens.
 - **dashboard** — Streamlit UI on port 8501 (built from `infra/Dockerfile.dashboard`), for monitoring, manual imports, and triggering tasks.
+- **backup** — the always-on restic backup/restore daemon (built from `infra/Dockerfile.backup`); singleton, not scoped to any one environment.
 
-Each service mounts `./output`, `./observability`, and the relevant `slskd_docker_data/${APP_ENV}` subfolders as volumes, so code changes to `scripts/` require a rebuild (`invoke up` always passes `--build`) but data persists on the host.
+Each service mounts `./output`, `./observability/logs`, and the relevant `slskd_docker_data/${APP_ENV}` subfolders as volumes, so data persists on the host across restarts. Code (`scripts/`, the dashboard code under `observability/`) is bind-mounted from `${CODE_ROOT}` for `workflow`/`dashboard` — normally the working tree, so `invoke up`/`invoke build` (which always pass `--build`) pick up code changes immediately — see **Gated Environment Deploys** below for the one exception.
+
+### Gated Environment Deploys
+
+The environment named by `DEPLOY_GATED_ENV` in `.env` (currently `all_playlists`) is the **gated environment** — see `CONTEXT.md` for the glossary and `docs/adr/0002-gated-environment-deploys-via-git-archive.md` for the full rationale. Only its `workflow`/`dashboard` code changes exclusively through `invoke deploy [--ref=<ref>]` (default `origin/main`, fetched first), never just by being the hot environment or by running `invoke up`/`invoke setenv` against whatever's on disk. `invoke deploy`:
+
+1. Resolves `ref` to a commit and `git archive`s exactly `scripts/`, `observability/dashboard/`, `observability/combined_dashboard.py`, `requirements.txt`, and `infra/Dockerfile.backup` into `.deploy/deployed-code/` (wiped and recreated from scratch each time), recording the commit in `.deploy/DEPLOYED_SHA`.
+2. Rebuilds the `backup` service from that snapshot — `backup` is a singleton touching every environment's real data, so its build context is *always* `.deploy/deployed-code`, regardless of which environment is hot.
+3. If the gated environment is currently hot, restarts `workflow`/`dashboard` (a plain restart, not a rebuild — their code is bind-mounted, not baked into the image) so they pick up the new snapshot.
+
+`invoke up`/`invoke build`/`invoke setenv` compute `CODE_ROOT` (`./.deploy/deployed-code` when the gated environment is hot, `.` otherwise) into `.env` before every run, and refuse to proceed if `.deploy/deployed-code/` doesn't exist yet — there's no auto-bootstrap; run `invoke deploy` once first. Everything besides `scripts/`/dashboard code/`backup`'s build inputs (infra, Dockerfiles, `.env` itself) still takes effect immediately via ordinary `invoke up --build`, for every environment including the gated one.
 
 ### Data Flow
 

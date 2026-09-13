@@ -165,6 +165,26 @@ This deletes the entire restic repository for one environment (no per-snapshot d
 
 ---
 
+## Deployment Configuration
+
+One environment can be designated the **gated environment**: its `workflow`/`dashboard`/`backup` code only changes via `invoke deploy`, never just by being the hot environment or by running `invoke up`/`invoke setenv` against whatever's currently on disk. Every other environment keeps mounting the live working tree and rebuilds instantly on `invoke up`, unchanged. See `docs/adr/0002-gated-environment-deploys-via-git-archive.md` for the full design.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEPLOY_GATED_ENV` | `all_playlists` | The environment name that is gated. |
+| `CODE_ROOT` | `.` | Managed automatically by `invoke up`/`build`/`setenv` — do not edit by hand. |
+
+```bash
+invoke deploy                # Deploy origin/main (fetches first)
+invoke deploy --ref=<ref>    # Deploy an arbitrary branch, tag, or commit
+```
+
+This extracts exactly `scripts/`, `observability/dashboard/`, `observability/combined_dashboard.py`, `requirements.txt`, and `infra/Dockerfile.backup` from the target ref into `.deploy/deployed-code/` (wiped and recreated from scratch each time), records the deployed commit in `.deploy/DEPLOYED_SHA`, rebuilds the always-on `backup` service from that snapshot (its build context is always `.deploy/deployed-code`, regardless of which environment is hot), and — only if the gated environment is currently hot — restarts `workflow`/`dashboard` to pick up the new code.
+
+`invoke up`, `invoke build`, and `invoke setenv` refuse to run until `.deploy/deployed-code/` exists at least once — run `invoke deploy` first on a fresh clone. Everything besides gated code (infra, Dockerfiles, `.env` itself) still takes effect immediately via ordinary `invoke up --build`, for every environment including the gated one.
+
+---
+
 ## Example .env File
 
 ```env
@@ -182,6 +202,10 @@ SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
 # Environment
 APP_ENV=prod
 HOST_BASE_PATH=/path/to/spotiseek
+
+# Deployment (gated environment -- see docs/adr/0002-gated-environment-deploys-via-git-archive.md)
+DEPLOY_GATED_ENV=all_playlists
+CODE_ROOT=.
 
 # Format preferences
 PREFER_MP3=true

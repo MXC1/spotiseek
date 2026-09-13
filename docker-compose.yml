@@ -33,10 +33,12 @@ services:
       - ./output:/app/output:rw
       - ./slskd_docker_data/${APP_ENV}/imported:/app/slskd_docker_data/${APP_ENV}/imported:rw
       - ./slskd_docker_data/${APP_ENV}/downloads:/app/slskd_docker_data/${APP_ENV}/downloads:rw
-      - ./observability:/app/observability:rw
+      - ${CODE_ROOT}/observability/dashboard:/app/observability/dashboard:ro
+      - ${CODE_ROOT}/observability/combined_dashboard.py:/app/observability/combined_dashboard.py:ro
+      - ./observability/logs:/app/observability/logs:rw
       - ./docs:/app/docs:ro
       - ./README.md:/app/README.md:ro
-      - ./scripts:/app/scripts:ro
+      - ${CODE_ROOT}/scripts:/app/scripts:ro
       - ./input_playlists:/app/input_playlists:ro
     depends_on:
       - slskd
@@ -58,15 +60,17 @@ services:
       - ./output:/app/output:rw
       - ./input_playlists:/app/input_playlists:rw
       - ./slskd_docker_data/${APP_ENV}:/app/slskd_docker_data/${APP_ENV}:rw
-      - ./observability:/app/observability:rw
-      - ./scripts:/app/scripts:ro
+      - ./observability/logs:/app/observability/logs:rw
+      - ${CODE_ROOT}/scripts:/app/scripts:ro
     depends_on:
       - slskd
     restart: unless-stopped
 
   backup:
     build:
-      context: .
+      # Always builds from the deployed snapshot (never the working tree), regardless of
+      # which environment is hot -- see docs/adr/0002-gated-environment-deploys-via-git-archive.md.
+      context: ./.deploy/deployed-code
       dockerfile: infra/Dockerfile.backup
     environment:
       - LOG_LEVEL=${LOG_LEVEL}
