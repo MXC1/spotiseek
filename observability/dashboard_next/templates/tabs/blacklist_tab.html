@@ -1,0 +1,16 @@
+<section class="blacklist-tab">
+  <p class="stats-caption"><strong>Environment:</strong> <code>{{ env_value }}</code></p>
+  <h3>&#128683; Manual Track Blacklist</h3>
+  <p>Use this tab to blacklist tracks that are a wrong version (e.g. remix instead of
+    original), corrupted or have audio issues, or otherwise unsuitable.</p>
+  <p class="stats-caption">
+    What happens when you blacklist a track: the username+file combination is added to
+    the blacklist (if downloaded from Soulseek), the local file is deleted from disk,
+    and the track's status is set to <code>blacklisted</code> so it's searched again in
+    future search runs.
+  </p>
+
+  <div id="blacklist-body">
+    {% include "tabs/_blacklist_body.html" %}
+  </div>
+</section>

@@ -1,0 +1,91 @@
+{% if db_error %}
+<p class="stats-error">{{ db_error }}</p>
+{% else %}
+{% if flash %}
+<p class="flash flash-{{ flash.type }}">{{ flash.text }}</p>
+{% endif %}
+
+<h3>Search for Tracks</h3>
+<form hx-get="/blacklist/body" hx-target="#blacklist-body" hx-swap="innerHTML" hx-trigger="change">
+  <label class="field-label">Search by artist or track name:
+    <input type="text" name="search" value="{{ search }}"
+      hx-trigger="input changed delay:500ms"
+      hx-get="/blacklist/body"
+      hx-target="#blacklist-body"
+      hx-swap="innerHTML"
+      hx-include="closest form">
+  </label>
+  <div class="tasks-actions">
+    <label class="field-label">Rows per page
+      <select name="page_size">
+        {% for size in page_sizes %}
+        <option value="{{ size }}" {% if size == page_size %}selected{% endif %}>{{ size }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field-label">Page
+      <input type="number" name="page" min="1" value="{{ page }}" style="width:5rem">
+    </label>
+  </div>
+</form>
+
+<p class="stats-caption">Found {{ total }} track(s) matching your search</p>
+
+{% if not rows %}
+<p class="stats-empty">No tracks found matching your search. Try a different search term.</p>
+{% else %}
+<table class="stats-table">
+  <thead><tr><th>Artist</th><th>Track Name</th><th>Format</th><th>Bitrate (kbps)</th><th>Track ID</th></tr></thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.artist }}</td><td>{{ r.track_name }}</td><td>{{ r.extension }}</td>
+      <td>{{ r.bitrate }}</td><td>{{ r.track_id }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<hr class="section-divider">
+<h3>&#9888;&#65039; Blacklist Selected Track</h3>
+<div class="blacklist-selector" x-data="{ selected: '{{ rows[0].track_id }}' }">
+  <label class="field-label">Select a track to blacklist:
+    <select x-model="selected">
+      {% for r in rows %}
+      <option value="{{ r.track_id }}">{{ r.artist }} - {{ r.track_name }} &bull; {{ r.extension }} {{ r.bitrate }}kbps [{{ r.track_id }}]</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  {% for r in rows %}
+  <div x-show="selected === '{{ r.track_id }}'" class="upload-panel">
+    <p class="stats-caption"><strong>Selected:</strong> {{ r.artist }} - {{ r.track_name }}</p>
+    <p class="stats-caption">File: <code>{{ r.local_file_path }}</code></p>
+    <p class="stats-caption">Format: {{ r.extension }} @ {{ r.bitrate }} kbps</p>
+    <p class="flash flash-error">
+      Warning: this will delete the file from disk permanently, add it to the blacklist
+      (if from Soulseek), and mark the track for re-download. This action cannot be undone!
+    </p>
+    <form>
+      <input type="hidden" name="search" value="{{ search }}">
+      <input type="hidden" name="page" value="{{ page }}">
+      <input type="hidden" name="page_size" value="{{ page_size }}">
+      <button type="button" class="btn btn-primary"
+        hx-post="/blacklist/confirm/{{ r.track_id }}"
+        hx-target="#blacklist-body"
+        hx-swap="innerHTML"
+        hx-indicator="#blacklist-body"
+        hx-include="closest form"
+        hx-disabled-elt="this">&#128683; Blacklist This Track</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<hr class="section-divider">
+<p class="stats-caption">
+  &#128161; Tip: Blacklisted tracks will be searched again in the next search cycle.
+  The workflow will automatically attempt to find a better version of the track.
+</p>
+{% endif %}

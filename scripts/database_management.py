@@ -1283,6 +1283,90 @@ class TrackDB:
         )
         return cursor.fetchall()
 
+    def search_completed_tracks(
+        self, search: str | None, offset: int, limit: int,
+    ) -> tuple[list[tuple[str, str, str, str, str, int, str, str]], int]:
+        """Paginated (track_id, track_name, artist, local_file_path, extension, bitrate,
+        username, slskd_file_name) rows for tracks that have a local file, optionally
+        filtered by artist/track substring. Returns (rows, total_count_before_pagination).
+        """
+        cursor = self.conn.cursor()
+        where_search = ""
+        params: list[str] = []
+        if search:
+            where_search = " AND (LOWER(track_name) LIKE ? OR LOWER(artist) LIKE ?)"
+            like = f"%{search.lower()}%"
+            params.extend([like, like])
+
+        cursor.execute(
+            "SELECT COUNT(*) FROM tracks "
+            "WHERE local_file_path IS NOT NULL AND TRIM(local_file_path) != ''" + where_search,
+            params,
+        )
+        total = cursor.fetchone()[0]
+
+        cursor.execute(
+            "SELECT track_id, track_name, artist, local_file_path, extension, bitrate, "
+            "username, slskd_file_name FROM tracks "
+            "WHERE local_file_path IS NOT NULL AND TRIM(local_file_path) != ''"
+            + where_search + " ORDER BY artist, track_name LIMIT ? OFFSET ?",
+            [*params, limit, offset],
+        )
+        return cursor.fetchall(), total
+
+    def get_completed_track_by_id(self, track_id: str) -> tuple[str, str, str, str, str, int, str, str] | None:
+        """Return the same columns as search_completed_tracks for one track_id, or None
+        if it has no local file (already blacklisted/never downloaded/unknown id)."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT track_id, track_name, artist, local_file_path, extension, bitrate, "
+            "username, slskd_file_name FROM tracks "
+            "WHERE track_id = ? AND local_file_path IS NOT NULL AND TRIM(local_file_path) != ''",
+            (track_id,),
+        )
+        return cursor.fetchone()
+
+    def clear_track_download_metadata(self, track_id: str) -> None:
+        """Null out a track's local_file_path/bitrate/extension/username/slskd_file_name
+        -- used when blacklisting a track, to fully reset it for a fresh search."""
+        write_log.debug(
+            "TRACK_DOWNLOAD_METADATA_CLEAR", "Clearing download metadata for track.",
+            {"track_id": track_id},
+        )
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE tracks
+            SET local_file_path = NULL, bitrate = NULL, extension = NULL,
+                username = NULL, slskd_file_name = NULL
+            WHERE track_id = ?
+            """,
+            (track_id,),
+        )
+        self.conn.commit()
+
+    def restore_track_download_metadata(  # noqa: PLR0913, PLR0917
+        self, track_id: str, local_file_path: str | None, bitrate: int | None, extension: str | None,
+        username: str | None, slskd_file_name: str | None, download_status: str,
+    ) -> None:
+        """Restore a track's download fields -- used to roll back clear_track_download_metadata()
+        if a later step in blacklisting fails."""
+        write_log.warn(
+            "TRACK_DOWNLOAD_METADATA_RESTORE", "Rolling back download metadata for track.",
+            {"track_id": track_id},
+        )
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE tracks
+            SET local_file_path = ?, bitrate = ?, extension = ?,
+                username = ?, slskd_file_name = ?, download_status = ?
+            WHERE track_id = ?
+            """,
+            (local_file_path, bitrate, extension, username, slskd_file_name, download_status, track_id),
+        )
+        self.conn.commit()
+
     def close(self) -> None:
         """Close the database connection."""
         write_log.info("DB_CLOSE", "Closing database connection.")

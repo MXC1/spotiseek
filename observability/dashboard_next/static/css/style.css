@@ -619,3 +619,14 @@ output {
   font-size: 0.85rem;
   color: var(--muted);
 }
+
+/* Blacklist tab */
+
+.blacklist-tab h3 {
+  font-size: 0.95rem;
+  margin: 1.5rem 0 0.75rem;
+}
+
+.blacklist-selector {
+  margin-top: 0.75rem;
+}
