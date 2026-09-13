@@ -115,6 +115,7 @@ Always go through the `TrackDB` singleton (`scripts/database_management.py`) —
 - `track_id` is the primary key: a Spotify alphanumeric ID or a SoundCloud URL slug (e.g. `lobsta-b/7th-element-vip`) — never a platform-specific numeric ID.
 - `source` is `'spotify'` or `'soundcloud'`.
 - Track lookups always go through `track_id`, regardless of source platform.
+- The db file lives on a Docker Desktop/WSL2 bind mount (a Windows host directory mounted into Linux containers), which SQLite treats like a network filesystem — this has caused real corruption before. **Never open an extra/ad hoc `sqlite3` connection against a live environment's db file from a separate process** (e.g. `docker-compose exec <svc> python -c '...'`, or a one-off host-side script) while its containers are running, even just to read. One-off maintenance/backfill work should either go through a real task in `task_scheduler.py`/`workflow.py` (same process, same `TrackDB` connection as the running daemon), or `docker-compose stop` every service touching that environment's db first. This is also why the db uses the classic rollback journal (`journal_mode=DELETE`), not WAL — WAL's shared-memory coordination file isn't reliable over this mount type.
 
 ### Module Import Pattern
 

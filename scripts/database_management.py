@@ -132,10 +132,20 @@ class TrackDB:
         write_log.info("DB_CONNECT", "Connecting to database.", {"db_path": self.db_path})
         # Optimize SQLite connection for performance
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30.0)
-        # Enable write-ahead logging for better concurrency
-        self.conn.execute("PRAGMA journal_mode=WAL").fetchone()
-        # Optimize query performance
-        self.conn.execute("PRAGMA synchronous=NORMAL")
+        # Deliberately NOT WAL: this file lives on a Docker Desktop/WSL2 bind mount
+        # (a Windows host directory mounted into Linux containers), which behaves like
+        # a network filesystem to SQLite. WAL's cross-process coordination depends on a
+        # shared-memory (-shm) file, whose locking isn't reliably supported over mounts
+        # like this one - SQLite's own docs warn against WAL there - and it has caused
+        # real database corruption when workflow/dashboard/backup (each a separate
+        # process/container) touch the same db file concurrently. The classic rollback
+        # journal uses plain file locks instead, at the cost of writers briefly
+        # blocking readers (the timeout= above lets a blocked connection wait it out
+        # instead of erroring immediately).
+        self.conn.execute("PRAGMA journal_mode=DELETE").fetchone()
+        # FULL (not NORMAL) because DELETE-mode journaling needs the extra fsync to
+        # stay crash-safe; NORMAL's relaxed sync is only safe to pair with WAL.
+        self.conn.execute("PRAGMA synchronous=FULL")
         self._create_tables()
 
     def clear_database(self) -> None:
