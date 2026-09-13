@@ -44,6 +44,27 @@ services:
       - slskd
     restart: unless-stopped
 
+  # Temporary, alongside `dashboard` during the tab-by-tab migration off Streamlit --
+  # see docs/adr/0003-dashboard-rewrite-fastapi-htmx.md and
+  # docs/adr/0004-dashboard-migration-parallel-service-cutover.md. Code is mounted
+  # straight from the working tree (never ${CODE_ROOT}): it isn't part of the gated
+  # deploy's archived paths (docs/adr/0002-*), and isn't meant to be until cutover.
+  dashboard-next:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.dashboard-next
+    ports:
+      - "8502:8502"
+    environment:
+      - APP_ENV=${APP_ENV}
+    volumes:
+      - ./observability/dashboard_next:/app/observability/dashboard_next:ro
+      - ./observability/logs:/app/observability/logs:rw
+      - ./docs:/app/docs:ro
+      - ./README.md:/app/README.md:ro
+      - ./scripts:/app/scripts:ro
+    restart: unless-stopped
+
   workflow:
     build:
       context: .

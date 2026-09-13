@@ -1,0 +1,22 @@
+<section class="docs-tab">
+  <div class="docs-layout">
+    <nav class="docs-selector">
+      <h2>&#128196; Select Document</h2>
+      <ul>
+        {% for doc_slug, doc in docs.items() %}
+        <li>
+          <a class="doc-link{% if doc_slug == selected_slug %} active{% endif %}"
+             href="/docs/{{ doc_slug }}"
+             hx-get="/docs/{{ doc_slug }}"
+             hx-target="#tab-content"
+             hx-push-url="true">{{ doc[0] }}</a>
+        </li>
+        {% endfor %}
+      </ul>
+    </nav>
+    <div id="doc-content" class="docs-content">
+      {% include "tabs/_docs_content.html" %}
+    </div>
+  </div>
+  <p class="docs-footer">&#128193; Documentation files are located in: <code>{{ docs_dir }}</code></p>
+</section>
