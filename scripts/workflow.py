@@ -1223,7 +1223,7 @@ _TAG_MISMATCH_MAX_TITLE_OVERLAP = 0.34
 
 def _significant_tokens(text: str) -> set[str]:
     """Lowercase, strip punctuation, and drop short/generic words from text."""
-    cleaned = re.sub(r"[()\[\]{}\-_,.'!?&|:]", " ", text.lower())
+    cleaned = re.sub(r"[()\[\]{}\-_,.'!?&|:/;]", " ", text.lower())
     return {t for t in cleaned.split() if len(t) > 1 and t not in _TAG_MISMATCH_STOPWORDS}
 
 
@@ -1237,6 +1237,18 @@ def _is_tag_mismatch(file_path: str, expected_artist: str, expected_track_name: 
     left alone - they are much noisier (many are just messy multi-artist or
     compilation metadata, not actual wrong tracks) and better suited to manual
     review than an automatic redownload trigger.
+
+    Deliberately compares only the embedded artist/title tags, not the filename:
+    a release named after its own title track (e.g. "Vertex EP" for the track
+    "Vertex") can make a wrong-track download's filename contain the expected
+    title even though the embedded tag doesn't, defeating this check.
+
+    A tag title that's a (non-empty) subset of the expected title's words - a
+    dropped subtitle, remix credit, or edition suffix - is treated as the same
+    track, not a mismatch. The reverse isn't safe to assume: a tag title with
+    *extra* words beyond the expected title can be a genuinely different track
+    (e.g. a mashup/blend like "Rez/Cowgirl" vs the expected "Rez"), so that
+    direction is never used to excuse a mismatch.
 
     Args:
         file_path: Path to the downloaded (and possibly remuxed) file
@@ -1263,17 +1275,23 @@ def _is_tag_mismatch(file_path: str, expected_artist: str, expected_track_name: 
     if not file_title:
         return False
 
-    blob_tokens = _significant_tokens(
-        " ".join(filter(None, [file_artist, file_title, os.path.basename(file_path)])),
-    )
+    tag_tokens = _significant_tokens(" ".join(filter(None, [file_artist, file_title])))
     artist_tokens = _significant_tokens(expected_artist)
     title_tokens = _significant_tokens(expected_track_name)
     if not artist_tokens or not title_tokens:
         return False
 
-    artist_frac = len(artist_tokens & blob_tokens) / len(artist_tokens)
-    title_frac = len(title_tokens & blob_tokens) / len(title_tokens)
-    return artist_frac >= _TAG_MISMATCH_MIN_ARTIST_OVERLAP and title_frac <= _TAG_MISMATCH_MAX_TITLE_OVERLAP
+    artist_frac = len(artist_tokens & tag_tokens) / len(artist_tokens)
+    title_frac = len(title_tokens & tag_tokens) / len(title_tokens)
+
+    file_title_tokens = _significant_tokens(file_title)
+    is_truncated_title = bool(file_title_tokens) and file_title_tokens <= title_tokens
+
+    return (
+        artist_frac >= _TAG_MISMATCH_MIN_ARTIST_OVERLAP
+        and title_frac <= _TAG_MISMATCH_MAX_TITLE_OVERLAP
+        and not is_truncated_title
+    )
 
 
 def _remux_lossless_to_wav(local_file_path: str, track_id: str, extension: str) -> str:
