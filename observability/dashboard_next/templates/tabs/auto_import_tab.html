@@ -1,0 +1,31 @@
+<section class="auto-import-tab">
+  <p class="stats-caption"><strong>Environment:</strong> <code>{{ env_value }}</code></p>
+  <p>This tool scans a directory for audio files and attempts to match them with tracks
+    that are missing from your library. Matches are ranked by fuzzy matching score.</p>
+
+  {% if is_docker %}
+  <details class="tasks-failed">
+    <summary>How to mount a directory in Docker</summary>
+    <p>Add your music directory to the <code>dashboard-next</code> service's volumes in
+      <code>docker-compose.yml</code>. On Windows, <code>invoke up</code> runs
+      docker-compose inside WSL, so use the WSL-mounted-drive path
+      (<code>/mnt/&lt;lowercase-drive-letter&gt;/...</code>) — a raw Windows path like
+      <code>E:/Folder</code> breaks volume parsing:</p>
+    <pre>  dashboard-next:
+    volumes:
+      # ... existing volumes ...
+      - /mnt/e/Folder:/mnt/music:ro  # Mount your music folder</pre>
+    <p>Then use <code>/mnt/music</code> as the path. Run <code>invoke up</code> after editing.</p>
+  </details>
+  {% endif %}
+
+  <h3>Source Directory</h3>
+  <p class="stats-caption">
+    {% if is_docker %}Enter the mounted path inside the container (e.g. <code>/mnt/music/...</code>), or browse below.
+    {% else %}Enter the path to a directory containing audio files to match, or browse below.{% endif %}
+  </p>
+
+  <div id="auto-import-body">
+    {% include "tabs/_auto_import_body.html" %}
+  </div>
+</section>

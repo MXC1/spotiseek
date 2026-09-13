@@ -32,6 +32,11 @@
          hx-get="/manual-import"
          hx-target="#tab-content"
          hx-push-url="true">&#128229; Manual Import</a>
+      <a class="tab-link{% if active_tab == 'auto-import' %} active{% endif %}"
+         href="/auto-import"
+         hx-get="/auto-import"
+         hx-target="#tab-content"
+         hx-push-url="true">&#129302; Auto Import</a>
       <a class="tab-link{% if active_tab == 'docs' %} active{% endif %}"
          href="/docs/overview"
          hx-get="/docs/overview"

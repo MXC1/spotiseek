@@ -1,0 +1,76 @@
+{% if scan_flash %}
+<p class="flash flash-{{ scan_flash.type }}">{{ scan_flash.text }}</p>
+{% endif %}
+
+<details class="tasks-failed" open>
+  <summary>Browse for a directory</summary>
+
+  {% if multi_root %}
+  <form class="auto-import-root-form">
+    <label class="field-label">Drive:
+      <select name="browse_value">
+        {% for r in roots %}
+        <option value="{{ r }}" {% if r == browse_dir %}selected{% endif %}>{{ r }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="button" class="btn"
+      hx-get="/auto-import/source-panel"
+      hx-target="#auto-import-source-panel"
+      hx-swap="innerHTML"
+      hx-include="closest form"
+      hx-vals='{"browse_action": "root"}'>Go to drive</button>
+  </form>
+  {% endif %}
+
+  <p class="stats-caption">Current location:</p>
+  <pre class="auto-import-current-dir">{{ browse_dir }}</pre>
+
+  <div class="tasks-actions">
+    <button class="btn" type="button" {% if not can_go_up %}disabled{% endif %}
+      hx-get="/auto-import/source-panel"
+      hx-target="#auto-import-source-panel"
+      hx-swap="innerHTML"
+      hx-vals='{"browse_action": "up"}'>&#11014;&#65039; Up</button>
+    <button class="btn btn-primary" type="button"
+      hx-get="/auto-import/source-panel"
+      hx-target="#auto-import-source-panel"
+      hx-swap="innerHTML"
+      hx-vals='{"browse_action": "use"}'>&#9989; Use this directory</button>
+  </div>
+
+  <label class="field-label">Filter subdirectories:
+    <input type="text" value="{{ browse_filter }}" placeholder="Start typing to narrow the list..."
+      hx-get="/auto-import/source-panel"
+      hx-trigger="input changed delay:400ms"
+      hx-target="#auto-import-source-panel"
+      hx-swap="innerHTML"
+      hx-vals='js:{browse_filter: event.target.value}'>
+  </label>
+
+  {% if not subdirs %}
+  <p class="stats-empty">No subdirectories here.</p>
+  {% else %}
+  <p class="stats-caption">
+    {{ subdirs_total }} subdirectories{% if subdirs_truncated %} (showing first {{ subdirs | length }}){% endif %}:
+  </p>
+  <div class="auto-import-dir-list">
+    {% for name in subdirs %}
+    <button class="btn btn-small" type="button"
+      hx-get="/auto-import/source-panel"
+      hx-target="#auto-import-source-panel"
+      hx-swap="innerHTML"
+      hx-vals='js:{browse_action: "into", browse_value: {{ name | tojson }} }'>&#128193; {{ name }}</button>
+    {% endfor %}
+  </div>
+  {% endif %}
+</details>
+
+<form hx-post="/auto-import/scan" hx-target="#auto-import-body" hx-swap="innerHTML" hx-indicator="#auto-import-body">
+  <label class="field-label">Directory path:
+    <input type="text" name="source_dir" value="{{ source_dir }}"
+      placeholder="{% if is_docker %}/mnt/music/folder{% else %}e.g., E:\Music\MyFolder{% endif %}">
+  </label>
+  <button type="submit" class="btn btn-primary" hx-disabled-elt="this">&#128269; Scan Directory</button>
+  <span class="htmx-indicator spinner" aria-hidden="true"></span>
+</form>

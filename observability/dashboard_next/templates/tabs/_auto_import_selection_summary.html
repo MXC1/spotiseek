@@ -1,0 +1,33 @@
+{% if low_quality_selected %}
+<p class="flash flash-error">
+  Quality Warning: {{ low_quality_selected_total }} of your selected files are below MP3 320kbps quality.
+  Consider finding higher quality versions for better audio fidelity.
+</p>
+<details class="tasks-failed">
+  <summary>View {{ low_quality_selected_total }} low-quality file{{ "s" if low_quality_selected_total != 1 else "" }}</summary>
+  <ul>
+    {% for m in low_quality_selected %}
+    <li><strong>{{ m.file_name }}</strong>: {{ m.quality_warning or "Unknown quality issue" }}</li>
+    {% endfor %}
+  </ul>
+  {% if low_quality_selected_total > low_quality_selected | length %}
+  <p class="stats-caption">...and {{ low_quality_selected_total - (low_quality_selected | length) }} more</p>
+  {% endif %}
+</details>
+{% endif %}
+
+<div class="tasks-actions">
+  <span class="stats-caption">{{ selected_count }} matches selected</span>
+  <button type="button" class="btn"
+    hx-post="/auto-import/clear-selection"
+    hx-target="#auto-import-matches-panel"
+    hx-swap="innerHTML"
+    hx-include="[name='min_score'],[name='page_size'],[name='search'],[name='page']"
+    hx-indicator="#auto-import-matches-panel">&#10060; Clear Selection</button>
+  <button type="button" class="btn btn-primary" {% if selected_count == 0 %}disabled{% endif %}
+    hx-post="/auto-import/import"
+    hx-target="#auto-import-body"
+    hx-swap="innerHTML"
+    hx-indicator="#auto-import-body"
+    hx-disabled-elt="this">&#9989; Import {{ selected_count }} Selected Tracks</button>
+</div>

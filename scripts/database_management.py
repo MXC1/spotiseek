@@ -1265,6 +1265,24 @@ class TrackDB:
         )
         return cursor.fetchall(), total
 
+    def get_all_incomplete_tracks_with_playlists(self) -> list[tuple[str, str, str, str, str]]:
+        """Return (track_id, track_name, artist, download_status, playlists) for every
+        track missing a local file, with playlists as a comma-joined display string."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT DISTINCT t.track_id, t.track_name, t.artist, t.download_status,
+                   GROUP_CONCAT(p.playlist_name, ', ') AS playlists
+            FROM tracks t
+            LEFT JOIN playlist_tracks pt ON t.track_id = pt.track_id
+            LEFT JOIN playlists p ON pt.playlist_url = p.playlist_url
+            WHERE t.local_file_path IS NULL OR TRIM(t.local_file_path) = ''
+            GROUP BY t.track_id, t.track_name, t.artist, t.download_status
+            ORDER BY t.artist, t.track_name
+            """,
+        )
+        return cursor.fetchall()
+
     def close(self) -> None:
         """Close the database connection."""
         write_log.info("DB_CLOSE", "Closing database connection.")

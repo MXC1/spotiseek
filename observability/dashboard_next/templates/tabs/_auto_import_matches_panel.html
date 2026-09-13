@@ -1,0 +1,94 @@
+{% if matches %}
+<hr class="section-divider">
+<h3>Potential Matches</h3>
+<p class="stats-caption">Showing matches for directory: <code>{{ scanned_dir }}</code></p>
+
+<form hx-get="/auto-import/matches-panel" hx-target="#auto-import-matches-panel" hx-swap="innerHTML" hx-trigger="change">
+  <div class="tasks-actions">
+    <label class="field-label">Minimum score:
+      <input type="range" name="min_score" min="0" max="100" value="{{ min_score }}"
+        oninput="this.nextElementSibling.textContent = this.value + '%'">
+      <output>{{ min_score }}%</output>
+    </label>
+    <label class="field-label">Matches per page:
+      <select name="page_size">
+        {% for size in page_sizes %}
+        <option value="{{ size }}" {% if size == page_size %}selected{% endif %}>{{ size }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field-label">Filter by track/artist:
+      <input type="text" name="search" value="{{ search }}"
+        hx-trigger="input changed delay:500ms"
+        hx-get="/auto-import/matches-panel"
+        hx-target="#auto-import-matches-panel"
+        hx-swap="innerHTML"
+        hx-include="closest form">
+    </label>
+  </div>
+  <input type="hidden" name="page" value="{{ page }}">
+</form>
+
+{% if not rows %}
+<p class="stats-empty">No matches found with current filters.</p>
+{% else %}
+<p class="stats-caption">Showing {{ start_idx }}-{{ end_idx }} of {{ total_matches }} matches</p>
+
+<table class="stats-table auto-import-table">
+  <thead>
+    <tr>
+      <th></th><th>Score</th><th>Track Name - Artist (DB)</th><th>Track Name - Artist (Candidate)</th>
+      <th>Filename (Candidate)</th><th>Quality</th><th>Match Type</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for m in rows %}
+    <tr>
+      <td>
+        <input type="checkbox" {% if m.selected %}checked{% endif %}
+          hx-post="/auto-import/select"
+          hx-trigger="change"
+          hx-target="#auto-import-selection-summary"
+          hx-swap="innerHTML"
+          hx-vals='js:{key: {{ m.key | tojson }}, checked: event.target.checked}'>
+      </td>
+      <td>{{ m.score_emoji }} <strong>{{ "%.0f"|format(m.score) }}%</strong></td>
+      <td>{{ m.track_name }} - {{ m.track_artist }}</td>
+      <td>{{ m.file_title }}{% if m.file_artist %} - {{ m.file_artist }}{% endif %}</td>
+      <td><code>{{ m.file_name }}</code></td>
+      <td>
+        {% if m.is_low_quality %}&#9888;&#65039;{% else %}&#9989;{% endif %} {{ m.file_extension | upper }}
+        {%- if m.file_bitrate %} {{ m.file_bitrate }}k{% elif not m.is_low_quality %} (lossless){% endif %}
+      </td>
+      <td>{{ m.match_type }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if total_pages > 1 %}
+<form hx-get="/auto-import/matches-panel" hx-target="#auto-import-matches-panel" hx-swap="innerHTML" hx-trigger="change" hx-include="closest form">
+  <input type="hidden" name="min_score" value="{{ min_score }}">
+  <input type="hidden" name="page_size" value="{{ page_size }}">
+  <input type="hidden" name="search" value="{{ search }}">
+  <label class="field-label">Page (1-{{ total_pages }}):
+    <input type="number" name="page" min="1" max="{{ total_pages }}" value="{{ page }}" style="width:5rem">
+  </label>
+</form>
+{% endif %}
+{% endif %}
+
+<hr class="section-divider">
+<div id="auto-import-selection-summary">
+  {% include "tabs/_auto_import_selection_summary.html" %}
+</div>
+
+<hr class="section-divider">
+<p class="stats-caption">
+  &#128161; Tips: &#128994; &ge;90% excellent &middot; &#128993; 70-89% good &middot;
+  &#128992; 50-69% fair (review recommended) &middot; &#128308; &lt;50% poor (likely incorrect).
+  Files are copied (originals remain in place). Each track can only be imported once per batch.
+</p>
+{% else %}
+<p class="stats-caption">Scan a directory above to see potential matches here.</p>
+{% endif %}

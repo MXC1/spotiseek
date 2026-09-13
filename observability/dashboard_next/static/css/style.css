@@ -579,3 +579,43 @@ main#tab-content {
   border-top: 1px solid var(--border);
   margin: 2rem 0 1.25rem;
 }
+
+/* Auto Import tab */
+
+.auto-import-tab h3 {
+  font-size: 0.95rem;
+  margin: 1.5rem 0 0.75rem;
+}
+
+.auto-import-root-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.auto-import-current-dir {
+  background: var(--code-bg);
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.25rem 0 0.75rem;
+}
+
+.auto-import-dir-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.auto-import-table td {
+  vertical-align: top;
+}
+
+output {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
