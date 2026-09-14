@@ -130,7 +130,7 @@ Each environment is backed up into its own [restic](https://restic.net/) reposit
 | `BACKUP_DEST` | `./backups` | Host path for restic repositories (one subfolder per environment). Used only in `docker-compose.yml`'s volume mount. |
 | `BACKUP_RESTIC_PASSWORD` | — | Password protecting every environment's restic repository. Required. |
 | `BACKUP_SCHEDULE_ENVS` | *(empty)* | Comma-separated environments to back up automatically, e.g. `prod,all_playlists`. Empty = no scheduled backups; `invoke backup` still works on demand. |
-| `BACKUP_SCHEDULE_HOUR` | `4` | Local hour (0-23, in `BACKUP_SCHEDULE_TIMEZONE`) each scheduled environment is backed up, once per day. |
+| `BACKUP_SCHEDULE_HOUR` | `4` | Local hour (0-23, in `BACKUP_SCHEDULE_TIMEZONE`) each scheduled environment is backed up, once per day, with 1 hour of slack either side (e.g. `4` is due anywhere from 3am up to 6am) so a daemon restart mid-window doesn't miss the day entirely. |
 | `BACKUP_QUIET_MINUTES` | `60` | A scheduled backup for the *hot* environment is deferred (retried on a later tick, same day) unless at least this many minutes have passed since the last `invoke up`/`invoke deploy`. |
 | `BACKUP_SCHEDULE_TIMEZONE` | `Europe/London` | IANA timezone `BACKUP_SCHEDULE_HOUR` is interpreted in. |
 | `BACKUP_KEEP_DAILY` | `7` | Retention: daily snapshots to keep. |

@@ -581,6 +581,18 @@ def _save_schedule_state(state: dict) -> None:
         json.dump(state, f)
 
 
+def _in_schedule_window(hour: int, target_hour: int, window_hours: int = 1) -> bool:
+    """True if `hour` is within `window_hours` of `target_hour`, wrapping around midnight.
+
+    A bare `hour == target_hour` check would miss the day entirely if the daemon happened
+    to be down for the whole of that hour (e.g. rebuilding during `invoke deploy`), so this
+    gives it a few hours either side to still catch that day's backup -- e.g. target_hour=4,
+    window_hours=1 is due anywhere from 3am up to (not including) 6am.
+    """
+    diff = (hour - target_hour) % 24
+    return diff <= window_hours or diff >= 24 - window_hours
+
+
 def _minutes_since_last_invoke_activity() -> float | None:
     """Minutes since `invoke up`/`invoke deploy` last ran on the host, or None if
     never recorded (treated as "quiet enough" -- a fresh checkout shouldn't block
@@ -653,7 +665,7 @@ def run_scheduler_daemon() -> None:
     while not _shutdown.is_set():
         now_local = datetime.now(tz)
         today = now_local.date().isoformat()
-        if now_local.hour >= schedule_hour:
+        if _in_schedule_window(now_local.hour, schedule_hour):
             for env in schedule_envs:
                 if last_run_dates.get(env) == today:
                     continue  # already ran today
