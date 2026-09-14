@@ -130,12 +130,14 @@ Each environment is backed up into its own [restic](https://restic.net/) reposit
 | `BACKUP_DEST` | `./backups` | Host path for restic repositories (one subfolder per environment). Used only in `docker-compose.yml`'s volume mount. |
 | `BACKUP_RESTIC_PASSWORD` | — | Password protecting every environment's restic repository. Required. |
 | `BACKUP_SCHEDULE_ENVS` | *(empty)* | Comma-separated environments to back up automatically, e.g. `prod,all_playlists`. Empty = no scheduled backups; `invoke backup` still works on demand. |
-| `BACKUP_INTERVAL_MINUTES` | `1440` | How often each scheduled environment is backed up (daily by default). |
+| `BACKUP_SCHEDULE_HOUR` | `4` | Local hour (0-23, in `BACKUP_SCHEDULE_TIMEZONE`) each scheduled environment is backed up, once per day. |
+| `BACKUP_QUIET_MINUTES` | `60` | A scheduled backup for the *hot* environment is deferred (retried on a later tick, same day) unless at least this many minutes have passed since the last `invoke up`/`invoke deploy`. |
+| `BACKUP_SCHEDULE_TIMEZONE` | `Europe/London` | IANA timezone `BACKUP_SCHEDULE_HOUR` is interpreted in. |
 | `BACKUP_KEEP_DAILY` | `7` | Retention: daily snapshots to keep. |
 | `BACKUP_KEEP_WEEKLY` | `4` | Retention: weekly snapshots to keep. |
 | `BACKUP_KEEP_MONTHLY` | `6` | Retention: monthly snapshots to keep. |
 
-A backup includes, per environment: `downloads/`, `imported/`, the exported database/XML/M3U8s, the environment's playlist CSV and `slskd.yml`, and its logs — plus the shared `.env` and shared `slskd_docker_data/slskd.yml` (for disaster recovery). It excludes slskd's own runtime `data/` and `incomplete/` (both regenerable). Whichever environment currently matches `APP_ENV` has its `slskd`/`workflow` containers briefly paused for a consistent copy; every other environment's data is already inert and is copied without any pause.
+A backup includes, per environment: `downloads/`, `imported/`, the exported database/XML/M3U8s, the environment's playlist CSV and `slskd.yml`, and its logs — plus the shared `.env` and shared `slskd_docker_data/slskd.yml` (for disaster recovery). It excludes slskd's own runtime `data/` and `incomplete/` (both regenerable). Whichever environment currently matches `APP_ENV` has its `slskd`/`workflow` containers briefly paused for a consistent copy; every other environment's data is already inert and is copied without any pause. Because the always-on `backup` container gets rebuilt/recreated by things like `invoke deploy` (and its schedule state is otherwise lost on recreate), the daemon persists which date each environment's scheduled backup last ran, and re-checks the hot environment's quiet period on every 30s tick rather than only at startup — so a pause is deferred, not skipped, until an hour has actually passed since your last `invoke up`/`invoke deploy`.
 
 ### Backing Up
 
@@ -227,7 +229,9 @@ TASK_REMUX_EXISTING_FILES_INTERVAL=360
 BACKUP_DEST=./backups
 BACKUP_RESTIC_PASSWORD=your_restic_repository_password
 BACKUP_SCHEDULE_ENVS=
-BACKUP_INTERVAL_MINUTES=1440
+BACKUP_SCHEDULE_HOUR=4
+BACKUP_QUIET_MINUTES=60
+BACKUP_SCHEDULE_TIMEZONE=Europe/London
 BACKUP_KEEP_DAILY=7
 BACKUP_KEEP_WEEKLY=4
 BACKUP_KEEP_MONTHLY=6

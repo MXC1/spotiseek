@@ -4,11 +4,17 @@ import os
 import platform
 import subprocess
 import tarfile
+import time
 from pathlib import Path
 
 from invoke import task
 
 ENV_PATH = Path(__file__).parent / ".env"
+
+# Read by the backup daemon's quiet-period gate (BACKUP_QUIET_MINUTES) so a scheduled
+# backup doesn't pause slskd/workflow while the user is actively running `invoke
+# up`/`invoke deploy` against the hot environment -- see scripts/backup_manager.py.
+LAST_INVOKE_ACTIVITY_FILE = Path("observability/logs/_scheduler/last_invoke_activity")
 
 # Files extracted by `invoke deploy` -- see docs/adr/0002-gated-environment-deploys-via-git-archive.md
 DEPLOY_DIR = Path(".deploy")
@@ -96,6 +102,14 @@ def _require_deployed_code() -> bool:
         )
         return False
     return True
+
+
+def _record_invoke_activity() -> None:
+    """Timestamp `invoke up`/`invoke deploy` so the backup daemon's quiet-period gate
+    can see how recently the user last touched the hot environment's infrastructure.
+    """
+    LAST_INVOKE_ACTIVITY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    LAST_INVOKE_ACTIVITY_FILE.write_text(str(time.time()))
 
 
 def running_inside_wsl() -> bool:
@@ -236,6 +250,7 @@ def up(c, service=None):
     if not _require_deployed_code():
         return
     _sync_code_root()
+    _record_invoke_activity()
     cmd = ["docker-compose", "up", "-d", "--build"]
     if service:
         cmd.append(service)
@@ -432,6 +447,7 @@ def deploy(c, ref="origin/main"):
     docs/adr/0005-defer-dashboard-cutover-keep-streamlit-as-rollback.md. The active
     dashboard-next service always mounts the working tree directly, gated deploy or not.
     """
+    _record_invoke_activity()
     print("Fetching origin...")
     subprocess.run(["git", "fetch", "origin"], check=True)
 

@@ -26,6 +26,8 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 sys.dont_write_bytecode = True
 
@@ -54,6 +56,15 @@ SHARED_SLSKD_YML = os.path.join(SLSKD_DATA_ROOT, "slskd.yml")
 # see docs/adr/0001-backup-restore-architecture.md) can be recovered from on
 # the next daemon start/loop tick instead of leaving them stopped forever.
 PAUSE_MARKER_FILE = os.path.join(APP_ROOT, "observability", "logs", "_scheduler", ".hot_pause_state.json")
+
+# Per-env date (YYYY-MM-DD) the scheduled daily backup last ran, so a recreated backup
+# container (e.g. every `invoke deploy`) doesn't treat today's backup as still due and
+# re-pause slskd/workflow. Timestamp of the last `invoke up`/`invoke deploy` on the
+# Windows host, written by tasks.py into this same mounted logs volume -- lets the
+# scheduler defer a scheduled run while the user is actively working on the hot
+# environment. See BACKUP_SCHEDULE_HOUR / BACKUP_QUIET_MINUTES.
+SCHEDULE_STATE_FILE = os.path.join(APP_ROOT, "observability", "logs", "_scheduler", "backup_schedule_state.json")
+LAST_INVOKE_ACTIVITY_FILE = os.path.join(APP_ROOT, "observability", "logs", "_scheduler", "last_invoke_activity")
 
 # Fixed container-side mount point for BACKUP_DEST (see docker-compose.yml);
 # the host path a user configures in .env is only ever used on the compose
@@ -554,6 +565,37 @@ def _handle_signal(signum, frame) -> None:  # noqa: ARG001
     _shutdown.set()
 
 
+def _load_schedule_state() -> dict:
+    if not os.path.exists(SCHEDULE_STATE_FILE):
+        return {}
+    try:
+        with open(SCHEDULE_STATE_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_schedule_state(state: dict) -> None:
+    os.makedirs(os.path.dirname(SCHEDULE_STATE_FILE), exist_ok=True)
+    with open(SCHEDULE_STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f)
+
+
+def _minutes_since_last_invoke_activity() -> float | None:
+    """Minutes since `invoke up`/`invoke deploy` last ran on the host, or None if
+    never recorded (treated as "quiet enough" -- a fresh checkout shouldn't block
+    scheduled backups forever).
+    """
+    if not os.path.exists(LAST_INVOKE_ACTIVITY_FILE):
+        return None
+    try:
+        with open(LAST_INVOKE_ACTIVITY_FILE, encoding="utf-8") as f:
+            last = float(f.read().strip())
+    except (OSError, ValueError):
+        return None
+    return (time.time() - last) / 60
+
+
 def _run_backup_subprocess(env: str) -> None:
     """Run a single environment's backup as a fresh process.
 
@@ -586,11 +628,16 @@ def run_scheduler_daemon() -> None:
     resume_orphaned_pause()
 
     schedule_envs = [e.strip() for e in os.getenv("BACKUP_SCHEDULE_ENVS", "").split(",") if e.strip()]
-    interval_minutes = int(os.getenv("BACKUP_INTERVAL_MINUTES", "1440"))
+    schedule_hour = int(os.getenv("BACKUP_SCHEDULE_HOUR", "4"))
+    quiet_minutes = int(os.getenv("BACKUP_QUIET_MINUTES", "60"))
+    tz = ZoneInfo(os.getenv("BACKUP_SCHEDULE_TIMEZONE", "Europe/London"))
 
     write_log.info(
         "BACKUP_SCHEDULER_START", "Backup scheduler started.",
-        {"envs": schedule_envs, "interval_minutes": interval_minutes},
+        {
+            "envs": schedule_envs, "schedule_hour": schedule_hour,
+            "quiet_minutes": quiet_minutes, "timezone": str(tz),
+        },
     )
     if not schedule_envs:
         write_log.info(
@@ -599,15 +646,30 @@ def run_scheduler_daemon() -> None:
             "invoke backup is still available for on-demand runs.",
         )
 
-    next_run_at = dict.fromkeys(schedule_envs, 0.0)  # due immediately on startup
+    # Per-env date a scheduled backup last ran, so a recreated container (every
+    # `invoke deploy` rebuilds this service) doesn't treat today's backup as still due.
+    last_run_dates = _load_schedule_state()
 
     while not _shutdown.is_set():
-        now = time.time()
-        for env in schedule_envs:
-            if now >= next_run_at.get(env, 0.0):
+        now_local = datetime.now(tz)
+        today = now_local.date().isoformat()
+        if now_local.hour >= schedule_hour:
+            for env in schedule_envs:
+                if last_run_dates.get(env) == today:
+                    continue  # already ran today
+                if is_hot_environment(env):
+                    quiet_since = _minutes_since_last_invoke_activity()
+                    if quiet_since is not None and quiet_since < quiet_minutes:
+                        write_log.info(
+                            "BACKUP_SCHEDULER_DEFERRED",
+                            "Deferring scheduled backup -- too soon after invoke up/deploy.",
+                            {"env": env, "minutes_since_invoke_activity": round(quiet_since, 1)},
+                        )
+                        continue  # retry on a later tick
                 write_log.info("BACKUP_SCHEDULER_TRIGGER", "Triggering scheduled backup.", {"env": env})
                 _run_backup_subprocess(env)
-                next_run_at[env] = time.time() + interval_minutes * 60
+                last_run_dates[env] = today
+                _save_schedule_state(last_run_dates)
         resume_orphaned_pause()
         _shutdown.wait(timeout=30)
 
