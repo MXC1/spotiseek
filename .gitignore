@@ -30,6 +30,7 @@ htmlcov/
 # Logs
 *.log
 *.log.*
+observability/logs/
 
 # OS
 Thumbs.db

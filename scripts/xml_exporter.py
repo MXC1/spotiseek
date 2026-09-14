@@ -341,8 +341,8 @@ def export_itunes_xml(xml_path: str, music_folder_url: str | None = None) -> Non
 
     for idx, (track_id, track_name, artist, _, _, local_file_path, _, genre) in enumerate(downloaded_tracks, 1):
         try:
-            _add_track_to_xml(tracks_dict, idx, track_name, artist, track_id, local_file_path, genre)
-            source_id_to_track_id[track_id] = idx
+            if _add_track_to_xml(tracks_dict, idx, track_name, artist, track_id, local_file_path, db, genre):
+                source_id_to_track_id[track_id] = idx
         except Exception as e:
             write_log.error(
                 "XML_TRACK_ADD_FAIL",
@@ -380,11 +380,23 @@ def _add_xml_key_value(parent: ET.Element, key: str, value: str, value_type: str
     ET.SubElement(parent, value_type).text = value
 
 
-def _add_track_to_xml(  # noqa: PLR0913
+def _add_track_to_xml(  # noqa: PLR0913, PLR0917
     tracks_dict: ET.Element, track_idx: int, track_name: str,
-    artist: str, track_id: str, local_file_path: str, genre: str | None = None,
-) -> None:
-    """Add a track entry to the tracks dictionary with file metadata."""
+    artist: str, track_id: str, local_file_path: str, db: TrackDB, genre: str | None = None,
+) -> bool:
+    """Add a track entry to the tracks dictionary with file metadata.
+
+    Returns False without adding anything if the file no longer exists on disk --
+    also clears the now-stale local_file_path so the track falls into the same
+    "missing local file" bucket the Auto Import tab already knows how to re-match,
+    instead of silently re-warning on every export forever.
+    """
+    if not os.path.exists(local_file_path):
+        write_log.warn("FILE_NOT_FOUND", "File missing on disk; clearing stale local_file_path.",
+                       {"track_id": track_id, "file_path": local_file_path})
+        db.update_local_file_path(track_id, None)
+        return False
+
     track_key = ET.SubElement(tracks_dict, "key")
     track_key.text = str(track_idx)
     track_dict = ET.SubElement(tracks_dict, "dict")
@@ -441,6 +453,7 @@ def _add_track_to_xml(  # noqa: PLR0913
     _add_xml_key_value(track_dict, "Persistent ID", track_id or "", "string")
     _add_xml_key_value(track_dict, "Track Type", "File", "string")
     _add_xml_key_value(track_dict, "Location", format_file_location_url(local_file_path), "string")
+    return True
 
 
 def _build_playlists_array(
