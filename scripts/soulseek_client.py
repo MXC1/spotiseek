@@ -1412,6 +1412,9 @@ def process_redownload_queue() -> None:
     'redownload_pending' to 'searching' and initiates searches without waiting.
     The searches will be processed on the next workflow run.
 
+    Searches are batched with delays (same as download_tracks_async) to avoid
+    triggering Soulseek's automatic 30-minute ban for bursty search creation.
+
     Note: Unlike new tracks, quality upgrades need special handling to compare
     file quality before downloading. This is done in process_pending_searches().
     """
@@ -1421,27 +1424,38 @@ def process_redownload_queue() -> None:
     if not redownload_tracks:
         return
 
-    # Initiate all searches without waiting
+    # Initiate searches in batches with delays to prevent rate limiting
     initiated_count = 0
+    total_tracks = len(redownload_tracks)
+    batch_size = SEARCH_BATCH_SIZE
+    batch_delay = SEARCH_BATCH_DELAY_SECONDS
 
-    for track_row in redownload_tracks:
-        track_id, track_name, artist = track_row[0], track_row[1], track_row[2]
+    for i in range(0, total_tracks, batch_size):
+        batch = redownload_tracks[i:i + batch_size]
 
-        # Create search and update status
-        search_text = f"{artist} {track_name}"
-        try:
-            search_id = create_search(search_text)
-            track_db.set_search_uuid(track_id, search_id)
-            track_db.update_track_status(track_id, "searching")
-            initiated_count += 1
-        except Exception as e:
-            write_log.warn("SLSKD_REDOWNLOAD_SEARCH_FAIL", "Failed to create upgrade search.",
-                          {"error": str(e)})
-            track_db.update_track_status(track_id, "failed", failed_reason=str(e))
+        for track_row in batch:
+            track_id, track_name, artist = track_row[0], track_row[1], track_row[2]
+
+            # Create search and update status
+            search_text = f"{artist} {track_name}"
+            try:
+                search_id = create_search(search_text)
+                track_db.set_search_uuid(track_id, search_id)
+                track_db.update_track_status(track_id, "searching")
+                initiated_count += 1
+            except Exception as e:
+                write_log.warn("SLSKD_REDOWNLOAD_SEARCH_FAIL", "Failed to create upgrade search.",
+                              {"error": str(e)})
+                track_db.update_track_status(track_id, "failed", failed_reason=str(e))
+
+        # Add delay between batches (but not after the last batch)
+        if i + batch_size < total_tracks:
+            time.sleep(batch_delay)
 
     if initiated_count > 0:
         write_log.info("SLSKD_REDOWNLOAD_SEARCHES_INITIATED", "Initiated upgrade searches.",
-                      {"initiated": initiated_count})
+                      {"initiated": initiated_count, "total": total_tracks,
+                       "batch_size": batch_size, "batch_delay": batch_delay})
 
 
 def get_track_bitrate(track_id: str) -> int | None:
