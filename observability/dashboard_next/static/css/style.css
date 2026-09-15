@@ -10,6 +10,7 @@
   --danger: #dc2626;
   --danger-bg: #fee2e2;
   --success-bg: #dcfce7;
+  --warning: #b45309;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -22,6 +23,7 @@
     --danger: #f87171;
     --danger-bg: #3f1d1d;
     --success-bg: #16321f;
+    --warning: #fbbf24;
   }
 }
 
@@ -488,6 +490,11 @@ main#tab-content {
   color: var(--muted);
 }
 
+.log-task {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .log-message {
   flex: 1 1 300px;
 }
@@ -509,11 +516,6 @@ main#tab-content {
 .execution-inspection-tab h2 {
   font-size: 1.1rem;
   margin: 0 0 0.35rem;
-}
-
-.execution-inspection-tab h3 {
-  font-size: 0.95rem;
-  margin: 1.5rem 0 0.75rem;
 }
 
 .metric-grid {
@@ -543,6 +545,61 @@ main#tab-content {
 
 .metric-label {
   font-size: 0.75rem;
+  color: var(--muted);
+}
+
+/* Live log stream (Execution Inspection tab) */
+
+.section-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.75rem 0;
+}
+
+.live-logs-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.live-logs-controls .stats-caption {
+  margin-left: auto;
+}
+
+.live-log-pane {
+  height: 420px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--code-bg);
+  padding: 0.5rem 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.78rem;
+}
+
+.live-log-pane .log-entry {
+  border-bottom: none;
+  padding: 0.1rem 0;
+}
+
+/* .log-entry sets display:flex, which otherwise beats the browser's default
+   [hidden]{display:none} at equal specificity -- the container/level checkboxes toggle
+   the `hidden` property in JS and need this to actually win. */
+.live-log-pane .log-entry[hidden] {
+  display: none;
+}
+
+.log-level-error {
+  color: var(--danger);
+}
+
+.log-level-warning {
+  color: var(--warning);
+}
+
+.log-level-debug {
   color: var(--muted);
 }
 

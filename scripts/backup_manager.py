@@ -37,6 +37,7 @@ dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(dotenv_path)
 
 from scripts.database_management import TrackDB  # noqa: E402
+from scripts.docker_control import container_ids_for_service, own_compose_project  # noqa: E402
 from scripts.logs_utils import setup_logging, write_log  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -154,40 +155,15 @@ def repo_path(env: str) -> str:
 # Docker control (pause/resume the hot environment's containers)
 # ---------------------------------------------------------------------------
 
-def _own_compose_project() -> str | None:
-    """The compose project this container itself belongs to.
-
-    Filtering only by `com.docker.compose.service` is not enough to scope
-    docker ps to this project: an unrelated compose project elsewhere on the
-    host can use the same service name (e.g. another "slskd" service) and
-    would otherwise get matched too. Docker sets HOSTNAME to the container's
-    own short ID by default, which lets us look up our own project label and
-    use it to scope every other query.
-    """
-    own_id = os.getenv("HOSTNAME", "")
-    if not own_id:
-        return None
-    result = subprocess.run(
-        ["docker", "inspect", "--format", '{{index .Config.Labels "com.docker.compose.project"}}', own_id],
-        capture_output=True, text=True, check=False,
-    )
-    project = result.stdout.strip()
-    return project or None
-
-
 def _container_ids_for_service(service: str) -> list[str]:
-    filters = ["--filter", f"label=com.docker.compose.service={service}"]
-    project = _own_compose_project()
-    if project:
-        filters += ["--filter", f"label=com.docker.compose.project={project}"]
-    else:
+    project = own_compose_project()
+    if not project:
         write_log.warn(
             "BACKUP_PROJECT_LOOKUP_FAILED",
             "Could not determine this container's own compose project; "
             "container discovery is unscoped and may match unrelated projects.",
         )
-    result = subprocess.run(["docker", "ps", "-q", *filters], check=True, capture_output=True, text=True)
-    return [cid for cid in result.stdout.split() if cid]
+    return container_ids_for_service(service, project)
 
 
 def stop_hot_containers(env: str) -> list[str]:

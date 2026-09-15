@@ -8,6 +8,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# docker-cli: gives us the `docker` client so the Execution Inspection tab can stream
+# live container logs (via the mounted socket -- see docker-compose.yml) with
+# scripts/docker_control.py, the same way the `backup` service already does.
+RUN apt-get update && apt-get install -y --no-install-recommends docker-cli \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install requirements from the full project requirements.txt (shared with the other
 # services); dashboard_next only imports a subset of it so far.
 COPY requirements.txt .

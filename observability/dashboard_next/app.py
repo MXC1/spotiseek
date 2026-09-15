@@ -10,6 +10,7 @@ Usage:
 """
 
 import os
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
@@ -26,8 +27,25 @@ from observability.dashboard_next.routes.tasks import router as tasks_router
 
 app = FastAPI(title=f"Spotiseek Dashboard ({(ENV or 'default').upper()})")
 
+
+class _RevalidatingStaticFiles(StaticFiles):
+    """StaticFiles that never lets the browser serve a stale copy from its heuristic
+    cache. Starlette's default sends no Cache-Control at all, so browsers apply their
+    own freshness guess (commonly ~10% of the file's age since Last-Modified) and can
+    keep serving old JS/CSS for a while after a change -- exactly the kind of thing
+    that's confusing on a dashboard whose static assets get edited often. `no-cache`
+    forces a conditional GET (If-None-Match/If-Modified-Since) on every load; a cheap
+    304 comes back when nothing changed, so this doesn't add a real fetch cost.
+    """
+
+    def file_response(self, *args: Any, **kwargs: Any) -> Any:
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
-app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+app.mount("/static", _RevalidatingStaticFiles(directory=_static_dir), name="static")
 
 app.include_router(stats_router)
 app.include_router(tasks_router)

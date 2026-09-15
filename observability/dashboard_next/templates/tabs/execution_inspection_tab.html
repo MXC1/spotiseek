@@ -1,19 +1,45 @@
 <section class="execution-inspection-tab">
-  {% if not runs %}
-  <p class="stats-empty">No workflow runs found.</p>
-  {% else %}
-  <form hx-get="/execution-inspection/run" hx-target="#run-summary-panel" hx-swap="innerHTML" hx-trigger="change">
-    <label class="field-label">Select a workflow run to inspect:
-      <select name="run_id">
-        {% for run in runs %}
-        <option value="{{ run.run_id }}" {% if run.run_id == selected_run_id %}selected{% endif %}>{{ run.display_name }}</option>
+  <section class="live-logs" id="live-logs" data-stream-url="/execution-inspection/stream">
+    <h2>&#128225; Live Log Stream</h2>
+    {% if not live_containers %}
+    <p class="stats-empty">No running containers found (is the Docker socket mounted into dashboard-next?).</p>
+    {% else %}
+    <div class="live-logs-controls">
+      <fieldset class="tasks-level-filter" id="live-container-filter">
+        <legend>Containers:</legend>
+        {% for c in live_containers %}
+        <label class="level-checkbox">
+          <input type="checkbox" class="live-container-toggle" value="{{ c }}" checked>
+          {{ c }}
+        </label>
         {% endfor %}
-      </select>
-    </label>
-  </form>
-
-  <div id="run-summary-panel">
-    {% include "tabs/_execution_inspection_summary.html" %}
-  </div>
-  {% endif %}
+      </fieldset>
+      <fieldset class="tasks-level-filter" id="live-level-filter">
+        <legend>Level:</legend>
+        {% for level in live_levels %}
+        <label class="level-checkbox">
+          <input type="checkbox" class="live-level-toggle" value="{{ level }}" {% if level != "DEBUG" %}checked{% endif %}>
+          {{ level }}
+        </label>
+        {% endfor %}
+      </fieldset>
+      <button type="button" id="live-logs-clear" class="btn btn-small">Clear</button>
+      <label class="level-checkbox"><input type="checkbox" id="live-logs-autoscroll" checked> Autoscroll</label>
+      <span class="stats-caption" id="live-logs-status">Connecting&hellip;</span>
+    </div>
+    <div class="live-logs-controls">
+      <fieldset class="tasks-level-filter" id="live-task-filter">
+        <legend>Task (workflow only):</legend>
+        {% for task_name in live_tasks %}
+        <label class="level-checkbox">
+          <input type="checkbox" class="live-task-toggle" value="{{ task_name }}" checked>
+          {{ task_name }}
+        </label>
+        {% endfor %}
+      </fieldset>
+    </div>
+    <div class="live-log-pane" id="live-log-pane"></div>
+    <script src="/static/js/execution_inspection_live.js" defer></script>
+    {% endif %}
+  </section>
 </section>

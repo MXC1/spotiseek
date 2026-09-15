@@ -1,107 +1,225 @@
 """
 Execution Inspection tab routes.
 
-1:1 port of observability/dashboard/tabs/execution_inspection.py's behaviour (workflow
-run picker + summary metrics, timeline, errors/warnings) onto FastAPI + HTMX -- see
-docs/adr/0004-dashboard-migration-parallel-service-cutover.md.
+A live log stream that tails `docker logs -f` for every currently running compose
+container over SSE, tagging each line with a best-effort severity so the UI can offer
+per-container/per-level show-hide checkboxes (see _log_event_stream and
+static/js/execution_inspection_live.js). This replaced an earlier port of
+observability/dashboard/tabs/execution_inspection.py's workflow run picker + summary
+metrics/timeline/errors view (docs/adr/0004-dashboard-migration-parallel-service-cutover.md);
+that view (and scripts.logs_utils.get_workflow_runs/analyze_workflow_run it was built on)
+still lives in the deprecated Streamlit dashboard, kept as a rollback path per
+docs/adr/0005-defer-dashboard-cutover-keep-streamlit-as-rollback.md.
 """
 
+import asyncio
+import contextlib
 import json
-import os
+import re
+from collections.abc import AsyncIterator
+from datetime import datetime
 
 from fastapi import APIRouter, Request
+from fastapi.responses import StreamingResponse
 
-from observability.dashboard_next.config import ENV, LOGS_DIR
+from observability.dashboard_next.config import ENV
 from observability.dashboard_next.templating import templates
-from scripts.logs_utils import analyze_workflow_run, get_workflow_runs
+from scripts.docker_control import list_running_containers, own_compose_project
+from scripts.task_scheduler import get_task_registry
 
 router = APIRouter()
 
-_STATUS_EMOJI = {
-    "completed": "\U0001f7e2",
-    "failed": "\U0001f534",
-    "incomplete": "\U0001f7e1",
-    "unknown": "⚪",
-}
+# ---------------------------------------------------------------------------
+# Live log stream: tails `docker logs -f` for every currently running compose
+# container, over one SSE connection. Container/level/task checkboxes are handled
+# entirely client-side (static/js/execution_inspection_live.js) by show/hide,
+# not by re-opening the stream -- so all containers/levels/tasks are always sent.
+# ---------------------------------------------------------------------------
+
+_ALL_LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"]
+
+# Bucket for lines that aren't attributable to a scheduled task: everything from
+# non-workflow containers, plus workflow's own startup/idle-loop chatter before the
+# first task of a run starts. Must match the fallback the frontend JS uses for
+# data.task === null.
+_NO_TASK_LABEL = "Other"
+
+# task_scheduler.run_task() logs exactly "Starting task: {task.display_name}" (see
+# TASK_START in scripts/task_scheduler.py) and nothing else marks a task boundary --
+# there's no generic "task complete" line, only per-task-function completion messages
+# with their own event_ids. Since the scheduler runs tasks one at a time in a single
+# loop (never concurrently), treating everything between one "Starting task" line and
+# the next as belonging to that task is a reasonable approximation, tracked only for
+# the `workflow` container/service (nothing else in this codebase has this concept).
+_TASK_START_RE = re.compile(r"Starting task: (.+)$")
+
+# Matches `docker logs --timestamps`' RFC3339Nano prefix, e.g.
+# "2026-09-15T12:34:56.789012345Z the rest of the line".
+_DOCKER_TIMESTAMP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s?(.*)$")
+
+# Containers writing our own JSON logs (workflow, dashboard-next, backup) emit
+# "[LEVEL] message" to stdout (see logs_utils.ConsoleFormatter); slskd, a .NET app,
+# prefixes lines with its Generic Host short codes (info:/warn:/fail:/...). Neither is
+# guaranteed -- multi-line entries (stack traces, our own context-JSON continuation
+# lines) won't match anything and fall back to INFO.
+_LEVEL_RE = re.compile(
+    r"^\[(?P<bracket>TRACE|DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL|CRITICAL)\]"
+    r"|^(?P<dotnet>trce|dbug|info|warn|fail|crit):"
+    r"|\b(?P<bare>TRACE|DEBUG|INFO|WARNING|WARN|ERROR|FATAL|CRITICAL)\b",
+    re.IGNORECASE,
+)
+_DOTNET_LEVELS = {"trce": "DEBUG", "dbug": "DEBUG", "info": "INFO", "warn": "WARNING", "fail": "ERROR", "crit": "ERROR"}
+_NORMALIZE_LEVEL = {"WARN": "WARNING", "FATAL": "ERROR", "CRITICAL": "ERROR"}
 
 
-def _entry_block(entry: dict) -> str:
-    return (
-        f"Event: {entry.get('event_id', 'N/A')}\n"
-        f"Message: {entry.get('message', 'N/A')}\n"
-        f"Context: {json.dumps(entry.get('context', {}), indent=2)}"
-    )
+def _detect_level(line: str) -> str:
+    match = _LEVEL_RE.search(line)
+    if not match:
+        return "INFO"
+    token = match.group("bracket") or match.group("dotnet") or match.group("bare") or ""
+    if token.lower() in _DOTNET_LEVELS:
+        return _DOTNET_LEVELS[token.lower()]
+    return _NORMALIZE_LEVEL.get(token.upper(), token.upper())
 
 
-def _summary_context(run_id: str | None) -> dict:
-    runs = get_workflow_runs(LOGS_DIR)
-    if not runs:
-        return {"runs": [], "selected_run_id": None, "run": None}
+def _split_docker_timestamp(line: str) -> tuple[str, str]:
+    match = _DOCKER_TIMESTAMP_RE.match(line)
+    if not match:
+        return "", line
+    iso_ts, rest = match.groups()
+    try:
+        display_time = datetime.fromisoformat(iso_ts.replace("Z", "+00:00")).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        display_time = ""
+    return display_time, rest
 
-    selected_run = next((r for r in runs if r["run_id"] == run_id), runs[0])
-    analysis = analyze_workflow_run(selected_run["log_file"])
 
-    downloads_new = analysis.get("downloads_completed_new", 0)
-    downloads_upgrade = analysis.get("downloads_completed_upgrade", 0)
-
-    timeline_rows = [
-        {"time": item["display_time"], "event": item["event_id"], "message": item["message"]}
-        for item in analysis["timeline"]
-    ]
-
+def _live_context() -> dict:
+    containers = list_running_containers(own_compose_project())
+    task_names = [task.display_name for task in get_task_registry().tasks.values()]
     return {
-        "runs": runs,
-        "selected_run_id": selected_run["run_id"],
-        "run": selected_run,
-        "status": analysis["workflow_status"],
-        "status_emoji": _STATUS_EMOJI.get(analysis["workflow_status"], "⚪"),
-        "log_filename": os.path.basename(selected_run["log_file"]),
-        "metric_cards": [
-            [
-                ("Total Logs", analysis["total_logs"]),
-                ("Errors", len(analysis["errors"])),
-                ("Warnings", len(analysis["warnings"])),
-            ],
-            [
-                ("Searches (New)", analysis["new_searches"]),
-                ("Searches (Upgrade)", analysis["upgrade_searches"]),
-            ],
-            [
-                ("Playlists Added", analysis["playlists_added"]),
-                ("Playlists Removed", analysis.get("playlists_removed", 0)),
-            ],
-            [
-                ("Tracks Added", analysis["tracks_added"]),
-                ("Tracks Removed", analysis.get("tracks_removed", 0)),
-            ],
-            [
-                ("Quality Upgrades", analysis["tracks_upgraded"]),
-            ],
-            [
-                ("Downloads Completed (New)", downloads_new),
-                ("Downloads Completed (Upgrade)", downloads_upgrade),
-                ("Downloads Failed", analysis["downloads_failed"]),
-            ],
-        ],
-        "timeline_rows": timeline_rows,
-        "error_blocks": [_entry_block(e) for e in analysis["errors"]],
-        "warning_blocks": [_entry_block(w) for w in analysis["warnings"]],
-        "error_count": len(analysis["errors"]),
-        "warning_count": len(analysis["warnings"]),
+        "live_containers": sorted({c["service"] for c in containers}),
+        "live_levels": _ALL_LOG_LEVELS,
+        "live_tasks": [*task_names, _NO_TASK_LABEL],
     }
 
 
-@router.get("/execution-inspection/run")
-def execution_inspection_run(request: Request, run_id: str | None = None):
-    return templates.TemplateResponse(
-        request, "tabs/_execution_inspection_summary.html", _summary_context(run_id),
+async def _seed_current_task(container_id: str) -> str | None:
+    """Best-effort guess at which task is attributable right now, from further back than
+    the live stream's own --tail window covers.
+
+    A single chatty task (e.g. poll_search_results processing dozens of pending
+    searches) can easily produce more than the live stream's 200-line backlog on its
+    own, so on a fresh connection its own "Starting task: X" line may already have
+    scrolled out of that window -- leaving everything misattributed to "Other" until
+    the *next* task happens to start. Scanning a much deeper (but still bounded, and
+    non-follow so it returns immediately) tail just for this purpose fixes that without
+    bloating what's actually displayed.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "logs", "--tail", "5000", container_id,
+            # Our own ConsoleFormatter writes through logging.StreamHandler(), which
+            # defaults to stderr -- merge it into stdout like the live -f pump does, or
+            # every "Starting task" line silently goes missing from this scan.
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout, _stderr = await proc.communicate()
+    except OSError:
+        return None
+
+    last_match = None
+    for line in stdout.decode("utf-8", errors="replace").splitlines():
+        match = _TASK_START_RE.search(line)
+        if match:
+            last_match = match.group(1).strip()
+    return last_match
+
+
+async def _pump_container_logs(container: dict, queue: asyncio.Queue) -> None:
+    """Follow one container's logs, pushing parsed entries onto the shared queue."""
+    track_tasks = container["service"] == "workflow"
+    current_task = await _seed_current_task(container["id"]) if track_tasks else None
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "logs", "-f", "--tail", "200", "--timestamps", container["id"],
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        )
+    except OSError:
+        await queue.put({
+            "container": container["service"], "level": "ERROR", "time": "",
+            "message": "Could not start `docker logs` for this container.", "task": None,
+        })
+        return
+
+    try:
+        while proc.stdout is not None:
+            raw = await proc.stdout.readline()
+            if not raw:
+                break
+            line = raw.decode("utf-8", errors="replace").rstrip("\n")
+            if not line:
+                continue
+            display_time, message = _split_docker_timestamp(line)
+            if track_tasks:
+                match = _TASK_START_RE.search(message)
+                if match:
+                    current_task = match.group(1).strip()
+            await queue.put({
+                "container": container["service"],
+                "level": _detect_level(message),
+                "time": display_time,
+                "message": message,
+                "task": current_task if track_tasks else None,
+            })
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            proc.terminate()
+        with contextlib.suppress(Exception):
+            await proc.wait()
+
+
+async def _log_event_stream(request: Request) -> AsyncIterator[str]:
+    containers = list_running_containers(own_compose_project())
+    if not containers:
+        payload = json.dumps({"message": "No running containers found (is the Docker socket mounted?)."})
+        yield f"event: error\ndata: {payload}\n\n"
+        return
+
+    queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
+    tasks = [asyncio.create_task(_pump_container_logs(c, queue)) for c in containers]
+    yield f"event: init\ndata: {json.dumps({'containers': [c['service'] for c in containers]})}\n\n"
+
+    try:
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                entry = await asyncio.wait_for(queue.get(), timeout=15)
+            except asyncio.TimeoutError:
+                yield ": heartbeat\n\n"
+                continue
+            yield f"event: log\ndata: {json.dumps(entry)}\n\n"
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@router.get("/execution-inspection/stream")
+async def execution_inspection_stream(request: Request):
+    return StreamingResponse(
+        _log_event_stream(request),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
 @router.get("/execution-inspection")
 def execution_inspection_tab(request: Request):
     """The whole Execution Inspection tab: full page on direct nav, tab fragment on HTMX."""
-    context = _summary_context(None)
+    context = _live_context()
 
     if request.headers.get("HX-Request") == "true":
         return templates.TemplateResponse(request, "tabs/execution_inspection_tab.html", context)

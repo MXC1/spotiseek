@@ -76,6 +76,12 @@ services:
       - ./docs:/app/docs:ro
       - ./README.md:/app/README.md:ro
       - ./scripts:/app/scripts:ro
+      # Docker socket: lets the Execution Inspection tab stream every other container's
+      # live logs (workflow, slskd, backup, itself) via `docker logs -f`. This is a real
+      # privilege escalation for a web-facing container -- socket access is effectively
+      # root on the host -- accepted here because this dashboard isn't exposed beyond the
+      # host/LAN. If that ever changes, put dashboard-next behind auth first.
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
 
   workflow:
