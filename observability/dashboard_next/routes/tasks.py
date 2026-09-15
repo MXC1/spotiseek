@@ -8,18 +8,24 @@ docs/adr/0004-dashboard-migration-parallel-service-cutover.md. Unlike the origin
 each action here just returns the freshly-rendered fragment directly.
 """
 
+import asyncio
 import json
-import threading
 from datetime import datetime
 
 from fastapi import APIRouter, Query, Request
 
 from observability.dashboard_next.config import ENV, LOGS_DIR
+from observability.dashboard_next.live_log_bus import TASK_START_RE, detect_level, publish
 from observability.dashboard_next.templating import templates
+from scripts.docker_control import container_ids_for_service, own_compose_project
 from scripts.logs_utils import get_task_scheduler_logs, parse_logs, write_log
 from scripts.task_scheduler import get_task_registry
 
 router = APIRouter()
+
+# asyncio.create_task() only holds a weak reference to its Task -- without keeping our
+# own strong reference here, a background run-all could be garbage-collected mid-run.
+_background_tasks: set[asyncio.Task] = set()
 
 _STATUS_EMOJI = {
     "idle": "⚪",
@@ -178,26 +184,89 @@ def tasks_overview(request: Request):
     return templates.TemplateResponse(request, "tabs/_tasks_overview.html", _overview_context())
 
 
+def _workflow_container_id() -> str | None:
+    """The running `workflow` container's ID, so task runs execute there.
+
+    Tasks must run inside `workflow` -- not here in dashboard-next -- because
+    it's the container with the real input_playlists/slskd_docker_data mounts
+    and its logs are what the rest of the system (Execution Inspection, etc.)
+    expects task activity to show up under.
+    """
+    project = own_compose_project()
+    if not project:
+        write_log.warn(
+            "DASHBOARD_NEXT_PROJECT_LOOKUP_FAILED",
+            "Could not determine this container's own compose project; "
+            "workflow container discovery is unscoped and may match unrelated projects.",
+        )
+    ids = container_ids_for_service("workflow", project)
+    return ids[0] if ids else None
+
+
+async def _run_in_workflow(container_id: str, cli_args: list[str]) -> tuple[int, list[str]]:
+    """Run `python -m scripts.task_scheduler <cli_args>` inside the `workflow` container,
+    relaying each output line to the Execution Inspection live bus as it's produced --
+    `docker exec` output never reaches `docker logs`, so without this a manually
+    triggered run would be invisible in that live view. Returns (exit_code, lines)."""
+    proc = await asyncio.create_subprocess_exec(
+        "docker", "exec", container_id, "python", "-m", "scripts.task_scheduler", *cli_args,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+    )
+    lines: list[str] = []
+    current_task: str | None = None
+    while proc.stdout is not None:
+        raw = await proc.stdout.readline()
+        if not raw:
+            break
+        line = raw.decode("utf-8", errors="replace").rstrip("\n")
+        if not line:
+            continue
+        lines.append(line)
+        match = TASK_START_RE.search(line)
+        if match:
+            current_task = match.group(1).strip()
+        await publish({
+            "container": "workflow",
+            "level": detect_level(line),
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "message": line,
+            "task": current_task,
+        })
+    returncode = await proc.wait()
+    return returncode, lines
+
+
 @router.post("/tasks/run-all")
-def tasks_run_all(request: Request):
-    registry = get_task_registry()
+async def tasks_run_all(request: Request):
+    container_id = _workflow_container_id()
+    if not container_id:
+        flash = {"type": "error", "text": "Workflow container is not running."}
+        return templates.TemplateResponse(request, "tabs/_tasks_overview.html", _overview_context(flash))
 
-    def _run_in_background():
+    async def _run_in_background():
         try:
-            registry.run_all_tasks()
-        except Exception as e:
-            write_log.error("DASHBOARD_NEXT_RUN_ALL_FAILED", "Background run-all-tasks failed.", {"error": str(e)})
+            await _run_in_workflow(container_id, ["--run-all"])
+        except OSError as e:
+            write_log.error("DASHBOARD_NEXT_RUN_ALL_FAILED", "Failed to start run-all-tasks in workflow container.",
+                            {"error": str(e)})
 
-    threading.Thread(target=_run_in_background, daemon=True).start()
+    bg_task = asyncio.create_task(_run_in_background())
+    _background_tasks.add(bg_task)
+    bg_task.add_done_callback(_background_tasks.discard)
     flash = {"type": "success", "text": "All tasks have been started in the background!"}
     return templates.TemplateResponse(request, "tabs/_tasks_overview.html", _overview_context(flash))
 
 
 @router.post("/tasks/run/{task_name}")
-def tasks_run_one(request: Request, task_name: str):
-    registry = get_task_registry()
-    success, message = registry.run_task(task_name, force=True)
-    flash = {"type": "success" if success else "error", "text": message}
+async def tasks_run_one(request: Request, task_name: str):
+    container_id = _workflow_container_id()
+    if not container_id:
+        flash = {"type": "error", "text": "Workflow container is not running."}
+        return templates.TemplateResponse(request, "tabs/_tasks_overview.html", _overview_context(flash))
+
+    returncode, lines = await _run_in_workflow(container_id, ["--run", task_name])
+    message = lines[-1] if lines else "No output."
+    flash = {"type": "success" if returncode == 0 else "error", "text": message}
     return templates.TemplateResponse(request, "tabs/_tasks_overview.html", _overview_context(flash))
 
 

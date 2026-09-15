@@ -23,6 +23,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from observability.dashboard_next.config import ENV
+from observability.dashboard_next.live_log_bus import TASK_START_RE, detect_level, subscribe, unsubscribe
 from observability.dashboard_next.templating import templates
 from scripts.docker_control import list_running_containers, own_compose_project
 from scripts.task_scheduler import get_task_registry
@@ -44,42 +45,9 @@ _ALL_LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"]
 # data.task === null.
 _NO_TASK_LABEL = "Other"
 
-# task_scheduler.run_task() logs exactly "Starting task: {task.display_name}" (see
-# TASK_START in scripts/task_scheduler.py) and nothing else marks a task boundary --
-# there's no generic "task complete" line, only per-task-function completion messages
-# with their own event_ids. Since the scheduler runs tasks one at a time in a single
-# loop (never concurrently), treating everything between one "Starting task" line and
-# the next as belonging to that task is a reasonable approximation, tracked only for
-# the `workflow` container/service (nothing else in this codebase has this concept).
-_TASK_START_RE = re.compile(r"Starting task: (.+)$")
-
 # Matches `docker logs --timestamps`' RFC3339Nano prefix, e.g.
 # "2026-09-15T12:34:56.789012345Z the rest of the line".
 _DOCKER_TIMESTAMP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s?(.*)$")
-
-# Containers writing our own JSON logs (workflow, dashboard-next, backup) emit
-# "[LEVEL] message" to stdout (see logs_utils.ConsoleFormatter); slskd, a .NET app,
-# prefixes lines with its Generic Host short codes (info:/warn:/fail:/...). Neither is
-# guaranteed -- multi-line entries (stack traces, our own context-JSON continuation
-# lines) won't match anything and fall back to INFO.
-_LEVEL_RE = re.compile(
-    r"^\[(?P<bracket>TRACE|DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL|CRITICAL)\]"
-    r"|^(?P<dotnet>trce|dbug|info|warn|fail|crit):"
-    r"|\b(?P<bare>TRACE|DEBUG|INFO|WARNING|WARN|ERROR|FATAL|CRITICAL)\b",
-    re.IGNORECASE,
-)
-_DOTNET_LEVELS = {"trce": "DEBUG", "dbug": "DEBUG", "info": "INFO", "warn": "WARNING", "fail": "ERROR", "crit": "ERROR"}
-_NORMALIZE_LEVEL = {"WARN": "WARNING", "FATAL": "ERROR", "CRITICAL": "ERROR"}
-
-
-def _detect_level(line: str) -> str:
-    match = _LEVEL_RE.search(line)
-    if not match:
-        return "INFO"
-    token = match.group("bracket") or match.group("dotnet") or match.group("bare") or ""
-    if token.lower() in _DOTNET_LEVELS:
-        return _DOTNET_LEVELS[token.lower()]
-    return _NORMALIZE_LEVEL.get(token.upper(), token.upper())
 
 
 def _split_docker_timestamp(line: str) -> tuple[str, str]:
@@ -130,7 +98,7 @@ async def _seed_current_task(container_id: str) -> str | None:
 
     last_match = None
     for line in stdout.decode("utf-8", errors="replace").splitlines():
-        match = _TASK_START_RE.search(line)
+        match = TASK_START_RE.search(line)
         if match:
             last_match = match.group(1).strip()
     return last_match
@@ -163,12 +131,12 @@ async def _pump_container_logs(container: dict, queue: asyncio.Queue) -> None:
                 continue
             display_time, message = _split_docker_timestamp(line)
             if track_tasks:
-                match = _TASK_START_RE.search(message)
+                match = TASK_START_RE.search(message)
                 if match:
                     current_task = match.group(1).strip()
             await queue.put({
                 "container": container["service"],
-                "level": _detect_level(message),
+                "level": detect_level(message),
                 "time": display_time,
                 "message": message,
                 "task": current_task if track_tasks else None,
@@ -180,6 +148,18 @@ async def _pump_container_logs(container: dict, queue: asyncio.Queue) -> None:
             await proc.wait()
 
 
+async def _pump_bus(queue: asyncio.Queue) -> None:
+    """Relay manually-triggered task-run lines (routes/tasks.py's `docker exec` into
+    `workflow`) into this connection's queue. `docker exec` output never reaches
+    `docker logs`, so this bus is the only way those runs show up live."""
+    bus_queue = subscribe()
+    try:
+        while True:
+            await queue.put(await bus_queue.get())
+    finally:
+        unsubscribe(bus_queue)
+
+
 async def _log_event_stream(request: Request) -> AsyncIterator[str]:
     containers = list_running_containers(own_compose_project())
     if not containers:
@@ -189,6 +169,7 @@ async def _log_event_stream(request: Request) -> AsyncIterator[str]:
 
     queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
     tasks = [asyncio.create_task(_pump_container_logs(c, queue)) for c in containers]
+    tasks.append(asyncio.create_task(_pump_bus(queue)))
     yield f"event: init\ndata: {json.dumps({'containers': [c['service'] for c in containers]})}\n\n"
 
     try:
