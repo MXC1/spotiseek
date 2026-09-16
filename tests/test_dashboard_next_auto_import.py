@@ -10,6 +10,7 @@ associated search/download UUIDs, so those calls are skipped by do_track_import'
 import os
 import shutil
 import tempfile
+import wave
 
 import pytest
 
@@ -43,18 +44,39 @@ def reset_state():
     _reset()
 
 
+def _write_silent_wav(path: str) -> None:
+    """Write a minimal but genuinely decodable WAV file (untagged, so artist/title
+    metadata lookups still miss and matching falls back to filename parsing) --
+    real audio bytes are required now that do_track_import() rejects files that
+    fail an ffmpeg decode check (see scripts/audio_validation.py).
+    """
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(8000)
+        w.writeframes(b"\x00\x00" * 100)
+
+
 @pytest.fixture()
 def scan_dir():
     root = tempfile.mkdtemp(prefix="spotiseek_ai_test_")
     sub = os.path.join(root, "Subfolder")
     os.makedirs(sub)
-    # mutagen will fail silently on these garbage bytes, so the match has to come from
-    # filename parsing ("Artist - Title") -- exactly the fallback path production code
-    # takes for files with unreadable/missing tags, not a stand-in for it.
+    # No artist/title tags are written, so the match still has to come from filename
+    # parsing ("Artist - Title") -- exactly the fallback path production code takes for
+    # files with unreadable/missing tags, not a stand-in for it.
     file_path = os.path.join(root, "Test Artist - Test Song.mp3")
-    with open(file_path, "wb") as f:
-        f.write(b"not a real mp3 file")
+    _write_silent_wav(file_path)
     yield root, sub, file_path
+    shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.fixture()
+def corrupt_file():
+    root = tempfile.mkdtemp(prefix="spotiseek_ai_corrupt_")
+    file_path = os.path.join(root, "Test Artist - Test Song.mp3")
+    open(file_path, "wb").close()  # zero-byte file, same shape as the real-world bug
+    yield root, file_path
     shutil.rmtree(root, ignore_errors=True)
 
 
@@ -185,6 +207,28 @@ def test_import_selected_writes_file_and_clears_state(client, scan_dir):
     local_file_path, status = cursor.fetchone()
     assert local_file_path
     assert status == "completed"
+
+
+@pytest.mark.usefixtures("seeded_track")
+def test_import_rejects_corrupt_file(client, corrupt_file):
+    root, file_path = corrupt_file
+    files_before = set(os.listdir(IMPORTED_DIR))
+
+    client.post("/auto-import/scan", data={"source_dir": root})
+    key = f"ai-track-1::{file_path}"
+    client.post("/auto-import/select", data={"key": key, "checked": "true"})
+
+    response = client.post("/auto-import/import")
+    assert "flash-error" in response.text
+    assert "Failed to import 1 tracks" in response.text
+
+    assert set(os.listdir(IMPORTED_DIR)) == files_before  # nothing new was written
+
+    cursor = track_db.conn.cursor()
+    cursor.execute("SELECT local_file_path, download_status FROM tracks WHERE track_id = ?", ("ai-track-1",))
+    local_file_path, status = cursor.fetchone()
+    assert not local_file_path
+    assert status != "completed"
 
 
 @pytest.mark.usefixtures("reset_state")

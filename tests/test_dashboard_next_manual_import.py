@@ -9,6 +9,7 @@ no associated search/download UUIDs, so those calls are skipped by do_track_impo
 
 import io
 import os
+import wave
 
 import pytest
 
@@ -23,6 +24,22 @@ from observability.dashboard_next.routes import manual_import as mi_module
 from scripts.database_management import TrackData
 
 _PLAYLIST_URL = "https://open.spotify.com/playlist/mi-test"
+
+
+def _valid_wav_bytes() -> bytes:
+    """A minimal but genuinely decodable WAV, needed wherever a staged upload is
+    actually imported -- do_track_import() now rejects files that fail an ffmpeg
+    decode check (see scripts/audio_validation.py). Uploads that only exercise the
+    precheck step keep using plain garbage bytes, since precheck never decodes them.
+    """
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(8000)
+        w.writeframes(b"\x00\x00" * 100)
+    buf.seek(0)
+    return buf.read()
 
 
 @pytest.fixture()
@@ -127,11 +144,11 @@ def test_import_without_precheck_reports_error(client):
 
 @pytest.mark.usefixtures("seeded_tracks")
 def test_full_import_flow_writes_file_and_updates_db(client):
-    fake_audio = io.BytesIO(b"not a real mp3 file")
+    valid_audio = io.BytesIO(_valid_wav_bytes())
     client.post(
         "/manual-import/precheck",
         data={"track_id": "mi-track-0", "artist": "Artist X", "track_name": "Track 0"},
-        files={"audio_file": ("song.mp3", fake_audio, "audio/mpeg")},
+        files={"audio_file": ("song.mp3", valid_audio, "audio/mpeg")},
     )
 
     response = client.post(
@@ -146,6 +163,30 @@ def test_full_import_flow_writes_file_and_updates_db(client):
 
     imported_files = os.listdir(IMPORTED_DIR)
     assert any("Artist_X" in f and "Track_0" in f for f in imported_files)
+    assert "mi-track-0" not in mi_module._staged_uploads
+
+
+@pytest.mark.usefixtures("seeded_tracks")
+def test_import_rejects_corrupt_staged_file(client):
+    files_before = set(os.listdir(IMPORTED_DIR))
+    fake_audio = io.BytesIO(b"not a real mp3 file")
+    client.post(
+        "/manual-import/precheck",
+        data={"track_id": "mi-track-0", "artist": "Artist X", "track_name": "Track 0"},
+        files={"audio_file": ("song.mp3", fake_audio, "audio/mpeg")},
+    )
+
+    response = client.post(
+        "/manual-import/import/mi-track-0",
+        data={"playlist_url": _PLAYLIST_URL, "search": "", "page": 1, "page_size": 25},
+    )
+    assert "flash-error" in response.text
+    assert "not a valid/decodable audio file" in response.text
+    # Track 0 still needs import -- rejected files must not update the DB.
+    assert '<span class="metric-value">3</span>' in response.text
+    assert "<td>Track 0</td>" in response.text
+
+    assert set(os.listdir(IMPORTED_DIR)) == files_before  # nothing new was written
     assert "mi-track-0" not in mi_module._staged_uploads
 
 

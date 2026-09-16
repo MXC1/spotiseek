@@ -46,6 +46,7 @@ sys.dont_write_bytecode = True
 dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(dotenv_path)
 
+from scripts.audio_validation import is_audio_valid  # noqa: E402
 from scripts.constants import LOSSLESS_FORMATS, LOSSY_FORMATS, MIN_BITRATE_KBPS  # noqa: E402
 from scripts.database_management import TrackData, TrackDB  # noqa: E402
 from scripts.logs_utils import setup_logging, write_log  # noqa: E402
@@ -1058,24 +1059,6 @@ def _handle_completed_download(file: dict, track_id: str) -> None:
 
     track_db.update_track_status(track_id, "completed")
 
-def _is_audio_valid(audio_path: str) -> bool:
-    """Use ffmpeg to check if an audio file is valid and decodable.
-    Returns True if valid, False otherwise.
-    """
-    try:
-        result = subprocess.run([
-            "ffmpeg", "-v", "error", "-i", audio_path, "-f", "null", "-",
-        ], check=False, capture_output=True, text=True)
-        return result.returncode == 0
-    except Exception as e:
-        write_log.error(
-            "AUDIO_CHECK_FAIL",
-            "Failed to check audio file integrity.",
-            {"audio_path": audio_path, "error": str(e)},
-        )
-        return False
-
-
 def _get_ffmpeg_log_path() -> str:
     """Get the path for the FFmpeg remux log file.
 
@@ -1305,7 +1288,7 @@ def _remux_lossless_to_wav(local_file_path: str, track_id: str, extension: str) 
 
     try:
         # Check audio integrity before remuxing
-        if not _is_audio_valid(ffmpeg_input):
+        if not is_audio_valid(ffmpeg_input):
             _handle_corrupt_audio(track_id, ffmpeg_input, extension, is_lossless=True)
             return local_file_path
 
@@ -1345,7 +1328,7 @@ def _remux_lossy_to_mp3(local_file_path: str, track_id: str, extension: str) -> 
 
     try:
         # Check audio integrity before remuxing
-        if not _is_audio_valid(ffmpeg_input):
+        if not is_audio_valid(ffmpeg_input):
             _handle_corrupt_audio(track_id, ffmpeg_input, extension, is_lossless=False)
             return local_file_path
 

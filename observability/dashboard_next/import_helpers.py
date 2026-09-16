@@ -16,6 +16,7 @@ from pathlib import Path
 from mutagen import File as MutagenFile
 
 from observability.dashboard_next.config import BASE_DIR, IMPORTED_DIR, IS_DOCKER, track_db
+from scripts.audio_validation import is_audio_valid
 from scripts.constants import LOSSLESS_FORMATS, MIN_BITRATE_KBPS
 from scripts.logs_utils import write_log
 from scripts.m3u8_manager import update_track_in_m3u8
@@ -65,6 +66,11 @@ def is_quality_worse_than_mp3_320(extension: str, bitrate: int | None) -> tuple[
 def do_track_import(track_id: str, source_path: str, artist: str, track_name: str) -> tuple[bool, str]:
     """Copy source_path into IMPORTED_DIR and update the DB/m3u8s for track_id."""
     try:
+        if not is_audio_valid(source_path):
+            write_log.warn("IMPORT_INVALID_AUDIO", "Source file failed audio integrity check; import rejected.",
+                            {"track_id": track_id, "source_path": source_path})
+            return False, f"Rejected: {os.path.basename(source_path)} is not a valid/decodable audio file"
+
         file_extension = os.path.splitext(source_path)[1]
         safe_filename = sanitize_filename(artist, track_name, file_extension)
         destination_path = os.path.abspath(os.path.join(IMPORTED_DIR, safe_filename))
