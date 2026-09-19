@@ -1,4 +1,4 @@
-"""Route tests for the dashboard_next Tasks tab (see docs/adr/0004).
+"""Route tests for the dashboard's Tasks tab (see docs/adr/0003).
 
 Uses a real TaskRegistry (real DB writes to task_runs/task_state) but with fake,
 harmless TaskDefinitions instead of the real scripts.workflow task functions -- the
@@ -15,9 +15,9 @@ os.environ.setdefault("APP_ENV", "test")
 
 from fastapi.testclient import TestClient
 
-import observability.dashboard_next.routes.tasks as tasks_module
-from observability.dashboard_next.app import app
-from observability.dashboard_next.config import LOGS_DIR, track_db
+import observability.dashboard.routes.tasks as tasks_module
+from observability.dashboard.app import app
+from observability.dashboard.config import LOGS_DIR, track_db
 from scripts.task_scheduler import TaskDefinition, TaskRegistry
 
 

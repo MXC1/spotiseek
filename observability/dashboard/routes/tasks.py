@@ -14,9 +14,9 @@ from datetime import datetime
 
 from fastapi import APIRouter, Query, Request
 
-from observability.dashboard_next.config import ENV, LOGS_DIR
-from observability.dashboard_next.live_log_bus import TASK_START_RE, detect_level, publish
-from observability.dashboard_next.templating import templates
+from observability.dashboard.config import ENV, LOGS_DIR
+from observability.dashboard.live_log_bus import TASK_START_RE, detect_level, publish
+from observability.dashboard.templating import templates
 from scripts.docker_control import container_ids_for_service, own_compose_project
 from scripts.logs_utils import get_task_scheduler_logs, parse_logs, write_log
 from scripts.task_scheduler import get_task_registry
@@ -187,7 +187,7 @@ def tasks_overview(request: Request):
 def _workflow_container_id() -> str | None:
     """The running `workflow` container's ID, so task runs execute there.
 
-    Tasks must run inside `workflow` -- not here in dashboard-next -- because
+    Tasks must run inside `workflow` -- not here in the dashboard -- because
     it's the container with the real input_playlists/slskd_docker_data mounts
     and its logs are what the rest of the system (Execution Inspection, etc.)
     expects task activity to show up under.

@@ -181,7 +181,7 @@ invoke deploy                # Deploy origin/main (fetches first)
 invoke deploy --ref=<ref>    # Deploy an arbitrary branch, tag, or commit
 ```
 
-This extracts exactly `scripts/`, `observability/dashboard/`, `observability/combined_dashboard.py`, `requirements.txt`, and `infra/Dockerfile.backup` from the target ref into `.deploy/deployed-code/` (wiped and recreated from scratch each time), records the deployed commit in `.deploy/DEPLOYED_SHA`, rebuilds the always-on `backup` service from that snapshot (its build context is always `.deploy/deployed-code`, regardless of which environment is hot), and — only if the gated environment is currently hot — restarts `workflow`/`dashboard` to pick up the new code.
+This extracts exactly `scripts/`, `observability/dashboard/`, `requirements.txt`, and `infra/Dockerfile.backup` from the target ref into `.deploy/deployed-code/` (wiped and recreated from scratch each time), records the deployed commit in `.deploy/DEPLOYED_SHA`, rebuilds the always-on `backup` service from that snapshot (its build context is always `.deploy/deployed-code`, regardless of which environment is hot), and — only if the gated environment is currently hot — restarts `workflow`/`dashboard` to pick up the new code.
 
 `invoke up`, `invoke build`, and `invoke setenv` refuse to run until `.deploy/deployed-code/` exists at least once — run `invoke deploy` first on a fresh clone. Everything besides gated code (infra, Dockerfiles, `.env` itself) still takes effect immediately via ordinary `invoke up --build`, for every environment including the gated one.
 

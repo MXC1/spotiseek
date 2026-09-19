@@ -4,12 +4,10 @@ Execution Inspection tab routes.
 A live log stream that tails `docker logs -f` for every currently running compose
 container over SSE, tagging each line with a best-effort severity so the UI can offer
 per-container/per-level show-hide checkboxes (see _log_event_stream and
-static/js/execution_inspection_live.js). This replaced an earlier port of
-observability/dashboard/tabs/execution_inspection.py's workflow run picker + summary
-metrics/timeline/errors view (docs/adr/0004-dashboard-migration-parallel-service-cutover.md);
-that view (and scripts.logs_utils.get_workflow_runs/analyze_workflow_run it was built on)
-still lives in the deprecated Streamlit dashboard, kept as a rollback path per
-docs/adr/0005-defer-dashboard-cutover-keep-streamlit-as-rollback.md.
+static/js/execution_inspection_live.js). This superseded the old Streamlit dashboard's
+workflow run picker + summary metrics/timeline/errors view, which was dropped (along
+with the scripts.logs_utils helpers it was built on) when that dashboard was deleted --
+see docs/adr/0006-complete-dashboard-cutover.md.
 """
 
 import asyncio
@@ -22,9 +20,9 @@ from datetime import datetime
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from observability.dashboard_next.config import ENV
-from observability.dashboard_next.live_log_bus import TASK_START_RE, detect_level, subscribe, unsubscribe
-from observability.dashboard_next.templating import templates
+from observability.dashboard.config import ENV
+from observability.dashboard.live_log_bus import TASK_START_RE, detect_level, subscribe, unsubscribe
+from observability.dashboard.templating import templates
 from scripts.docker_control import list_running_containers, own_compose_project
 from scripts.task_scheduler import get_task_registry
 

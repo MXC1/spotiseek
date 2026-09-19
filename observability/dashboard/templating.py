@@ -1,4 +1,4 @@
-"""Shared Jinja2Templates instance, used by every dashboard_next route module."""
+"""Shared Jinja2Templates instance, used by every dashboard route module."""
 
 import json
 import os

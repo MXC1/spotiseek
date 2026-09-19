@@ -1,14 +1,8 @@
 # Spotiseek Dashboard Guide
 
-> **This guide describes the deprecated Streamlit dashboard**, kept only as a manual
-> rollback (`docker compose --profile deprecated up -d dashboard`) and not running by
-> default — see [ADR-0005](adr/0005-defer-dashboard-cutover-keep-streamlit-as-rollback.md).
-> The active dashboard is at **http://localhost:8502**, built on FastAPI + HTMX
-> ([ADR-0003](adr/0003-dashboard-rewrite-fastapi-htmx.md)). Every tab and feature
-> described below has been ported there with the same behavior, just a different UI
-> stack — this document stays accurate as a feature reference for either one.
-
-The Streamlit dashboard provides a web interface for monitoring and managing Spotiseek. Access it at **http://localhost:8501** after starting the services.
+The dashboard (FastAPI + HTMX, see [ADR-0003](adr/0003-dashboard-rewrite-fastapi-htmx.md))
+provides a web interface for monitoring and managing Spotiseek. Access it at
+**http://localhost:8501** after starting the services.
 
 ## 📊 Stats Tab
 
@@ -63,25 +57,20 @@ Browse and filter log files with level filtering (INFO, WARNING, ERROR, DEBUG).
 
 ## 🔍 Execution Inspection Tab
 
-The **Execution Inspection** tab provides deep-dive analysis of workflow runs.
+The **Execution Inspection** tab is a live log stream: it tails `docker logs -f` for every
+currently running Compose container over SSE and renders lines as they arrive, each tagged
+with a best-effort severity.
 
 ### Features
 
-- **Run Selection**: Dropdown to select specific workflow runs by date
-- **Status Badge**: Visual indicator (🟢 completed, 🔴 failed, 🟡 incomplete)
+- **Per-Container Filtering**: Show/hide log lines by container (workflow, slskd, backup, dashboard)
+- **Per-Level Filtering**: Show/hide by severity (TRACE/DEBUG/INFO/WARNING/ERROR/FATAL); DEBUG is hidden by default
+- **Per-Task Filtering**: For `workflow`'s log lines specifically, filter to one or more task names
+- **Autoscroll**: Toggle whether the pane follows new lines as they arrive
+- **Clear**: Wipe the pane without disconnecting the stream
 
-### Summary Statistics
-
-- Total logs, errors, warnings
-- New and upgrade searches initiated
-- Playlists and tracks added/removed
-- Downloads completed (new vs. upgrades)
-- Failed downloads
-
-### Analysis Tools
-
-- **Workflow Timeline**: Chronological event log
-- **Expandable Error/Warning Sections**: Full context for debugging issues
+Manually-triggered task runs (from the **Tasks** tab) are pushed into this same view, since
+`docker exec` output never reaches `docker logs -f` on its own.
 
 ---
 

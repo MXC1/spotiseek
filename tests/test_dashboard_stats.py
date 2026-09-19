@@ -1,4 +1,4 @@
-"""Route tests for the dashboard_next Overall Stats tab (see docs/adr/0004)."""
+"""Route tests for the dashboard's Overall Stats tab (see docs/adr/0003)."""
 
 import os
 
@@ -9,8 +9,8 @@ os.environ.setdefault("APP_ENV", "test")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from observability.dashboard_next.app import app  # noqa: E402
-from observability.dashboard_next.config import track_db  # noqa: E402
+from observability.dashboard.app import app  # noqa: E402
+from observability.dashboard.config import track_db  # noqa: E402
 from scripts.database_management import TrackData  # noqa: E402
 
 
@@ -21,9 +21,9 @@ def client():
 
 @pytest.fixture()
 def empty_db():
-    """The dashboard_next config module owns one real TrackDB singleton for the whole
-    test session (constructed at import time, same as the original Streamlit dashboard's
-    config.py) -- so tests reset it via its own clear_database(), not a fresh tmp_path."""
+    """The dashboard's config module owns one real TrackDB singleton for the whole
+    test session (constructed at import time) -- so tests reset it via its own
+    clear_database(), not a fresh tmp_path."""
     track_db.clear_database()
     yield track_db
     track_db.clear_database()

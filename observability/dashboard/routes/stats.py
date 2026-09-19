@@ -14,8 +14,8 @@ import os
 from fastapi import APIRouter, Request
 from mutagen import File as MutagenFile
 
-from observability.dashboard_next.config import ENV, track_db
-from observability.dashboard_next.templating import templates
+from observability.dashboard.config import ENV, track_db
+from observability.dashboard.templating import templates
 from scripts.constants import LOSSLESS_FORMATS
 
 router = APIRouter()

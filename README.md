@@ -9,7 +9,7 @@ Spotiseek automates downloading playlists from **Spotify** and **SoundCloud** vi
 - **Quality Control**: Remuxes to preferred formats (lossless → WAV, lossy → MP3 320kbps)
 - **Library Export**: Generates iTunes-compatible XML and M3U8 playlists
 - **Task Scheduler**: Radarr-style automation with configurable intervals
-- **Web Dashboard**: Streamlit UI for monitoring, manual imports, and task management
+- **Web Dashboard**: FastAPI + HTMX UI for monitoring, manual imports, and task management
 - **Auto Import**: Fuzzy-match local audio files to missing tracks with bulk import
 - **Quality Upgrades**: Automatically identifies and upgrades lower-quality tracks
 
@@ -108,7 +108,7 @@ Remux & Import
 |---------|------|---------|
 | `slskd` | 5030, 5031 | Soulseek P2P daemon |
 | `workflow` | - | Task scheduler daemon |
-| `dashboard` | 8501 | Streamlit web UI |
+| `dashboard` | 8501 | Web UI (FastAPI + HTMX) |
 | `backup` | - | Backup/restore daemon (restic, one repo per environment) |
 
 See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for all task scheduler intervals, backup settings, and `invoke backup`/`invoke restore` usage.
@@ -163,5 +163,6 @@ invoke clean       # Remove __pycache__ files
 
 - [slskd](https://github.com/slskd/slskd) - Soulseek daemon
 - [spotipy](https://spotipy.readthedocs.io/) - Spotify API client
-- [Streamlit](https://streamlit.io/) - Dashboard framework
+- [FastAPI](https://fastapi.tiangolo.com/) - Dashboard framework
+- [HTMX](https://htmx.org/) - Dashboard interactivity
 - [mutagen](https://mutagen.readthedocs.io/) - Audio metadata handling

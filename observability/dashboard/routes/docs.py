@@ -11,8 +11,8 @@ import os
 import markdown
 from fastapi import APIRouter, Request
 
-from observability.dashboard_next.config import DEFAULT_DOC_SLUG, DOC_FILES, DOCS_DIR, ENV
-from observability.dashboard_next.templating import templates
+from observability.dashboard.config import DEFAULT_DOC_SLUG, DOC_FILES, DOCS_DIR, ENV
+from observability.dashboard.templating import templates
 
 router = APIRouter()
 

@@ -1,12 +1,13 @@
 """
-FastAPI replacement for the Streamlit dashboard.
-
-Runs as the temporary `dashboard-next` service on port 8502 while tabs are migrated
-one at a time -- see docs/adr/0003-dashboard-rewrite-fastapi-htmx.md and
-docs/adr/0004-dashboard-migration-parallel-service-cutover.md.
+The Spotiseek dashboard: a FastAPI + HTMX app, one tab per route module -- see
+docs/adr/0003-dashboard-rewrite-fastapi-htmx.md. Originally built tab-by-tab as a
+parallel `dashboard-next` service alongside the old Streamlit dashboard
+(docs/adr/0004-dashboard-migration-parallel-service-cutover.md); that migration is
+complete (docs/adr/0006-complete-dashboard-cutover.md) and this is now the only
+dashboard, at observability/dashboard/, serving port 8501.
 
 Usage:
-    uvicorn observability.dashboard_next.app:app --host 0.0.0.0 --port 8502
+    uvicorn observability.dashboard.app:app --host 0.0.0.0 --port 8501
 """
 
 import os
@@ -16,14 +17,14 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from observability.dashboard_next.config import ENV
-from observability.dashboard_next.routes.auto_import import router as auto_import_router
-from observability.dashboard_next.routes.blacklist import router as blacklist_router
-from observability.dashboard_next.routes.docs import router as docs_router
-from observability.dashboard_next.routes.execution_inspection import router as execution_inspection_router
-from observability.dashboard_next.routes.manual_import import router as manual_import_router
-from observability.dashboard_next.routes.stats import router as stats_router
-from observability.dashboard_next.routes.tasks import router as tasks_router
+from observability.dashboard.config import ENV
+from observability.dashboard.routes.auto_import import router as auto_import_router
+from observability.dashboard.routes.blacklist import router as blacklist_router
+from observability.dashboard.routes.docs import router as docs_router
+from observability.dashboard.routes.execution_inspection import router as execution_inspection_router
+from observability.dashboard.routes.manual_import import router as manual_import_router
+from observability.dashboard.routes.stats import router as stats_router
+from observability.dashboard.routes.tasks import router as tasks_router
 
 app = FastAPI(title=f"Spotiseek Dashboard ({(ENV or 'default').upper()})")
 

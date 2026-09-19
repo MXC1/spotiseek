@@ -1132,7 +1132,7 @@ class TrackDB:
         result = cursor.fetchone()
         return result[0] if result else None
 
-    # --- dashboard_next Overall Stats queries ---
+    # --- dashboard Overall Stats queries ---
     # Routed through the singleton connection instead of an ad-hoc sqlite3.connect,
     # per docs/adr/0003-dashboard-rewrite-fastapi-htmx.md.
 

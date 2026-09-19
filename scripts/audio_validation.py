@@ -1,7 +1,7 @@
 """Shared audio file integrity checking.
 
 Used by both the automated Soulseek remux pipeline (workflow.py) and the
-dashboard's manual/auto import paths (observability/dashboard_next/import_helpers.py)
+dashboard's manual/auto import paths (observability/dashboard/import_helpers.py)
 so a corrupt or truncated file is rejected the same way regardless of how it
 arrived.
 """

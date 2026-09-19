@@ -1,8 +1,8 @@
-"""Route tests for the dashboard_next Manual Import tab (see docs/adr/0004).
+"""Route tests for the dashboard's Manual Import tab (see docs/adr/0003).
 
 do_track_import() writes a real file under the test env's slskd_docker_data/test/imported
 directory and updates the real (test-env) DB -- both disposable, same as other
-dashboard_next tests. It never touches slskd over the network here: our test tracks have
+dashboard tests. It never touches slskd over the network here: our test tracks have
 no associated search/download UUIDs, so those calls are skipped by do_track_import's own
 `if search_uuid:` / `if download_uuid:` guards -- no mocking needed.
 """
@@ -18,9 +18,9 @@ os.environ.setdefault("APP_ENV", "test")
 
 from fastapi.testclient import TestClient
 
-from observability.dashboard_next.app import app
-from observability.dashboard_next.config import IMPORTED_DIR, track_db
-from observability.dashboard_next.routes import manual_import as mi_module
+from observability.dashboard.app import app
+from observability.dashboard.config import IMPORTED_DIR, track_db
+from observability.dashboard.routes import manual_import as mi_module
 from scripts.database_management import TrackData
 
 _PLAYLIST_URL = "https://open.spotify.com/playlist/mi-test"

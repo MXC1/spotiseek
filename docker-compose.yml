@@ -16,14 +16,15 @@ services:
     image: slskd/slskd:latest
     restart: unless-stopped
 
-  # Deprecated: the old Streamlit dashboard, superseded by dashboard-next (see
-  # docs/adr/0005-defer-dashboard-cutover-keep-streamlit-as-rollback.md). Not started by
-  # `invoke up`/plain `docker-compose up` -- the "deprecated" profile keeps its
-  # definition (and this service's code) around as a manual rollback path without
-  # running it day to day. Bring it back with:
-  #   docker compose --profile deprecated up -d dashboard
+  # The Spotiseek dashboard (FastAPI + HTMX) -- see
+  # docs/adr/0003-dashboard-rewrite-fastapi-htmx.md. Started life as a temporary
+  # parallel service (docs/adr/0004-dashboard-migration-parallel-service-cutover.md)
+  # alongside the old Streamlit dashboard; that migration is complete
+  # (docs/adr/0006-complete-dashboard-cutover.md) and this is now the only dashboard.
+  # Code is mounted via ${CODE_ROOT}, same as `workflow`: for the gated environment, it
+  # only changes through `invoke deploy`, never just by being the hot environment -- see
+  # docs/adr/0002-gated-environment-deploys-via-git-archive.md.
   dashboard:
-    profiles: ["deprecated"]
     build:
       context: .
       dockerfile: infra/Dockerfile.dashboard
@@ -34,53 +35,19 @@ services:
       - HOST_BASE_PATH=${HOST_BASE_PATH}
       - SLSKD_BASE_URL=http://slskd:5030
       - TOKEN=${TOKEN}
-      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
-      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
     volumes:
       - ./output:/app/output:rw
       - ./slskd_docker_data/${APP_ENV}/imported:/app/slskd_docker_data/${APP_ENV}/imported:rw
-      - ./slskd_docker_data/${APP_ENV}/downloads:/app/slskd_docker_data/${APP_ENV}/downloads:rw
       - ${CODE_ROOT}/observability/dashboard:/app/observability/dashboard:ro
-      - ${CODE_ROOT}/observability/combined_dashboard.py:/app/observability/combined_dashboard.py:ro
       - ./observability/logs:/app/observability/logs:rw
       - ./docs:/app/docs:ro
       - ./README.md:/app/README.md:ro
       - ${CODE_ROOT}/scripts:/app/scripts:ro
-      - ./input_playlists:/app/input_playlists:ro
-    depends_on:
-      - slskd
-    restart: unless-stopped
-
-  # The active dashboard -- see docs/adr/0003-dashboard-rewrite-fastapi-htmx.md. The
-  # full cutover described in docs/adr/0004-dashboard-migration-parallel-service-cutover.md
-  # (delete Streamlit, move this code into observability/dashboard/, promote to :8501)
-  # is deliberately deferred; see docs/adr/0005-defer-dashboard-cutover-keep-streamlit-as-rollback.md.
-  # Code is mounted straight from the working tree (never ${CODE_ROOT}): it isn't part
-  # of the gated deploy's archived paths (docs/adr/0002-*) until that cutover happens.
-  dashboard-next:
-    build:
-      context: .
-      dockerfile: infra/Dockerfile.dashboard-next
-    ports:
-      - "8502:8502"
-    environment:
-      - APP_ENV=${APP_ENV}
-      - HOST_BASE_PATH=${HOST_BASE_PATH}
-      - SLSKD_BASE_URL=http://slskd:5030
-      - TOKEN=${TOKEN}
-    volumes:
-      - ./output:/app/output:rw
-      - ./slskd_docker_data/${APP_ENV}/imported:/app/slskd_docker_data/${APP_ENV}/imported:rw
-      - ./observability/dashboard_next:/app/observability/dashboard_next:ro
-      - ./observability/logs:/app/observability/logs:rw
-      - ./docs:/app/docs:ro
-      - ./README.md:/app/README.md:ro
-      - ./scripts:/app/scripts:ro
       # Docker socket: lets the Execution Inspection tab stream every other container's
       # live logs (workflow, slskd, backup, itself) via `docker logs -f`. This is a real
       # privilege escalation for a web-facing container -- socket access is effectively
       # root on the host -- accepted here because this dashboard isn't exposed beyond the
-      # host/LAN. If that ever changes, put dashboard-next behind auth first.
+      # host/LAN. If that ever changes, put the dashboard behind auth first.
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
 

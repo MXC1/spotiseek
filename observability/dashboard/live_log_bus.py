@@ -12,7 +12,7 @@ import asyncio
 import contextlib
 import re
 
-# Containers writing our own JSON logs (workflow, dashboard-next, backup) emit
+# Containers writing our own JSON logs (workflow, dashboard, backup) emit
 # "[LEVEL] message" to stdout (see logs_utils.ConsoleFormatter); slskd, a .NET app,
 # prefixes lines with its Generic Host short codes (info:/warn:/fail:/...). Neither is
 # guaranteed -- multi-line entries (stack traces, our own context-JSON continuation

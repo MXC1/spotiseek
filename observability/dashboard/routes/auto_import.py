@@ -28,9 +28,9 @@ from fastapi import APIRouter, Form, Request
 from mutagen import File as MutagenFile
 from rapidfuzz import fuzz
 
-from observability.dashboard_next.config import ENV, IS_DOCKER, track_db
-from observability.dashboard_next.import_helpers import do_track_import, is_quality_worse_than_mp3_320
-from observability.dashboard_next.templating import templates
+from observability.dashboard.config import ENV, IS_DOCKER, track_db
+from observability.dashboard.import_helpers import do_track_import, is_quality_worse_than_mp3_320
+from observability.dashboard.templating import templates
 from scripts.constants import SUPPORTED_AUDIO_FORMATS
 from scripts.logs_utils import write_log
 

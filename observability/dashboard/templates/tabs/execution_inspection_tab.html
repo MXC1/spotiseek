@@ -2,7 +2,7 @@
   <section class="live-logs" id="live-logs" data-stream-url="/execution-inspection/stream">
     <h2>&#128225; Live Log Stream</h2>
     {% if not live_containers %}
-    <p class="stats-empty">No running containers found (is the Docker socket mounted into dashboard-next?).</p>
+    <p class="stats-empty">No running containers found (is the Docker socket mounted into the dashboard container?).</p>
     {% else %}
     <div class="live-logs-controls">
       <fieldset class="tasks-level-filter" id="live-container-filter">

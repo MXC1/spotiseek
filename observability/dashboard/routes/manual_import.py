@@ -21,13 +21,13 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 
-from observability.dashboard_next.config import DOWNLOADS_ROOT, ENV, IS_DOCKER, XML_DIR, track_db
-from observability.dashboard_next.import_helpers import (
+from observability.dashboard.config import DOWNLOADS_ROOT, ENV, IS_DOCKER, XML_DIR, track_db
+from observability.dashboard.import_helpers import (
     do_track_import,
     extract_metadata_from_file,
     is_quality_worse_than_mp3_320,
 )
-from observability.dashboard_next.templating import templates
+from observability.dashboard.templating import templates
 from scripts.logs_utils import write_log
 from scripts.xml_exporter import export_itunes_xml
 

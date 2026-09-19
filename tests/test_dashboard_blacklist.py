@@ -1,4 +1,4 @@
-"""Route tests for the dashboard_next Blacklist tab (see docs/adr/0004).
+"""Route tests for the dashboard's Blacklist tab (see docs/adr/0003).
 
 This is the most destructive action in the whole dashboard -- it deletes a real file
 from disk and cannot be undone -- so every test here operates on files created in a
@@ -17,9 +17,9 @@ os.environ.setdefault("APP_ENV", "test")
 
 from fastapi.testclient import TestClient
 
-from observability.dashboard_next.app import app
-from observability.dashboard_next.config import track_db
-from observability.dashboard_next.routes import blacklist as bl_module
+from observability.dashboard.app import app
+from observability.dashboard.config import track_db
+from observability.dashboard.routes import blacklist as bl_module
 from scripts.database_management import TrackData
 
 _PLAYLIST_URL = "https://open.spotify.com/playlist/bl-test"

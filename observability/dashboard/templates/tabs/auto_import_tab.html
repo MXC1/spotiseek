@@ -6,12 +6,12 @@
   {% if is_docker %}
   <details class="tasks-failed">
     <summary>How to mount a directory in Docker</summary>
-    <p>Add your music directory to the <code>dashboard-next</code> service's volumes in
+    <p>Add your music directory to the <code>dashboard</code> service's volumes in
       <code>docker-compose.yml</code>. On Windows, <code>invoke up</code> runs
       docker-compose inside WSL, so use the WSL-mounted-drive path
       (<code>/mnt/&lt;lowercase-drive-letter&gt;/...</code>) — a raw Windows path like
       <code>E:/Folder</code> breaks volume parsing:</p>
-    <pre>  dashboard-next:
+    <pre>  dashboard:
     volumes:
       # ... existing volumes ...
       - /mnt/e/Folder:/mnt/music:ro  # Mount your music folder</pre>

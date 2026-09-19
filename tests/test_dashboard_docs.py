@@ -1,4 +1,4 @@
-"""Route tests for the dashboard_next Docs tab (see docs/adr/0004)."""
+"""Route tests for the dashboard's Docs tab (see docs/adr/0003)."""
 
 import os
 import re
@@ -10,8 +10,8 @@ os.environ.setdefault("APP_ENV", "test")
 
 from fastapi.testclient import TestClient
 
-from observability.dashboard_next.app import app
-from observability.dashboard_next.config import DOC_FILES
+from observability.dashboard.app import app
+from observability.dashboard.config import DOC_FILES
 
 
 @pytest.fixture()

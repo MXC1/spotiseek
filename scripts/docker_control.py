@@ -1,10 +1,10 @@
 """Shared helpers for talking to the Docker daemon over the mounted socket.
 
 Used by both the `backup` service (pause/resume slskd + workflow around a
-consistent snapshot) and the `dashboard-next` service (live log streaming in
+consistent snapshot) and the `dashboard` service (live log streaming in
 the Execution Inspection tab) -- both run in containers with
 /var/run/docker.sock mounted and the `docker` CLI installed (see
-infra/Dockerfile.backup, infra/Dockerfile.dashboard-next).
+infra/Dockerfile.backup, infra/Dockerfile.dashboard).
 """
 
 import os

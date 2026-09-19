@@ -23,7 +23,7 @@ scripts/
 ### Docker Services (docker-compose.yml)
 - **slskd**: Soulseek daemon for peer-to-peer downloads
 - **workflow**: Task scheduler daemon (`--daemon` mode)
-- **dashboard**: Streamlit UI for monitoring/manual imports
+- **dashboard**: FastAPI + HTMX UI for monitoring/manual imports
 
 ### Data Flow
 1. CSV playlist URLs (`input_playlists/playlists_{APP_ENV}.csv`) → Spotify API or SoundCloud scraper

@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0006
 ---
 
 # The dashboard rewrite migrates tab-by-tab behind a temporary parallel service, not a big-bang rewrite

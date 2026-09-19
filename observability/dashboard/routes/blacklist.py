@@ -18,8 +18,8 @@ import os
 
 from fastapi import APIRouter, Form, Request
 
-from observability.dashboard_next.config import ENV, track_db
-from observability.dashboard_next.templating import templates
+from observability.dashboard.config import ENV, track_db
+from observability.dashboard.templating import templates
 from scripts.logs_utils import write_log
 
 router = APIRouter()

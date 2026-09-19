@@ -1,12 +1,9 @@
 """
-Shared import logic for dashboard_next's manual/auto import tabs.
+Shared import logic for the Manual Import and Auto Import tabs.
 
-Adapted from observability/dashboard/helpers.py's do_track_import() and friends, but
-decoupled from Streamlit's UploadedFile type: every caller here already has a real file
-on disk (a staged upload for Manual Import, a discovered file for Auto Import), so
-there's no separate "is_upload" branch. Kept self-contained (no import of
-observability.dashboard.*) per docs/adr/0004-dashboard-migration-parallel-service-cutover.md
--- this code must keep working after the old dashboard is deleted at cutover.
+Every caller here already has a real file on disk (a staged upload for Manual Import,
+a discovered file for Auto Import), so there's no separate "is_upload" branch to worry
+about.
 """
 
 import os
@@ -15,7 +12,7 @@ from pathlib import Path
 
 from mutagen import File as MutagenFile
 
-from observability.dashboard_next.config import BASE_DIR, IMPORTED_DIR, IS_DOCKER, track_db
+from observability.dashboard.config import BASE_DIR, IMPORTED_DIR, IS_DOCKER, track_db
 from scripts.audio_validation import is_audio_valid
 from scripts.constants import LOSSLESS_FORMATS, MIN_BITRATE_KBPS
 from scripts.logs_utils import write_log

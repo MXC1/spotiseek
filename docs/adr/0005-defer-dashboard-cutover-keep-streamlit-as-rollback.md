@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0006
 ---
 
 # Defer the ADR-0004 cutover: stop Streamlit but keep its code as a rollback path
