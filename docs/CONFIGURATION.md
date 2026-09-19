@@ -80,6 +80,13 @@ https://soundcloud.com/user/sets/eee
 Folders are flat (no folder-inside-a-folder) — see
 [docs/adr/0001-playlist-folders-in-itunes-xml.md](adr/0001-playlist-folders-in-itunes-xml.md).
 
+**Master playlists:** every folder also gets a generated playlist named
+`ALL <folder name>` (e.g. `ALL Warmup`), placed first inside the folder, holding every
+downloaded track from that folder's playlists — each track once, in CSV order. There is
+nothing to configure. It exists only in the exported library: no m3u8 file, no
+dashboard entry, and playlists at the top level don't get one. See
+[docs/adr/0007-folder-master-playlists.md](adr/0007-folder-master-playlists.md).
+
 > **Rekordbox:** load the library through **Sync Manager**, not the default iTunes
 > tree view — the plain view has a bug where playlists inside a folder render
 > empty. See [docs/TROUBLESHOOTING.md](TROUBLESHOOTING.md#playlist-folders-show-in-rekordbox-but-appear-empty).

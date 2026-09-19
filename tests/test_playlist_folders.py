@@ -254,7 +254,7 @@ class TestXmlExport:
         dicts = _playlist_dicts(library)
         abc = next(d for d in dicts if d.get("Folder") and d["Name"] == "ABC")
         members = [d for d in dicts if d.get("Parent Persistent ID") == abc["Playlist Persistent ID"]]
-        assert {d["Name"] for d in members} == {"ABC One", "Multi"}
+        assert {d["Name"] for d in members} == {"ALL ABC", "ABC One", "Multi"}
 
     def test_playlist_listed_only_in_folders_has_no_root_copy(self, library):
         abc_one = [d for d in _playlist_dicts(library) if d["Name"] == "ABC One"]
@@ -276,6 +276,109 @@ class TestXmlExport:
         again = str(tmp_path / "Library-again.xml")
         export_itunes_xml(again)
         assert Path(library).read_text(encoding="utf-8") == Path(again).read_text(encoding="utf-8")
+
+    # -- master playlists (ADR 0007) ------------------------------------------
+
+    def test_each_folder_gets_a_master_named_all_folder(self, library):
+        dicts = _playlist_dicts(library)
+        for folder_name in ("ABC", "DEF"):
+            folder = next(d for d in dicts if d.get("Folder") and d["Name"] == folder_name)
+            masters = [
+                d for d in dicts
+                if d["Name"] == f"ALL {folder_name}"
+                and d.get("Parent Persistent ID") == folder["Playlist Persistent ID"]
+            ]
+            assert len(masters) == 1
+
+    def test_master_is_the_first_entry_after_its_folder(self, library):
+        dicts = _playlist_dicts(library)
+        for idx, d in enumerate(dicts):
+            if d.get("Folder"):
+                master = dicts[idx + 1]
+                assert master["Name"] == f"ALL {d['Name']}"
+                assert master["Parent Persistent ID"] == d["Playlist Persistent ID"]
+
+    def test_master_items_are_the_union_of_member_items_in_csv_order(self, library):
+        dicts = _playlist_dicts(library)
+        abc = next(d for d in dicts if d.get("Folder") and d["Name"] == "ABC")
+        members = [
+            d for d in dicts
+            if d.get("Parent Persistent ID") == abc["Playlist Persistent ID"]
+            and not d["Name"].startswith("ALL ")
+        ]
+        expected: list = []
+        for member in members:
+            expected += [i for i in member["Playlist Items"] if i not in expected]
+        master = next(d for d in dicts if d["Name"] == "ALL ABC")
+        assert master["Playlist Items"] == expected
+        assert len(master["Playlist Items"]) == 3
+
+    def test_single_member_folder_still_gets_a_master(self, library):
+        # DEF's only member is Multi (t3, t4)
+        master = next(d for d in _playlist_dicts(library) if d["Name"] == "ALL DEF")
+        assert len(master["Playlist Items"]) == 2
+
+    def test_playlist_in_two_folders_contributes_to_both_masters(self, library):
+        dicts = _playlist_dicts(library)
+        abc_master = next(d for d in dicts if d["Name"] == "ALL ABC")
+        def_master = next(d for d in dicts if d["Name"] == "ALL DEF")
+        # Multi (t3, t4) is in both folders, so DEF's whole master appears inside ABC's.
+        assert def_master["Playlist Items"]
+        assert all(i in abc_master["Playlist Items"] for i in def_master["Playlist Items"])
+
+    def test_root_only_playlist_contributes_to_no_master(self, library):
+        # t1 belongs only to the root playlist "Root One": ABC has 3 tracks, DEF 2,
+        # so neither master can include it (the four tracks total would be 4).
+        dicts = _playlist_dicts(library)
+        root_item = next(d for d in dicts if d["Name"] == "Root One")["Playlist Items"][0]
+        for name in ("ALL ABC", "ALL DEF"):
+            master = next(d for d in dicts if d["Name"] == name)
+            assert root_item not in master["Playlist Items"]
+
+    def test_root_playlists_get_no_master(self, library):
+        masters = [d for d in _playlist_dicts(library) if d["Name"].startswith("ALL ")]
+        assert {d["Name"] for d in masters} == {"ALL ABC", "ALL DEF"}
+        assert all(d.get("Parent Persistent ID") for d in masters)
+
+    def test_master_persistent_id_is_distinct_from_every_other_entry(self, library):
+        ids = [d["Playlist Persistent ID"] for d in _playlist_dicts(library)]
+        assert len(ids) == len(set(ids))
+
+    def test_folder_entry_keeps_its_own_union_alongside_the_master(self, library):
+        dicts = _playlist_dicts(library)
+        abc = next(d for d in dicts if d.get("Folder") and d["Name"] == "ABC")
+        master = next(d for d in dicts if d["Name"] == "ALL ABC")
+        assert abc["Playlist Items"] == master["Playlist Items"]
+
+    def test_master_is_empty_when_no_member_track_is_downloaded(self, db, tmp_path):
+        db.add_track(TrackData(
+            track_id="t1", track_name="Name t1", artist="Artist",
+            source="spotify", download_status="pending",
+        ))
+        db.add_playlist("u1", playlist_name="Pending Only")
+        db.link_track_to_playlist("t1", "u1")
+        db.replace_playlist_folder_memberships([("u1", "Waiting", 0)])
+
+        xml_path = str(tmp_path / "Empty.xml")
+        export_itunes_xml(xml_path)
+
+        master = next(d for d in _playlist_dicts(xml_path) if d["Name"] == "ALL Waiting")
+        assert master["Playlist Items"] == []
+
+    def test_member_named_like_a_master_is_not_special_cased(self, db, tmp_path):
+        audio = tmp_path / "audio.wav"
+        audio.write_text("fake audio", encoding="utf-8")
+        _add_downloaded_track(db, "t1", str(audio))
+        db.add_playlist("u1", playlist_name="ALL Mix")
+        db.link_track_to_playlist("t1", "u1")
+        db.replace_playlist_folder_memberships([("u1", "Mix", 0)])
+
+        xml_path = str(tmp_path / "Collision.xml")
+        export_itunes_xml(xml_path)
+
+        named = [d for d in _playlist_dicts(xml_path) if d["Name"] == "ALL Mix"]
+        assert len(named) == 2  # the generated master and the real playlist
+        assert len({d["Playlist Persistent ID"] for d in named}) == 2
 
     def test_flat_export_when_no_memberships_recorded(self, db, tmp_path):
         audio = tmp_path / "audio.wav"

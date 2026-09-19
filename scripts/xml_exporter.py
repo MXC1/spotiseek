@@ -44,6 +44,10 @@ from mutagen.mp3 import MP3
 from scripts.database_management import TrackDB
 from scripts.logs_utils import write_log
 
+# Every folder gets a generated playlist of this prefix + folder name, holding the
+# union of its members' tracks (see docs/adr/0007-folder-master-playlists.md).
+MASTER_PLAYLIST_PREFIX = "ALL "
+
 
 def convert_to_windows_path(container_path: str) -> str:
     """Convert a Docker container path to a Windows host path.
@@ -521,13 +525,18 @@ def _add_foldered_playlists_to_xml(
     playlist_tracks: dict[str, list],
     source_id_to_track_id: dict,
 ) -> None:
-    """Emit root playlists, then each folder followed by its member playlists.
+    """Emit root playlists, then each folder, its master playlist, and its members.
 
     A playlist that belongs to several folders is emitted once per folder, each
     copy with its own persistent ID and ``Parent Persistent ID``. The iTunes
     format has a single-valued parent, so duplicate entries are the only way to
     place one playlist under more than one folder. Folders are ordered by the
     CSV position of their first member; members keep CSV order within a folder.
+
+    Each folder's master playlist (``ALL <folder name>``, the union of its
+    members' tracks) is emitted right after the folder and before its members,
+    which puts it first in the folder by array order. Root playlists never get
+    one. The folder entry keeps its own copy of the union as well.
     """
     known = set(playlist_name_by_url)
     root_urls = [url for url, folder, _ in memberships if folder == "" and url in known]
@@ -553,10 +562,16 @@ def _add_foldered_playlists_to_xml(
     for folder in sorted(folder_members, key=lambda f: folder_first_seq[f]):
         member_urls = folder_members[folder]
         folder_pid = _persistent_id("folder", folder)
+        union_track_ids = _union_track_ids(playlist_tracks.get(u, []) for u in member_urls)
         _add_playlist_to_xml(
-            playlists_array, next_id, folder,
-            _union_track_ids(playlist_tracks.get(u, []) for u in member_urls),
+            playlists_array, next_id, folder, union_track_ids,
             source_id_to_track_id, persistent_id=folder_pid, is_folder=True,
+        )
+        next_id += 1
+        _add_playlist_to_xml(
+            playlists_array, next_id, f"{MASTER_PLAYLIST_PREFIX}{folder}", union_track_ids,
+            source_id_to_track_id, persistent_id=_persistent_id("master", folder),
+            parent_persistent_id=folder_pid,
         )
         next_id += 1
         for url in member_urls:

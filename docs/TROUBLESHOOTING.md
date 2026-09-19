@@ -145,6 +145,19 @@ See `docs/adr/0001-playlist-folders-in-itunes-xml.md` for background.
 
 ---
 
+### The `ALL <folder>` master playlist isn't first in its Rekordbox folder
+
+**Cause**: Spotiseek emits the master playlist first in the folder's XML, but whether
+Rekordbox follows XML order inside a folder (rather than sorting alphabetically) was
+**not verified** when the feature was designed (2026-09-19).
+
+**Solution**: If the master shows up somewhere other than the top, Rekordbox is
+sorting folder contents itself. Spotiseek has no setting for this; the planned
+fallback is a sort-forcing name prefix, which needs a follow-up decision — see
+`docs/adr/0007-folder-master-playlists.md`. If the master *is* first, no action needed.
+
+---
+
 ## Resetting an Environment
 
 To completely reset an environment (⚠️ **DESTRUCTIVE**):

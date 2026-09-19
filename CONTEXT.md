@@ -76,3 +76,10 @@ A playlist whose URL is listed before the first folder heading. It appears at th
 level of the exported tree, outside every folder. A playlist can be both a root playlist
 and a member of one or more folders.
 _Avoid_: top-level playlist, ungrouped playlist, loose playlist
+
+**Master playlist**:
+A generated playlist, one per folder, named `ALL <folder name>`, holding every track
+from that folder's member playlists, listed first in its folder. It is derived from the
+folder and exists only in the exported library — it has no source URL and is not a
+scraped **Playlist** or a **Folder membership**.
+_Avoid_: aggregate playlist, union playlist, "ALL" playlist, folder playlist
