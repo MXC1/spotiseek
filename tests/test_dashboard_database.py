@@ -65,9 +65,12 @@ def empty_db():
 
 
 @pytest.fixture()
-def library(empty_db, workdir):
+def library(empty_db, workdir, monkeypatch):
     """A small consistent library on disk: real audio + m3u8 files for one completed track,
-    a placeholder-only m3u8 entry for a pending one."""
+    a placeholder-only m3u8 entry for a pending one. The workdir stands in for imported/, the
+    one directory (besides the read-only downloads alias) the dashboard can see -- files
+    anywhere else are reported "not checked", never "missing"."""
+    monkeypatch.setattr(db_module, "IMPORTED_DIR", workdir)
     song = os.path.join(workdir, "alpha.mp3")
     with open(song, "w") as f:
         f.write("fake audio")
@@ -565,3 +568,107 @@ def test_routes_never_write_and_never_leave_a_transaction_open(client):
     assert track_db.conn.total_changes == before
     assert not track_db.conn.in_transaction
     assert track_db.conn.row_factory is None
+
+
+# --- file checks only claim what this container can see (regression) ---------------------------
+#
+# The first version stat'ed every recorded path directly. But recorded paths name the workflow
+# container's filesystem, and the dashboard container mounts only imported/ (plus a read-only
+# alias of downloads/). On the real library that flagged all 3,371 completed tracks whose files
+# are in downloads/ as "missing". These tests pin the fix.
+
+
+@pytest.fixture()
+def downloads(tmp_path, monkeypatch):
+    """Where the DB says downloads/ is (`recorded`) vs where this container can see it (`view`).
+    Neither directory exists yet; tests create what they need."""
+    recorded = tmp_path / "recorded" / "downloads"
+    view = tmp_path / "view" / "downloads"
+    monkeypatch.setattr(db_module, "DOWNLOADS_ROOT", str(recorded))
+    monkeypatch.setattr(db_module, "DOWNLOADS_VIEW_DIR", str(view))
+    return {"recorded": recorded, "view": view}
+
+
+def _downloads_track(downloads, track_id, name="song.mp3"):
+    _track(track_id, path=str(downloads["recorded"] / "Album" / name))
+
+
+def _put_in_view(downloads, name="song.mp3", content=b"12345"):
+    target = downloads["view"] / "Album" / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(content)
+
+
+@pytest.mark.usefixtures("library")
+def test_unmounted_downloads_are_not_checked_rather_than_called_missing(client, downloads):
+    for i in range(3):
+        _downloads_track(downloads, f"dl-{i}", name=f"{i}.mp3")
+
+    html = client.post("/database/audit/disk/completed_files_missing").text
+
+    assert "db-badge-bad" not in html  # nothing is reported as found/missing
+    assert "nothing flagged" in html
+    assert "Checked 1 of 4 completed tracks" in html  # only t1, which lives in the visible directory
+    assert "3 of 4 completed tracks were not checked" in html
+    assert "track_id=dl-" not in html  # none of the unseen tracks is listed as missing
+
+
+@pytest.mark.usefixtures("empty_db")
+def test_the_check_says_nothing_could_be_checked_when_nothing_is_visible(client, downloads):
+    for i in range(3):
+        _downloads_track(downloads, f"dl-{i}", name=f"{i}.mp3")
+
+    html = client.post("/database/audit/disk/completed_files_missing").text
+
+    assert "nothing could be checked" in html
+    assert "nothing flagged" not in html  # that would be a claim with no evidence behind it
+    assert "Checked 0 of 3 completed tracks" in html
+
+
+@pytest.mark.usefixtures("library")
+def test_the_readonly_downloads_alias_lets_the_check_see_those_files(client, downloads):
+    _downloads_track(downloads, "dl-present", name="here.mp3")
+    _downloads_track(downloads, "dl-gone", name="gone.mp3")
+    _put_in_view(downloads, "here.mp3")
+
+    html = client.post("/database/audit/disk/completed_files_missing").text
+
+    assert "1 found" in html
+    assert 'href="/database/track?track_id=dl-gone"' in html  # genuinely deleted -> flagged
+    assert "dl-present" not in html  # present through the alias -> not flagged
+    assert "Checked 3 of 3 completed tracks" in html
+    assert "were not checked" not in html
+
+
+@pytest.mark.usefixtures("library")
+def test_track_detail_for_an_unseen_file_says_not_visible_not_missing(client, downloads):
+    _downloads_track(downloads, "dl-1")
+
+    html = client.get("/database/track?track_id=dl-1", headers=_HX).text
+
+    assert "not visible from here" in html
+    assert ">missing<" not in html
+    assert "db-badge-bad\">missing" not in html
+
+
+@pytest.mark.usefixtures("library")
+def test_track_detail_reads_downloads_files_through_the_alias(client, downloads):
+    _downloads_track(downloads, "dl-1")
+    _put_in_view(downloads)
+
+    html = client.get("/database/track?track_id=dl-1", headers=_HX).text
+
+    assert 'db-badge db-badge-ok">exists' in html
+    assert "not visible from here" not in html
+    assert "5 B" in html  # size comes from the file behind the alias
+
+
+@pytest.mark.usefixtures("library")
+def test_track_detail_still_reports_a_genuinely_missing_file_in_a_visible_location(client, downloads):
+    _downloads_track(downloads, "dl-1")
+    downloads["view"].mkdir(parents=True)  # the alias is mounted, but the file isn't in it
+
+    html = client.get("/database/track?track_id=dl-1", headers=_HX).text
+
+    assert ">missing<" in html
+    assert "not visible from here" not in html

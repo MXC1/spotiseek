@@ -44,6 +44,10 @@
       {% if detail.file.exists %}
       <p><span class="db-badge db-badge-ok">exists</span>
         <span class="stats-caption">{{ detail.file.size_bytes|filesize }} &middot; modified {{ detail.file.modified }} UTC</span></p>
+      {% elif detail.file.exists is none %}
+      {# Not "missing": this file lives somewhere the dashboard container can't see. #}
+      <p><span class="db-badge">not visible from here</span>
+        <span class="stats-caption">This file is in a location the dashboard container can't see, so whether it exists can't be checked here.</span></p>
       {% else %}
       <p><span class="db-badge db-badge-bad">missing</span>
         <span class="stats-caption">Nothing is on disk at this path.</span></p>

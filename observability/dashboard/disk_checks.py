@@ -13,6 +13,7 @@ so no database lock is held while files are being stat'ed.
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import NamedTuple
 
 from scripts.constants import SUPPORTED_AUDIO_FORMATS
 
@@ -37,25 +38,77 @@ M3U8_STATE_LABELS = {
 }
 
 
+def _normalise(path: str) -> str:
+    return os.path.normcase(os.path.normpath(path))
+
+
+def _is_under(norm_path: str, norm_root: str) -> bool:
+    """True if `norm_path` is `norm_root` or inside it. Compares whole path components, so
+    `/x/downloads-old/a.mp3` is not under `/x/downloads`."""
+    return norm_path == norm_root or norm_path.startswith(norm_root.rstrip(os.sep) + os.sep)
+
+
+@dataclass(frozen=True)
+class PathResolver:
+    """Map a track's recorded file path to a path THIS container can stat -- or say it can't.
+
+    A track's recorded path is written by the workflow container, so it names a location in
+    that container's filesystem, and the dashboard container mounts only some of those
+    directories (imported/ at the same path, downloads/ read-only under an alias). A file
+    outside them isn't missing, it is invisible from here, and calling it "missing" would be
+    false: the first version of the file checks did exactly that and flagged all 3,371
+    completed tracks whose files live in downloads/. So `resolve` is default-deny: it returns
+    None for any path not under a root positively known to be mounted, and callers report
+    those as "not checked" instead.
+
+    `roots` are (recorded_root, visible_root) pairs: a path under recorded_root is looked up
+    under visible_root. If visible_root doesn't exist as a directory the mount is absent, and
+    paths under it resolve to None too.
+    """
+
+    roots: tuple[tuple[str, str], ...]
+
+    def resolve(self, recorded_path: str) -> str | None:
+        norm = _normalise(recorded_path)
+        for recorded_root, visible_root in self.roots:
+            root = _normalise(recorded_root)
+            if _is_under(norm, root):
+                if not os.path.isdir(visible_root):
+                    return None
+                return os.path.join(visible_root, os.path.relpath(norm, root))
+        return None
+
+
 @dataclass(frozen=True)
 class FileFacts:
-    """What is on disk at a track's recorded local_file_path."""
+    """What is on disk at a track's recorded local_file_path.
+
+    `exists` is three-valued: True, False, or None when the file's location isn't visible
+    from this container so its existence can't be determined at all.
+    """
 
     path: str
-    exists: bool
+    exists: bool | None
     size_bytes: int | None = None
     modified: str | None = None  # UTC, "YYYY-MM-DD HH:MM:SS"
 
 
-def file_facts(path: str | None) -> FileFacts | None:
-    """Existence, size and mtime of `path`; None if the track records no path at all."""
+def file_facts(path: str | None, resolver: PathResolver | None = None) -> FileFacts | None:
+    """Existence, size and mtime of `path`; None if the track records no path at all.
+
+    With a `resolver`, a path in a location this container can't see comes back with
+    exists=None. Without one, `path` is stat'ed as given.
+    """
     if not path or not path.strip():
         return None
+    target = path if resolver is None else resolver.resolve(path)
+    if target is None:
+        return FileFacts(path=path, exists=None)
     try:
-        stat = os.stat(path)
+        stat = os.stat(target)
     except OSError:
         return FileFacts(path=path, exists=False)
-    if not os.path.isfile(path):
+    if not os.path.isfile(target):
         return FileFacts(path=path, exists=False)
     modified = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     return FileFacts(path=path, exists=True, size_bytes=stat.st_size, modified=modified)
@@ -87,12 +140,42 @@ def m3u8_line_state(m3u8_path: str | None, track_id: str, local_file_path: str |
     return STATE_NOT_LISTED
 
 
-def find_missing_track_files(completed_tracks: list[tuple[str, str, str, str]]) -> list[tuple[str, str, str, str]]:
+class MissingFilesResult(NamedTuple):
+    """Outcome of find_missing_track_files.
+
+    `missing` are the rows whose file is verifiably absent. `checked` counts every row whose
+    location this container can see; `not_checked` counts the rest (their files may or may
+    not exist -- nothing can be said), with `not_checked_example` one such recorded path.
+    """
+
+    missing: list[tuple[str, str, str, str]]
+    checked: int
+    not_checked: int
+    not_checked_example: str | None
+
+
+def find_missing_track_files(
+    completed_tracks: list[tuple[str, str, str, str]], resolver: PathResolver | None = None,
+) -> MissingFilesResult:
     """Completed tracks whose recorded file isn't on disk.
 
-    Takes and returns (track_id, artist, track_name, local_file_path) rows.
+    Takes (track_id, artist, track_name, local_file_path) rows. With a `resolver`, a row whose
+    location isn't visible from this container is counted as not checked rather than missing;
+    without one, every path is stat'ed as recorded.
     """
-    return [row for row in completed_tracks if not os.path.isfile(row[3])]
+    missing = []
+    checked = not_checked = 0
+    example = None
+    for row in completed_tracks:
+        target = row[3] if resolver is None else resolver.resolve(row[3])
+        if target is None:
+            not_checked += 1
+            example = example or row[3]
+            continue
+        checked += 1
+        if not os.path.isfile(target):
+            missing.append(row)
+    return MissingFilesResult(missing, checked, not_checked, example)
 
 
 def find_missing_m3u8s(playlists: list[tuple[str, str | None, str | None]]) -> list[tuple[str, str | None, str, str]]:
@@ -107,10 +190,6 @@ def find_missing_m3u8s(playlists: list[tuple[str, str | None, str | None]]) -> l
         elif not os.path.isfile(m3u8_path):
             problems.append((url, name, m3u8_path, "File not found"))
     return problems
-
-
-def _normalise(path: str) -> str:
-    return os.path.normcase(os.path.normpath(path))
 
 
 def find_orphan_files(imported_dir: str, known_paths: list[str]) -> tuple[list[tuple[str, int]], int, bool]:

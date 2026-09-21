@@ -7,8 +7,14 @@
   {% if total %}
   <span class="db-badge db-badge-bad">{{ "{:,}".format(total) }} found</span>
   {% if total > listed %}<span class="stats-caption">Showing the first {{ "{:,}".format(listed) }}.</span>{% endif %}
+  {% elif coverage and coverage.checked == 0 and coverage.not_checked %}
+  {# Nothing could be looked at, so "nothing flagged" would be a claim with no evidence behind it. #}
+  <span class="db-badge">nothing could be checked</span>
   {% else %}
   <span class="db-badge db-badge-ok">nothing flagged</span>
+  {% endif %}
+  {% if coverage %}
+  <span class="stats-caption">Checked {{ "{:,}".format(coverage.checked) }} of {{ "{:,}".format(coverage.checked + coverage.not_checked) }} completed tracks.</span>
   {% endif %}
 </p>
 {% if rows %}{{ results_table(columns, rows) }}{% endif %}

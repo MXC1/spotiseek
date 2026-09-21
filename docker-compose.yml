@@ -38,6 +38,13 @@ services:
     volumes:
       - ./output:/app/output:rw
       - ./slskd_docker_data/${APP_ENV}/imported:/app/slskd_docker_data/${APP_ENV}/imported:rw
+      # Read-only view of downloads/ so the Database tab's file checks can see the files most
+      # tracks record (their paths are .../downloads/...). Deliberately NOT mounted at that
+      # recorded path: the Blacklist tab deletes files at their recorded path, so a read-only
+      # mount there would make it fail outright and a read-write one would make it start
+      # deleting files it currently silently skips. Keep in sync with DOWNLOADS_VIEW_DIR in
+      # observability/dashboard/config.py (docs/adr/0008-dashboard-database-explorer.md).
+      - ./slskd_docker_data/${APP_ENV}/downloads:/mnt/spotiseek/downloads:ro
       - ${CODE_ROOT}/observability/dashboard:/app/observability/dashboard:ro
       - ./observability/logs:/app/observability/logs:rw
       - ./docs:/app/docs:ro

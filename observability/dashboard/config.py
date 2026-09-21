@@ -29,6 +29,12 @@ LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", ENV 
 XML_DIR = OUTPUT_ENV_DIR
 IMPORTED_DIR = os.path.join(BASE_DIR, "slskd_docker_data", ENV or "default", "imported")
 DOWNLOADS_ROOT = os.path.join(BASE_DIR, "slskd_docker_data", ENV or "default", "downloads")
+# Where docker-compose.yml mounts downloads/ READ-ONLY inside this container, for the Database
+# tab's file checks. Recorded file paths name downloads/ at DOWNLOADS_ROOT, but it is deliberately
+# NOT mounted there: the Blacklist tab deletes files at their recorded path, and a read-only mount
+# at that path would turn its current silent skip into a hard failure (read-write would make it
+# start deleting). See docs/adr/0008-dashboard-database-explorer.md.
+DOWNLOADS_VIEW_DIR = "/mnt/spotiseek/downloads"
 IS_DOCKER = os.path.exists("/.dockerenv")
 
 # Documentation paths -- slug -> (display name, file path)

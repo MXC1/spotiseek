@@ -72,7 +72,7 @@ parallel `dashboard-next` service and then cut over for real — see
 
 - **slskd** — the Soulseek P2P daemon (ports 5030/5031), configured via `slskd_docker_data/slskd.yml` and `SLSKD_USERNAME`/`SLSKD_PASSWORD`.
 - **workflow** — runs `scripts.task_scheduler --daemon` (built from `infra/Dockerfile.workflow`); this is where all downloading/processing happens.
-- **dashboard** — the dashboard UI on port 8501 (built from `infra/Dockerfile.dashboard`), for monitoring, manual imports, and triggering tasks.
+- **dashboard** — the dashboard UI on port 8501 (built from `infra/Dockerfile.dashboard`), for monitoring, manual imports, and triggering tasks. It mounts `imported/` at its recorded path but `downloads/` only as a read-only alias (`/mnt/spotiseek/downloads`) for the Database tab's file checks — deliberately not at the recorded path, because the Blacklist tab deletes files at their recorded path (`docs/adr/0008-dashboard-database-explorer.md`).
 - **backup** — the always-on restic backup/restore daemon (built from `infra/Dockerfile.backup`); singleton, not scoped to any one environment.
 
 Each service mounts `./output`, `./observability/logs`, and the relevant `slskd_docker_data/${APP_ENV}` subfolders as volumes, so data persists on the host across restarts. `scripts/` and `observability/dashboard/` are bind-mounted from `${CODE_ROOT}` for `workflow`/`dashboard` — normally the working tree, so `invoke up`/`invoke build` (which always pass `--build`) pick up code changes immediately — see **Gated Environment Deploys** below for the one exception.

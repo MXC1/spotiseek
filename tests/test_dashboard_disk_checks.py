@@ -95,11 +95,14 @@ def test_every_state_has_a_label():
 # --- find_missing_* --------------------------------------------------------------------------
 
 
-def test_find_missing_track_files(tmp_path):
+def test_find_missing_track_files_without_a_resolver_stats_paths_as_recorded(tmp_path):
     here = _write(tmp_path / "here.mp3")
     rows = [("t1", "A", "One", here), ("t2", "B", "Two", str(tmp_path / "gone.mp3"))]
 
-    assert dc.find_missing_track_files(rows) == [rows[1]]
+    result = dc.find_missing_track_files(rows)
+
+    assert result.missing == [rows[1]]
+    assert (result.checked, result.not_checked, result.not_checked_example) == (2, 0, None)
 
 
 def test_find_missing_m3u8s_flags_unrecorded_paths_and_absent_files(tmp_path):
@@ -162,3 +165,110 @@ def test_orphan_files_caps_the_listing_but_reports_the_true_total(tmp_path, monk
 
 def test_orphan_files_reports_a_missing_directory(tmp_path):
     assert dc.find_orphan_files(str(tmp_path / "nope"), []) == ([], 0, False)
+
+
+# --- PathResolver: what this container can actually see ---------------------------------------
+#
+# Regression: the first version of the file checks stat'ed every recorded path directly, but the
+# dashboard container mounts only imported/ (and, now, a read-only alias of downloads/). On the
+# real library that flagged all 3,371 completed tracks whose files live in downloads/ as
+# "missing". A path outside the known-mounted roots must be "not visible", never "missing".
+
+
+@pytest.fixture()
+def layout(tmp_path):
+    """recorded: where the workflow container says files are. visible: where this container
+    can see them. downloads is only visible through the alias."""
+    recorded = tmp_path / "recorded"
+    view = tmp_path / "view"
+    (recorded / "imported").mkdir(parents=True)
+    (view / "downloads").mkdir(parents=True)
+    resolver = dc.PathResolver(roots=(
+        (str(recorded / "imported"), str(recorded / "imported")),
+        (str(recorded / "downloads"), str(view / "downloads")),
+    ))
+    return {"recorded": recorded, "view": view, "resolver": resolver}
+
+
+def test_resolver_leaves_paths_under_an_identity_root_alone(layout):
+    imported = layout["recorded"] / "imported" / "a.mp3"
+
+    assert layout["resolver"].resolve(str(imported)) == str(imported)
+
+
+def test_resolver_translates_paths_under_an_alias_root(layout):
+    recorded = layout["recorded"] / "downloads" / "Album" / "song.mp3"
+
+    resolved = layout["resolver"].resolve(str(recorded))
+
+    assert os.path.normcase(resolved) == os.path.normcase(str(layout["view"] / "downloads" / "Album" / "song.mp3"))
+
+
+def test_resolver_says_none_when_the_alias_is_not_mounted(layout):
+    layout["view"].joinpath("downloads").rmdir()
+
+    assert layout["resolver"].resolve(str(layout["recorded"] / "downloads" / "a.mp3")) is None
+
+
+def test_resolver_is_default_deny_for_locations_it_does_not_know(layout, tmp_path):
+    assert layout["resolver"].resolve(str(tmp_path / "somewhere" / "else.mp3")) is None
+    assert layout["resolver"].resolve(r"E:\Music\host_path.mp3") is None  # a Windows host path
+
+
+def test_resolver_matches_whole_path_components_only(layout):
+    """'downloads-old' must not be treated as being under 'downloads'."""
+    assert layout["resolver"].resolve(str(layout["recorded"] / "downloads-old" / "a.mp3")) is None
+
+
+def test_resolver_normalises_dotdot_before_matching(layout):
+    sneaky = os.path.join(str(layout["recorded"]), "imported", "..", "downloads", "a.mp3")
+
+    resolved = layout["resolver"].resolve(sneaky)
+
+    assert os.path.normcase(resolved) == os.path.normcase(str(layout["view"] / "downloads" / "a.mp3"))
+
+
+def test_file_facts_through_a_resolver_reports_exists_missing_and_not_visible(layout):
+    (layout["view"] / "downloads" / "here.mp3").write_bytes(b"12345")
+    resolver = layout["resolver"]
+    recorded_downloads = layout["recorded"] / "downloads"
+
+    exists = dc.file_facts(str(recorded_downloads / "here.mp3"), resolver)
+    missing = dc.file_facts(str(recorded_downloads / "gone.mp3"), resolver)
+    invisible = dc.file_facts(str(layout["recorded"].parent / "elsewhere" / "x.mp3"), resolver)
+
+    assert (exists.exists, exists.size_bytes) == (True, 5)
+    assert missing.exists is False
+    assert invisible.exists is None  # not False: absence can't be claimed for a place we can't see
+    assert invisible.size_bytes is None
+
+
+def test_find_missing_track_files_separates_missing_from_not_checked(layout, tmp_path):
+    (layout["view"] / "downloads" / "here.mp3").write_bytes(b"x")
+    recorded_downloads = layout["recorded"] / "downloads"
+    elsewhere = str(tmp_path / "elsewhere" / "x.mp3")
+    rows = [
+        ("present", "A", "One", str(recorded_downloads / "here.mp3")),
+        ("missing", "B", "Two", str(recorded_downloads / "gone.mp3")),
+        ("unseen-1", "C", "Three", elsewhere),
+        ("unseen-2", "D", "Four", elsewhere),
+    ]
+
+    result = dc.find_missing_track_files(rows, layout["resolver"])
+
+    assert [row[0] for row in result.missing] == ["missing"]
+    assert result.checked == 2
+    assert result.not_checked == 2
+    assert result.not_checked_example == elsewhere
+
+
+def test_nothing_is_called_missing_when_no_location_is_visible(layout):
+    """The reported bug, in miniature: with downloads/ not mounted, every downloads-path track
+    used to come back 'missing'."""
+    layout["view"].joinpath("downloads").rmdir()
+    rows = [(f"t{i}", "A", "N", str(layout["recorded"] / "downloads" / f"{i}.mp3")) for i in range(50)]
+
+    result = dc.find_missing_track_files(rows, layout["resolver"])
+
+    assert result.missing == []
+    assert (result.checked, result.not_checked) == (0, 50)

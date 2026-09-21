@@ -191,6 +191,8 @@ Only `blacklisted` tracks are checked for a stray file path: a quality upgrade l
 
 Disk checks and the health check read every file or the whole database file, so they run only on demand and can be slow on a large library.
 
+**What the file checks can see.** A track's recorded file path names the workflow container's filesystem, and the dashboard container only mounts part of it: `imported/`, and `downloads/` read-only at `/mnt/spotiseek/downloads` (see `docker-compose.yml`). A file anywhere else is reported as **not checked** (the track detail page says "not visible from here"), never as missing, and if nothing could be checked the result says so instead of "nothing flagged". If a disk check reports many tracks as not checked, the dashboard container was probably started before that mount existed: run `invoke up` to recreate it.
+
 #### Stuck tracks
 
 A track is **stuck** when it has been in one in-flight status longer than that status normally lasts. The clock is `status_changed_at`, which moves only when the status *value* changes — a retry that sets `searching` again on a track already searching does not reset it. The thresholds are constants in `scripts/constants.py` (`STUCK_THRESHOLD_HOURS`):
