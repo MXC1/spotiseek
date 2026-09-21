@@ -80,7 +80,7 @@ The **Manual Import** tab allows you to manually import audio files for tracks t
 
 ### Workflow
 
-1. **Select Playlist**: Choose from playlists with incomplete tracks
+1. **Select Scope**: Choose **All Playlists** (every track missing a file, including any not in a playlist), a **folder** (the unique missing tracks across its playlists), or a single playlist. Folders and playlists are only listed while they have incomplete tracks
 2. **Browse Tracks**: Paginated, searchable list of tracks needing files
 3. **Upload File**: Drag and drop or select an audio file (MP3, FLAC, WAV, M4A, OGG, WMA)
 4. **Quality Check**: Automatic warning if uploaded file is lower quality than MP3 320kbps

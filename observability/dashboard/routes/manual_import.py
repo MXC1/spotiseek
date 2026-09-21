@@ -36,6 +36,13 @@ router = APIRouter()
 _PAGE_SIZES = [10, 25, 50, 100]
 _DEFAULT_PAGE_SIZE = 25
 
+# The dropdown's `scope` values: "all" (every track missing a file, playlist or not),
+# "folder:<folder name>" (union of a folder's member playlists), "playlist:<playlist url>".
+_SCOPE_ALL = "all"
+_FOLDER_PREFIX = "folder:"
+_PLAYLIST_PREFIX = "playlist:"
+_ALL_LABEL = "All Playlists"
+
 # track_id -> {"temp_path", "filename", "artist", "track_name"}, bridging the precheck
 # upload to the later Import click without re-uploading the file.
 _staged_uploads: dict[str, dict] = {}
@@ -69,71 +76,87 @@ def _export_itunes_xml() -> tuple[bool, str]:
         return False, f"Failed to export iTunes XML: {e}"
 
 
-def _tracks_context(playlist_url: str | None, search: str, page: int, page_size: int) -> dict:
-    playlists = track_db.get_playlists_with_incomplete_counts()
-    if not playlists:
-        return {"playlists": []}
+def _fetch_tracks(scope: str, search: str, offset: int, limit: int):
+    """Dispatch a validated scope value to the matching TrackDB query."""
+    if scope.startswith(_FOLDER_PREFIX):
+        return track_db.get_incomplete_tracks_for_folder(scope[len(_FOLDER_PREFIX):], search, offset, limit)
+    if scope.startswith(_PLAYLIST_PREFIX):
+        return track_db.get_incomplete_tracks_for_playlist(scope[len(_PLAYLIST_PREFIX):], search, offset, limit)
+    return track_db.get_incomplete_tracks(search, offset, limit)
 
-    playlist_by_url = {p[1]: p[0] for p in playlists}
-    if playlist_url not in playlist_by_url:
-        playlist_url = playlists[0][1]
-    selected_playlist_name = playlist_by_url[playlist_url]
+
+def _tracks_context(scope: str | None, search: str, page: int, page_size: int, total_incomplete: int) -> dict:
+    playlists = track_db.get_playlists_with_incomplete_counts()
+    folders = track_db.get_folders_with_incomplete_counts()
+
+    # Every dropdown value -> its display name; anything else (stale, or a folder/playlist that
+    # has since been fully imported and dropped off the list) falls back to All Playlists.
+    label_by_scope = {
+        _SCOPE_ALL: _ALL_LABEL,
+        **{f"{_FOLDER_PREFIX}{name}": name for name, _ in folders},
+        **{f"{_PLAYLIST_PREFIX}{url}": name for name, url, _ in playlists},
+    }
+    if scope not in label_by_scope:
+        scope = _SCOPE_ALL
 
     page_size = page_size if page_size in _PAGE_SIZES else _DEFAULT_PAGE_SIZE
     page = max(page, 1)
     offset = (page - 1) * page_size
 
-    rows, total = track_db.get_incomplete_tracks_for_playlist(playlist_url, search, offset, page_size)
+    rows, total = _fetch_tracks(scope, search, offset, page_size)
     if offset != 0 and offset >= max(total, 1):
         page, offset = 1, 0
-        rows, total = track_db.get_incomplete_tracks_for_playlist(playlist_url, search, offset, page_size)
+        rows, total = _fetch_tracks(scope, search, offset, page_size)
 
-    tracks = [
-        {"playlist_url": r[0], "track_id": r[1], "track_name": r[2], "artist": r[3], "status": r[4]}
-        for r in rows
-    ]
+    tracks = [{"track_id": r[0], "track_name": r[1], "artist": r[2], "status": r[3]} for r in rows]
 
     return {
-        "playlists": playlists,
-        "selected_playlist_url": playlist_url,
-        "selected_playlist_name": selected_playlist_name,
+        "all_scope": {"value": _SCOPE_ALL, "label": _ALL_LABEL, "count": total_incomplete},
+        "folder_scopes": [
+            {"value": f"{_FOLDER_PREFIX}{name}", "label": name, "count": count} for name, count in folders
+        ],
+        "playlist_scopes": [
+            {"value": f"{_PLAYLIST_PREFIX}{url}", "label": name, "count": count} for name, url, count in playlists
+        ],
+        "total_associations": sum(count for _, _, count in playlists),
+        "selected_scope": scope,
+        "selected_scope_label": label_by_scope[scope],
         "search": search or "",
         "page": page,
         "page_size": page_size,
         "page_sizes": _PAGE_SIZES,
-        "total_for_playlist": total,
+        "total_for_scope": total,
         "max_page": max((total + page_size - 1) // page_size, 1),
         "tracks": tracks,
     }
 
 
-def _body_context(playlist_url: str | None, search: str, page: int, page_size: int) -> dict:
+def _body_context(scope: str | None, search: str, page: int, page_size: int) -> dict:
     if track_db is None:
         return {"db_error": "Database is not available."}
 
-    tracks_ctx = _tracks_context(playlist_url, search, page, page_size)
-    total_associations = sum(p[2] for p in tracks_ctx["playlists"])
-
-    return {
+    total_incomplete = track_db.get_total_incomplete_tracks()
+    context = {
         "db_error": None,
         "env_value": ENV,
-        "total_incomplete": track_db.get_total_incomplete_tracks(),
-        "total_associations": total_associations,
+        "total_incomplete": total_incomplete,
         "flash": None,
-        **tracks_ctx,
     }
+    if total_incomplete:
+        context.update(_tracks_context(scope, search, page, page_size, total_incomplete))
+    return context
 
 
 @router.get("/manual-import/body")
 def manual_import_body(
     request: Request,
-    playlist_url: str | None = None,
+    scope: str | None = None,
     search: str = "",
     page: int = 1,
     page_size: int = _DEFAULT_PAGE_SIZE,
 ):
     return templates.TemplateResponse(
-        request, "tabs/_manual_import_body.html", _body_context(playlist_url, search, page, page_size),
+        request, "tabs/_manual_import_body.html", _body_context(scope, search, page, page_size),
     )
 
 
@@ -170,7 +193,7 @@ async def manual_import_precheck(
 def manual_import_import(
     request: Request,
     track_id: str,
-    playlist_url: str = Form(...),
+    scope: str = Form(_SCOPE_ALL),
     search: str = Form(""),
     page: int = Form(1),
     page_size: int = Form(_DEFAULT_PAGE_SIZE),
@@ -183,7 +206,7 @@ def manual_import_import(
         _cleanup_staged(track_id)
         flash = {"type": "success" if success else "error", "text": message}
 
-    context = _body_context(playlist_url, search, page, page_size)
+    context = _body_context(scope, search, page, page_size)
     context["flash"] = flash
     return templates.TemplateResponse(request, "tabs/_manual_import_body.html", context)
 

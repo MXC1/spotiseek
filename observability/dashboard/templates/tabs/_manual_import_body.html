@@ -7,7 +7,7 @@
 <p class="flash flash-{{ flash.type }}">{{ flash.text }}</p>
 {% endif %}
 
-{% if not playlists %}
+{% if not total_incomplete %}
 <p class="stats-empty">All tracks have been successfully downloaded! No tracks require manual import.</p>
 {% else %}
 <div class="metric-grid manual-import-metrics">
@@ -20,11 +20,23 @@
 </div>
 
 <form hx-get="/manual-import/body" hx-target="#manual-import-body" hx-swap="innerHTML" hx-trigger="change">
-  <label class="field-label">Choose a playlist to view its incomplete tracks:
-    <select name="playlist_url">
-      {% for name, url, count in playlists %}
-      <option value="{{ url }}" {% if url == selected_playlist_url %}selected{% endif %}>{{ name }} ({{ count }} tracks)</option>
-      {% endfor %}
+  <label class="field-label">Choose a playlist or folder to view its incomplete tracks:
+    <select name="scope">
+      <option value="{{ all_scope.value }}" {% if all_scope.value == selected_scope %}selected{% endif %}>{{ all_scope.label }} ({{ all_scope.count }} tracks)</option>
+      {% if folder_scopes %}
+      <optgroup label="Folders">
+        {% for s in folder_scopes %}
+        <option value="{{ s.value }}" {% if s.value == selected_scope %}selected{% endif %}>{{ s.label }} ({{ s.count }} tracks)</option>
+        {% endfor %}
+      </optgroup>
+      {% endif %}
+      {% if playlist_scopes %}
+      <optgroup label="Playlists">
+        {% for s in playlist_scopes %}
+        <option value="{{ s.value }}" {% if s.value == selected_scope %}selected{% endif %}>{{ s.label }} ({{ s.count }} tracks)</option>
+        {% endfor %}
+      </optgroup>
+      {% endif %}
     </select>
   </label>
 
@@ -52,7 +64,7 @@
   </div>
 </form>
 
-<h3>Tracks in: {{ selected_playlist_name }}</h3>
+<h3>Tracks in: {{ selected_scope_label }}</h3>
 
 {% if tracks %}
 <table class="stats-table">

@@ -1300,6 +1300,29 @@ class TrackDB:
         )
         return cursor.fetchall()
 
+    def get_folders_with_incomplete_counts(self) -> list[tuple[str, int]]:
+        """Return (folder_name, incomplete_count) for folders with at least one member
+        playlist track missing a local file, most-incomplete first.
+
+        The count is unique tracks across the folder's member playlists (the folder's
+        union, like its master playlist), so a track in two member playlists counts once.
+        Root-level memberships (folder_name = '') are not folders and are excluded.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT pfm.folder_name, COUNT(DISTINCT t.track_id) AS incomplete_count
+            FROM playlist_folder_memberships pfm
+            JOIN playlist_tracks pt ON pt.playlist_url = pfm.playlist_url
+            JOIN tracks t ON t.track_id = pt.track_id
+            WHERE pfm.folder_name != ''
+              AND (t.local_file_path IS NULL OR TRIM(t.local_file_path) = '')
+            GROUP BY pfm.folder_name
+            ORDER BY incomplete_count DESC, pfm.folder_name
+            """,
+        )
+        return cursor.fetchall()
+
     def get_total_incomplete_tracks(self) -> int:
         """Return the count of tracks without a local file (unique tracks, not playlist rows)."""
         cursor = self.conn.cursor()
@@ -1308,38 +1331,70 @@ class TrackDB:
         )
         return cursor.fetchone()[0]
 
-    def get_incomplete_tracks_for_playlist(
-        self, playlist_url: str, search: str | None, offset: int, limit: int,
-    ) -> tuple[list[tuple[str, str, str, str, str]], int]:
-        """Paginated (playlist_url, track_id, track_name, artist, status) rows missing a
-        local file for one playlist, optionally filtered by artist/track substring.
+    def _get_incomplete_tracks_page(
+        self, membership_filter: str, membership_params: list[str],
+        search: str | None, offset: int, limit: int,
+    ) -> tuple[list[tuple[str, str, str, str]], int]:
+        """Paginated (track_id, track_name, artist, status) rows missing a local file.
 
+        ``membership_filter`` is an optional ``AND ...`` SQL fragment over ``t`` that
+        narrows the tracks to a playlist/folder (empty for every track); it is matched
+        with ``IN (subquery)`` so a track reachable through several playlists is one row.
         Returns (rows, total_count_before_pagination).
         """
-        cursor = self.conn.cursor()
-        where_search = ""
-        params: list[str] = [playlist_url]
+        where = "(t.local_file_path IS NULL OR TRIM(t.local_file_path) = '')" + membership_filter
+        params = list(membership_params)
         if search:
-            where_search = " AND (LOWER(t.track_name) LIKE ? OR LOWER(t.artist) LIKE ?)"
+            where += " AND (LOWER(t.track_name) LIKE ? OR LOWER(t.artist) LIKE ?)"
             like = f"%{search.lower()}%"
             params.extend([like, like])
 
-        cursor.execute(
-            "SELECT COUNT(*) FROM playlist_tracks pt JOIN tracks t ON t.track_id = pt.track_id "
-            "WHERE pt.playlist_url = ? AND (t.local_file_path IS NULL OR TRIM(t.local_file_path) = '')"
-            + where_search,
-            params,
-        )
-        total = cursor.fetchone()[0]
+        cursor = self.conn.cursor()
+        cursor.execute(f"SELECT COUNT(*) FROM tracks t WHERE {where}", params)
+        total = cursor.fetchall()[0][0]
 
         cursor.execute(
-            "SELECT pt.playlist_url, t.track_id, t.track_name, t.artist, t.download_status "
-            "FROM playlist_tracks pt JOIN tracks t ON t.track_id = pt.track_id "
-            "WHERE pt.playlist_url = ? AND (t.local_file_path IS NULL OR TRIM(t.local_file_path) = '')"
-            + where_search + " ORDER BY t.track_name LIMIT ? OFFSET ?",
+            "SELECT t.track_id, t.track_name, t.artist, t.download_status "
+            f"FROM tracks t WHERE {where} ORDER BY t.track_name LIMIT ? OFFSET ?",
             [*params, limit, offset],
         )
         return cursor.fetchall(), total
+
+    def get_incomplete_tracks(
+        self, search: str | None, offset: int, limit: int,
+    ) -> tuple[list[tuple[str, str, str, str]], int]:
+        """Paginated (track_id, track_name, artist, status) rows for every track missing a
+        local file, whether or not it belongs to a playlist, optionally filtered by
+        artist/track substring. Returns (rows, total_count_before_pagination).
+        """
+        return self._get_incomplete_tracks_page("", [], search, offset, limit)
+
+    def get_incomplete_tracks_for_playlist(
+        self, playlist_url: str, search: str | None, offset: int, limit: int,
+    ) -> tuple[list[tuple[str, str, str, str]], int]:
+        """Paginated (track_id, track_name, artist, status) rows missing a local file for
+        one playlist, optionally filtered by artist/track substring.
+
+        Returns (rows, total_count_before_pagination).
+        """
+        return self._get_incomplete_tracks_page(
+            " AND t.track_id IN (SELECT track_id FROM playlist_tracks WHERE playlist_url = ?)",
+            [playlist_url], search, offset, limit,
+        )
+
+    def get_incomplete_tracks_for_folder(
+        self, folder_name: str, search: str | None, offset: int, limit: int,
+    ) -> tuple[list[tuple[str, str, str, str]], int]:
+        """Paginated (track_id, track_name, artist, status) rows missing a local file
+        across every playlist in one folder (unique tracks), optionally filtered by
+        artist/track substring. Returns (rows, total_count_before_pagination).
+        """
+        return self._get_incomplete_tracks_page(
+            " AND t.track_id IN (SELECT pt.track_id FROM playlist_tracks pt "
+            "JOIN playlist_folder_memberships pfm ON pfm.playlist_url = pt.playlist_url "
+            "WHERE pfm.folder_name = ?)",
+            [folder_name], search, offset, limit,
+        )
 
     def get_all_incomplete_tracks_with_playlists(self) -> list[tuple[str, str, str, str, str]]:
         """Return (track_id, track_name, artist, download_status, playlists) for every
