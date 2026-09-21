@@ -1,0 +1,27 @@
+{#- One table cell from routes/database.py's _cell(): NULL is shown distinctly, a value
+    with an href is a link (HTMX-navigated within the tab), and the full value is always
+    available on hover since long values are truncated by CSS. -#}
+{% macro cell(c) -%}
+{%- if c.is_null -%}
+<span class="db-null">NULL</span>
+{%- elif c.href -%}
+<a href="{{ c.href }}" hx-get="{{ c.href }}" hx-target="#tab-content" title="{{ c.text }}">{{ c.text }}</a>
+{%- else -%}
+<span title="{{ c.text }}">{{ c.text }}</span>
+{%- endif -%}
+{%- endmacro %}
+
+{#- A plain results table (audit / disk-check rows): `columns` are the headers, `rows`
+    are lists of cells. -#}
+{% macro results_table(columns, rows) -%}
+<div class="db-table-scroll">
+  <table class="stats-table db-table">
+    <thead><tr>{% for name in columns %}<th>{{ name }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>{% for c in row %}<td>{{ cell(c) }}</td>{% endfor %}</tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{%- endmacro %}

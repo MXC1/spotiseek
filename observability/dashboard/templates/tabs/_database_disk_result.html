@@ -1,0 +1,15 @@
+{% from "tabs/_database_macros.html" import results_table %}
+{% if db_error %}
+<p class="stats-error">{{ db_error }}</p>
+{% else %}
+{% if note %}<p class="flash flash-error">{{ note }}</p>{% endif %}
+<p>
+  {% if total %}
+  <span class="db-badge db-badge-bad">{{ "{:,}".format(total) }} found</span>
+  {% if total > listed %}<span class="stats-caption">Showing the first {{ "{:,}".format(listed) }}.</span>{% endif %}
+  {% else %}
+  <span class="db-badge db-badge-ok">nothing flagged</span>
+  {% endif %}
+</p>
+{% if rows %}{{ results_table(columns, rows) }}{% endif %}
+{% endif %}

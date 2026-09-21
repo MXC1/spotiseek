@@ -1,0 +1,118 @@
+{% from "tabs/_database_macros.html" import cell %}
+
+<p class="stats-caption">
+  A read-only view of the {{ env_name if env_name else "current" }} environment's database.
+  Every table is listed as it exists in the file.
+</p>
+
+<div class="db-table-list" role="list">
+  {% for name, count in tables %}
+  <a class="db-table-chip{% if name == selected %} active{% endif %}" role="listitem"
+     href="/database?table={{ name|urlencode }}" hx-get="/database?table={{ name|urlencode }}"
+     hx-target="#tab-content">
+    <span class="db-table-name">{{ name }}</span>
+    <span class="db-table-count">{{ "{:,}".format(count) }}</span>
+  </a>
+  {% endfor %}
+</div>
+
+{% if table_error %}
+<p class="flash flash-error">{{ table_error }}</p>
+{% elif selected %}
+<hr class="section-divider">
+<div class="db-browser-head">
+  <h2 class="db-h2">{{ selected }}</h2>
+  <p class="stats-caption">
+    {% if total %}Rows {{ "{:,}".format(first_row) }}&ndash;{{ "{:,}".format(last_row) }} of {{ "{:,}".format(total) }}{% else %}No rows{% endif %}{% if has_filters %} matching your filters
+    &middot; <a href="{{ clear_filters_url }}" hx-get="{{ clear_filters_url }}" hx-target="#tab-content">Clear filters</a>{% endif %}
+  </p>
+</div>
+
+<details class="db-schema">
+  <summary>Schema</summary>
+  <table class="stats-table">
+    <thead><tr><th>Column</th><th>Type</th><th>Key</th><th>Not null</th><th>Default</th></tr></thead>
+    <tbody>
+      {% for col in table_schema.columns %}
+      <tr>
+        <td>{{ col.name }}</td>
+        <td>{{ col.type or "-" }}</td>
+        <td>{% if col.pk %}PK{% endif %}</td>
+        <td>{% if col.notnull %}yes{% endif %}</td>
+        <td>{{ col.default if col.default is not none else "" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if table_schema.foreign_keys %}
+  <p class="stats-caption">Foreign keys:
+    {% for fk in table_schema.foreign_keys %}{{ fk.column }} &rarr; {{ fk.ref_table }}.{{ fk.ref_column }}{% if not loop.last %}, {% endif %}{% endfor %}
+  </p>
+  {% endif %}
+  {% if table_schema.indexes %}
+  <p class="stats-caption">Indexes:
+    {% for idx in table_schema.indexes %}{{ idx.name }} ({{ idx.columns|join(", ") }}){% if idx.unique %} unique{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}
+  </p>
+  {% endif %}
+</details>
+
+{# The whole table sits inside one form so a filter's `change` bubbles to it. Sort and pager
+   links are plain hx-get links whose URLs already carry the full state (built server-side). #}
+<form id="db-table-form" hx-get="/database" hx-target="#tab-content" hx-trigger="change, submit">
+  <input type="hidden" name="table" value="{{ selected }}">
+  {% if sort %}
+  <input type="hidden" name="sort" value="{{ sort }}">
+  <input type="hidden" name="dir" value="{{ direction }}">
+  {% endif %}
+
+  <label class="field-label">Rows per page
+    <select name="page_size">
+      {% for size in page_sizes %}
+      <option value="{{ size }}" {% if size == page_size %}selected{% endif %}>{{ size }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <div class="db-table-scroll">
+    <table class="stats-table db-table">
+      <thead>
+        <tr>
+          {% for h in headers %}
+          <th>
+            <a class="db-sort{% if h.sorted %} active{% endif %}" href="{{ h.sort_url }}"
+               hx-get="{{ h.sort_url }}" hx-target="#tab-content">{{ h.name }}{% if h.arrow %} {{ h.arrow }}{% endif %}</a>
+            {% if h.pk %}<span class="db-tag" title="Primary key">PK</span>{% endif %}
+            {% if h.fk %}<span class="db-tag" title="Foreign key: click a value to follow it">FK</span>{% endif %}
+          </th>
+          {% endfor %}
+        </tr>
+        <tr class="db-filter-row">
+          {% for h in headers %}
+          <th><input type="text" name="f__{{ h.name }}" value="{{ h.filter }}" placeholder="filter"
+                     aria-label="Filter {{ h.name }}" autocomplete="off"></th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>{% for c in row %}<td>{{ cell(c) }}</td>{% endfor %}</tr>
+        {% else %}
+        <tr><td colspan="{{ headers|length }}" class="stats-empty">No rows{% if has_filters %} match the current filters{% endif %}.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</form>
+
+<nav class="db-pager" aria-label="Pages">
+  {% if prev_url %}
+  <a class="btn btn-small" href="{{ first_url }}" hx-get="{{ first_url }}" hx-target="#tab-content">&laquo; First</a>
+  <a class="btn btn-small" href="{{ prev_url }}" hx-get="{{ prev_url }}" hx-target="#tab-content">&lsaquo; Prev</a>
+  {% endif %}
+  <span class="stats-caption">Page {{ page }} of {{ total_pages }}</span>
+  {% if next_url %}
+  <a class="btn btn-small" href="{{ next_url }}" hx-get="{{ next_url }}" hx-target="#tab-content">Next &rsaquo;</a>
+  <a class="btn btn-small" href="{{ last_url }}" hx-get="{{ last_url }}" hx-target="#tab-content">Last &raquo;</a>
+  {% endif %}
+</nav>
+{% endif %}

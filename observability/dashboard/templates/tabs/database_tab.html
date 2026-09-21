@@ -1,0 +1,23 @@
+<section class="database-tab">
+  <div class="db-header">
+    <nav class="db-subnav" aria-label="Database views">
+      <a class="db-sublink{% if active_sub == 'tables' %} active{% endif %}"
+         href="/database" hx-get="/database" hx-target="#tab-content">Tables</a>
+      <a class="db-sublink{% if active_sub == 'audit' %} active{% endif %}"
+         href="/database/audit" hx-get="/database/audit" hx-target="#tab-content">Audit</a>
+    </nav>
+    {# Data only changes when you ask: re-issues the current view's own URL. The header
+       tells the server this is a refresh, so it replaces the history entry, not adds one. #}
+    <button type="button" class="btn btn-small"
+            hx-get="{{ url }}" hx-target="#tab-content"
+            hx-headers='{"X-Refresh": "1"}' hx-disabled-elt="this">
+      &#8635; Refresh <span class="htmx-indicator spinner" aria-hidden="true"></span>
+    </button>
+  </div>
+
+  {% if db_error %}
+  <p class="stats-error">{{ db_error }}</p>
+  {% else %}
+  {% include subview_template %}
+  {% endif %}
+</section>

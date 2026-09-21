@@ -1,0 +1,74 @@
+<p class="stats-caption">
+  {% if total_flagged %}<strong>{{ total_flagged }}</strong> issue(s) flagged by the database checks below.{% else %}The database checks below found nothing.{% endif %}
+  Counts are live as of this page load; the disk checks and the database health check only run when you click <em>Run</em>.
+</p>
+
+{% for group in groups %}
+<div class="stats-panel db-audit-group">
+  <h2>{{ group.name }}
+    <span class="db-badge {% if group.flagged %}db-badge-bad{% else %}db-badge-ok{% endif %}">{{ group.flagged }}</span>
+  </h2>
+  {% for check in group.checks %}
+  <div class="db-check">
+    <div class="db-check-head">
+      <div>
+        <strong>{{ check.title }}</strong>
+        <div class="stats-caption">{{ check.description }}</div>
+      </div>
+      <div class="db-check-actions">
+        <span class="db-badge {% if check.count %}db-badge-bad{% else %}db-badge-ok{% endif %}">{{ check.count }}</span>
+        {% if check.count %}
+        <button type="button" class="btn btn-small"
+                hx-get="/database/audit/check/{{ check.id }}" hx-target="#check-rows-{{ check.id }}"
+                hx-swap="innerHTML" hx-disabled-elt="this">Show rows</button>
+        {% endif %}
+      </div>
+    </div>
+    <div id="check-rows-{{ check.id }}"></div>
+  </div>
+  {% endfor %}
+</div>
+{% endfor %}
+
+<div class="stats-panel db-audit-group">
+  <h2>Disk checks</h2>
+  <p class="stats-caption">Compare what the database says with what is on disk. Read-only, but they stat every completed track's file or walk <code>imported/</code>, so they can be slow on a large library.</p>
+  {% for check in disk_checks %}
+  <div class="db-check">
+    <div class="db-check-head">
+      <div>
+        <strong>{{ check.title }}</strong>
+        <div class="stats-caption">{{ check.description }}</div>
+      </div>
+      <div class="db-check-actions">
+        <button type="button" class="btn btn-small"
+                hx-post="/database/audit/disk/{{ check.id }}" hx-target="#disk-result-{{ check.id }}"
+                hx-swap="innerHTML" hx-disabled-elt="this">
+          Run <span class="htmx-indicator spinner" aria-hidden="true"></span>
+        </button>
+      </div>
+    </div>
+    <div id="disk-result-{{ check.id }}"></div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="stats-panel db-audit-group">
+  <h2>Database health</h2>
+  <div class="db-check">
+    <div class="db-check-head">
+      <div>
+        <strong>Database file and integrity</strong>
+        <div class="stats-caption">File size, page counts, journal settings, and SQLite's <code>PRAGMA quick_check</code>, which reads the whole file under a read lock.</div>
+      </div>
+      <div class="db-check-actions">
+        <button type="button" class="btn btn-small"
+                hx-post="/database/audit/health" hx-target="#health-result"
+                hx-swap="innerHTML" hx-disabled-elt="this">
+          Run <span class="htmx-indicator spinner" aria-hidden="true"></span>
+        </button>
+      </div>
+    </div>
+    <div id="health-result"></div>
+  </div>
+</div>

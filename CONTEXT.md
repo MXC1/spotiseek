@@ -83,3 +83,29 @@ from that folder's member playlists, listed first in its folder. It is derived f
 folder and exists only in the exported library — it has no source URL and is not a
 scraped **Playlist** or a **Folder membership**.
 _Avoid_: aggregate playlist, union playlist, "ALL" playlist, folder playlist
+
+### Tracks & auditing
+
+**In-flight status**:
+A track status meaning the track is still being worked on: pending, searching, queued,
+downloading, or awaiting redownload. Every other status (completed, failed, not found,
+no suitable file, blacklisted) is a final outcome.
+_Avoid_: active status, non-terminal status
+
+**Stuck track**:
+A track that has stayed in one **in-flight status** longer than that status normally
+lasts. It is a matter of elapsed time, not of inconsistent data: a track can hold a
+contradictory combination of fields without being stuck, and vice versa.
+_Avoid_: hung track, stalled track
+
+**Orphaned track**:
+A track that belongs to no playlist. Pruning removes orphans once every playlist has been
+reprocessed, so one that survives a full run signals inconsistent data.
+_Avoid_: dangling track, unlinked track
+
+**Audit check**:
+A named, read-only test of whether an environment's data agrees with itself or with its
+files on disk, reporting a count and the offending rows. A **disk check** is an audit
+check that compares database records to files on disk rather than to other records.
+_Avoid_: validation, lint, health check (a health check inspects the database file
+itself, not the data in it)

@@ -9,11 +9,13 @@ import os
 import sqlite3
 import threading
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, ClassVar, Optional
 
 if TYPE_CHECKING:
     import pandas as pd
 
+from scripts.audit_checks import AUDIT_CHECKS_BY_ID
 from scripts.logs_utils import write_log
 
 # Get environment configuration (used by TrackDB class)
@@ -50,6 +52,45 @@ def normalize_slskd_filename(slskd_file_name: str) -> str:
     if len(parts) == 1:
         return parts[0]
     return slskd_file_name
+
+
+# --- Database explorer helpers (docs/adr/0008-dashboard-database-explorer.md) -----------------
+
+# Tables the explorer lists first, in this order; any other table follows alphabetically.
+_EXPLORER_TABLE_ORDER = (
+    "tracks", "playlists", "playlist_tracks", "playlist_folder_memberships",
+    "slskd_blacklist", "task_runs", "task_state",
+)
+
+# Hard ceiling on rows returned by one browse/audit read, whatever the caller asks for: every
+# explorer read is a single bounded fetchall() so it can never hold the shared connection's
+# read lock (and so block the workflow's writes) for long.
+EXPLORER_MAX_PAGE_SIZE = 100
+
+_SYNCHRONOUS_NAMES = {0: "OFF", 1: "NORMAL", 2: "FULL", 3: "EXTRA"}
+
+
+def _quote_ident(name: str) -> str:
+    """Quote an SQL identifier. Only ever called with a name that came out of sqlite_master
+    or PRAGMA table_info -- never with raw request input."""
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _escape_like(text: str) -> str:
+    """Escape LIKE wildcards so a user's filter text is matched literally (ESCAPE '\\')."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def status_age_seconds(status_changed_at: str | None) -> int | None:
+    """Seconds since a status_changed_at value (SQLite CURRENT_TIMESTAMP text, UTC), or None
+    if it is missing or unparseable."""
+    if not status_changed_at:
+        return None
+    try:
+        changed = datetime.strptime(status_changed_at, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return max(0, int((datetime.now(timezone.utc) - changed).total_seconds()))
 
 
 @dataclass
@@ -201,6 +242,29 @@ class TrackDB:
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self._create_tables()
 
+    def _migrate_status_changed_at(self, cursor: sqlite3.Cursor, columns: list[str]) -> None:
+        """Add and backfill tracks.status_changed_at: when download_status last changed
+        VALUE (see docs/adr/0009-track-status-changed-at.md).
+
+        Idempotent under a concurrent first start: workflow and dashboard both run this at
+        startup and `invoke up` starts them together, so both can see the column missing.
+        The loser's ALTER fails with "duplicate column name", which only means the winner
+        already added it.
+        """
+        if "status_changed_at" not in columns:
+            try:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN status_changed_at DATETIME")
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" not in str(e).lower():
+                    raise
+        # ADD COLUMN can't take a CURRENT_TIMESTAMP default, so existing rows (and any row
+        # written by pre-migration code during a rollback) are backfilled with "now". Only
+        # NULL rows are touched, so re-running this on every start is a no-op.
+        cursor.execute("SELECT 1 FROM tracks WHERE status_changed_at IS NULL LIMIT 1")
+        if cursor.fetchone():
+            cursor.execute("UPDATE tracks SET status_changed_at = CURRENT_TIMESTAMP WHERE status_changed_at IS NULL")
+            self.conn.commit()
+
     def _create_tables(self) -> None:
         """Create database schema if it doesn't already exist.
 
@@ -252,6 +316,7 @@ class TrackDB:
             cursor.execute("ALTER TABLE tracks ADD COLUMN source TEXT NOT NULL DEFAULT 'spotify'")
         if "genre" not in columns:
             cursor.execute("ALTER TABLE tracks ADD COLUMN genre TEXT")
+        self._migrate_status_changed_at(cursor, columns)
 
 
         # Playlists table: stores playlist information, m3u8 path, and playlist name
@@ -418,8 +483,8 @@ class TrackDB:
             """
             INSERT OR IGNORE INTO tracks
               (track_id, track_name, artist, source, download_status,
-               failed_reason, slskd_file_name, extension, bitrate, genre)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               failed_reason, slskd_file_name, extension, bitrate, genre, status_changed_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """,
             (track_data.track_id, track_data.track_name, track_data.artist,
                track_data.source, track_data.download_status, track_data.failed_reason,
@@ -615,15 +680,26 @@ class TrackDB:
             context["failed_reason"] = failed_reason
         write_log.debug("TRACK_STATUS_UPDATE", "Updating track status.", context)
         cursor = self.conn.cursor()
+        # status_changed_at moves only when the status VALUE changes (ADR 0009): the search
+        # retry loops re-set the status a track already has, and bumping on those would keep
+        # resetting the age of a track that is really stuck. SQLite evaluates every SET
+        # expression against the row as it was BEFORE the update, so the CASE below compares
+        # the new status with the old one.
         if status == "failed":
             cursor.execute(
-                "UPDATE tracks SET download_status = ?, failed_reason = ? WHERE track_id = ?",
-                (status, failed_reason, track_id),
+                "UPDATE tracks SET "
+                "status_changed_at = CASE WHEN download_status IS NOT ? THEN CURRENT_TIMESTAMP "
+                "ELSE status_changed_at END, "
+                "download_status = ?, failed_reason = ? WHERE track_id = ?",
+                (status, status, failed_reason, track_id),
             )
         else:
             cursor.execute(
-                "UPDATE tracks SET download_status = ?, failed_reason = NULL WHERE track_id = ?",
-                (status, track_id),
+                "UPDATE tracks SET "
+                "status_changed_at = CASE WHEN download_status IS NOT ? THEN CURRENT_TIMESTAMP "
+                "ELSE status_changed_at END, "
+                "download_status = ?, failed_reason = NULL WHERE track_id = ?",
+                (status, status, track_id),
             )
         self.conn.commit()
 
@@ -1360,12 +1436,267 @@ class TrackDB:
             """
             UPDATE tracks
             SET local_file_path = ?, bitrate = ?, extension = ?,
-                username = ?, slskd_file_name = ?, download_status = ?
+                username = ?, slskd_file_name = ?,
+                status_changed_at = CASE WHEN download_status IS NOT ? THEN CURRENT_TIMESTAMP
+                                         ELSE status_changed_at END,
+                download_status = ?
             WHERE track_id = ?
             """,
-            (local_file_path, bitrate, extension, username, slskd_file_name, download_status, track_id),
+            (local_file_path, bitrate, extension, username, slskd_file_name,
+             download_status, download_status, track_id),
         )
         self.conn.commit()
+
+    # ------------------------------------------------------------------------------------
+    # Database explorer -- strictly read-only reads for the dashboard's Database tab
+    # (docs/adr/0008-dashboard-database-explorer.md).
+    #
+    # Guardrails, because self.conn is shared across the dashboard's request threads and
+    # its own blacklist/import writes, and every open read blocks the workflow's commits:
+    # each method is one bounded fetchall() with no cursor left open, and none of them
+    # commits, rolls back, or changes a pragma or row_factory on the connection.
+    # ------------------------------------------------------------------------------------
+
+    def _explorer_table_names(self) -> list[str]:
+        """Every user table, in the explorer's display order (auto-discovered, so a table
+        added later shows up without a code change)."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
+        )
+        names = [row[0] for row in cursor.fetchall()]
+        rank = {name: i for i, name in enumerate(_EXPLORER_TABLE_ORDER)}
+        return sorted(names, key=lambda name: (rank.get(name, len(rank)), name))
+
+    def list_tables(self) -> list[tuple[str, int]]:
+        """Return (table_name, row_count) for every table, in display order."""
+        cursor = self.conn.cursor()
+        result = []
+        for name in self._explorer_table_names():
+            cursor.execute(f"SELECT COUNT(*) FROM {_quote_ident(name)}")
+            result.append((name, cursor.fetchone()[0]))
+        return result
+
+    def get_table_schema(self, table: str) -> dict | None:
+        """Return a table's columns, declared foreign keys and indexes, or None if `table`
+        isn't a table in this database (which is what keeps request input out of SQL)."""
+        if table not in self._explorer_table_names():
+            return None
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT name, type, "notnull", dflt_value, pk FROM pragma_table_info(?) ORDER BY cid', (table,))
+        columns = [
+            {"name": name, "type": col_type, "notnull": bool(notnull), "default": default, "pk": pk}
+            for name, col_type, notnull, default, pk in cursor.fetchall()
+        ]
+        cursor.execute('SELECT "from", "table", "to" FROM pragma_foreign_key_list(?)', (table,))
+        foreign_keys = [
+            {"column": from_col, "ref_table": ref_table, "ref_column": to_col}
+            for from_col, ref_table, to_col in cursor.fetchall()
+        ]
+        cursor.execute('SELECT name, "unique" FROM pragma_index_list(?) ORDER BY name', (table,))
+        index_rows = cursor.fetchall()
+        indexes = []
+        for index_name, is_unique in index_rows:
+            cursor.execute("SELECT name FROM pragma_index_info(?) ORDER BY seqno", (index_name,))
+            indexes.append({
+                "name": index_name,
+                "unique": bool(is_unique),
+                "columns": [row[0] for row in cursor.fetchall()],
+            })
+        return {"name": table, "columns": columns, "foreign_keys": foreign_keys, "indexes": indexes}
+
+    def browse_table(  # noqa: PLR0913
+        self,
+        table: str,
+        *,
+        offset: int = 0,
+        limit: int = 25,
+        sort: str | None = None,
+        descending: bool = False,
+        filters: dict[str, str] | None = None,
+    ) -> dict | None:
+        """Return one page of a table, or None if `table` doesn't exist.
+
+        The table and every column name are validated against the schema (unknown sort or
+        filter columns are ignored, never interpolated); filter text is matched as a
+        case-insensitive substring via a bound LIKE parameter. `limit` is clamped to
+        EXPLORER_MAX_PAGE_SIZE. Ordering always ends in the primary key so paging is stable.
+        """
+        schema = self.get_table_schema(table)
+        if schema is None:
+            return None
+        columns = [col["name"] for col in schema["columns"]]
+        limit = max(1, min(int(limit), EXPLORER_MAX_PAGE_SIZE))
+        offset = max(0, int(offset))
+
+        clauses: list[str] = []
+        params: list = []
+        for column, text in (filters or {}).items():
+            if column in columns and text:
+                clauses.append(f"CAST({_quote_ident(column)} AS TEXT) LIKE ? ESCAPE '\\'")
+                params.append(f"%{_escape_like(text)}%")
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+
+        pk_columns = [col["name"] for col in sorted(schema["columns"], key=lambda c: c["pk"]) if col["pk"]]
+        tiebreak = [_quote_ident(c) for c in pk_columns] or ["rowid"]
+        order_terms = []
+        if sort in columns:
+            order_terms.append(f"{_quote_ident(sort)} {'DESC' if descending else 'ASC'}")
+            tiebreak = [t for t in tiebreak if t != _quote_ident(sort)]
+        order = " ORDER BY " + ", ".join([*order_terms, *tiebreak])
+
+        table_sql = _quote_ident(table)
+        cursor = self.conn.cursor()
+        cursor.execute(f"SELECT COUNT(*) FROM {table_sql}{where}", params)
+        total = cursor.fetchone()[0]
+        select_list = ", ".join(_quote_ident(c) for c in columns)
+        cursor.execute(
+            f"SELECT {select_list} FROM {table_sql}{where}{order} LIMIT ? OFFSET ?",
+            [*params, limit, offset],
+        )
+        rows = cursor.fetchall()
+        return {
+            "columns": columns, "rows": rows, "total": total,
+            "limit": limit, "offset": offset, "schema": schema,
+        }
+
+    def get_track_detail(self, track_id: str) -> dict | None:
+        """Return everything the explorer's track detail view shows that comes from the
+        database: the full row, its playlists (with folders), matching blacklist entries and
+        how long it has been in its current status. None if there's no such track."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM tracks WHERE track_id = ?", (track_id,))
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        track = dict(zip([col[0] for col in cursor.description], row, strict=True))
+
+        # LEFT JOIN so a playlist_tracks row pointing at a missing playlist still shows up
+        # (flagged) -- surfacing that kind of dangling link is the point of the view.
+        cursor.execute(
+            """
+            SELECT pt.playlist_url, p.playlist_name, p.m3u8_path, p.playlist_url IS NOT NULL
+            FROM playlist_tracks pt
+            LEFT JOIN playlists p ON p.playlist_url = pt.playlist_url
+            WHERE pt.track_id = ?
+            ORDER BY p.display_order IS NULL, p.display_order, pt.playlist_url
+            """,
+            (track_id,),
+        )
+        playlist_rows = cursor.fetchall()
+        playlists = []
+        for playlist_url, playlist_name, m3u8_path, exists in playlist_rows:
+            cursor.execute(
+                "SELECT folder_name FROM playlist_folder_memberships WHERE playlist_url = ? ORDER BY csv_sequence",
+                (playlist_url,),
+            )
+            playlists.append({
+                "playlist_url": playlist_url,
+                "playlist_name": playlist_name,
+                "m3u8_path": m3u8_path,
+                "in_playlists_table": bool(exists),
+                "folders": [r[0] for r in cursor.fetchall()],  # '' means the root
+            })
+
+        blacklist_entries: list[dict] = []
+        if track.get("username") and track.get("slskd_file_name"):
+            cursor.execute(
+                "SELECT username, slskd_file_name, reason, added_at FROM slskd_blacklist "
+                "WHERE username = ? AND slskd_file_name = ?",
+                (track["username"], normalize_slskd_filename(track["slskd_file_name"])),
+            )
+            blacklist_entries = [
+                {"username": u, "slskd_file_name": f, "reason": r, "added_at": a}
+                for u, f, r, a in cursor.fetchall()
+            ]
+
+        return {
+            "track": track,
+            "playlists": playlists,
+            "blacklist_entries": blacklist_entries,
+            "status_age_seconds": status_age_seconds(track.get("status_changed_at")),
+        }
+
+    def count_audit_check(self, check_id: str) -> int | None:
+        """Number of rows a DB audit check flags, or None for an unknown check id."""
+        check = AUDIT_CHECKS_BY_ID.get(check_id)
+        if check is None:
+            return None
+        cursor = self.conn.cursor()
+        cursor.execute(f"SELECT COUNT(*) FROM ({check.sql})", check.params)
+        return cursor.fetchone()[0]
+
+    def get_audit_check_rows(self, check_id: str, offset: int = 0, limit: int = 25) -> dict | None:
+        """One page of the rows a DB audit check flags ({"columns", "rows"}), or None for an
+        unknown check id. `limit` is clamped to EXPLORER_MAX_PAGE_SIZE."""
+        check = AUDIT_CHECKS_BY_ID.get(check_id)
+        if check is None:
+            return None
+        limit = max(1, min(int(limit), EXPLORER_MAX_PAGE_SIZE))
+        cursor = self.conn.cursor()
+        cursor.execute(f"{check.sql} LIMIT ? OFFSET ?", [*check.params, limit, max(0, int(offset))])
+        rows = cursor.fetchall()
+        return {"columns": [col[0] for col in cursor.description], "rows": rows}
+
+    def get_completed_track_files(self) -> list[tuple[str, str, str, str]]:
+        """(track_id, artist, track_name, local_file_path) for every completed track that
+        records a file -- the input to the "completed track's file is missing" disk check.
+        Returned whole so the caller can stat the files without the DB being involved."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT track_id, artist, track_name, local_file_path FROM tracks "
+            "WHERE download_status = 'completed' AND local_file_path IS NOT NULL "
+            "AND TRIM(local_file_path) != '' ORDER BY track_id",
+        )
+        return cursor.fetchall()
+
+    def get_playlist_m3u8_paths(self) -> list[tuple[str, str | None, str | None]]:
+        """(playlist_url, playlist_name, m3u8_path) for every playlist, in CSV order."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT playlist_url, playlist_name, m3u8_path FROM playlists "
+            "ORDER BY display_order IS NULL, display_order",
+        )
+        return cursor.fetchall()
+
+    def get_all_local_file_paths(self) -> list[str]:
+        """Every non-blank local_file_path recorded on any track -- the input to the
+        "files in imported/ that no track points at" disk check."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT local_file_path FROM tracks WHERE local_file_path IS NOT NULL AND TRIM(local_file_path) != ''",
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+    def get_database_health(self) -> dict:
+        """Cheap facts about the database file itself for the Database health section. Only
+        reads pragmas (no value given, so nothing is changed on the shared connection)."""
+        cursor = self.conn.cursor()
+
+        def pragma(name: str) -> int | str:
+            cursor.execute(f"PRAGMA {name}")
+            return cursor.fetchone()[0]
+
+        synchronous = pragma("synchronous")
+        return {
+            "path": self.db_path,
+            "file_size_bytes": os.path.getsize(self.db_path) if os.path.exists(self.db_path) else None,
+            "page_size": pragma("page_size"),
+            "page_count": pragma("page_count"),
+            "freelist_count": pragma("freelist_count"),
+            "journal_mode": pragma("journal_mode"),
+            "synchronous": _SYNCHRONOUS_NAMES.get(synchronous, str(synchronous)),
+            # A rollback journal exists only while a write is in flight; one that lingers
+            # means a write crashed mid-transaction (SQLite rolls it back on next open).
+            "journal_file_present": os.path.exists(f"{self.db_path}-journal"),
+        }
+
+    def run_quick_check(self) -> list[str]:
+        """Run PRAGMA quick_check and return its lines: ["ok"] when healthy, otherwise up to
+        100 problem descriptions. Reads the whole database file, so it is click-only."""
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA quick_check")
+        return [row[0] for row in cursor.fetchall()]
 
     def close(self) -> None:
         """Close the database connection."""

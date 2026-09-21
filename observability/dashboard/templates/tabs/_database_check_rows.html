@@ -1,0 +1,15 @@
+{% from "tabs/_database_macros.html" import results_table %}
+{% if db_error %}
+<p class="stats-error">{{ db_error }}</p>
+{% else %}
+{{ results_table(columns, rows) }}
+<nav class="db-pager" aria-label="Pages">
+  {% if prev_url %}
+  <button type="button" class="btn btn-small" hx-get="{{ prev_url }}" hx-target="#check-rows-{{ check_id }}" hx-swap="innerHTML">&lsaquo; Prev</button>
+  {% endif %}
+  <span class="stats-caption">{{ "{:,}".format(total) }} row(s) &middot; page {{ page }} of {{ total_pages }}</span>
+  {% if next_url %}
+  <button type="button" class="btn btn-small" hx-get="{{ next_url }}" hx-target="#check-rows-{{ check_id }}" hx-swap="innerHTML">Next &rsaquo;</button>
+  {% endif %}
+</nav>
+{% endif %}

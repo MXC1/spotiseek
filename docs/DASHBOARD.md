@@ -160,6 +160,55 @@ MP3, FLAC, WAV, M4A, OGG, WMA, AAC, ALAC, AIFF
 
 ---
 
+## 🗄️ Database Tab
+
+Design: `docs/adr/0008-dashboard-database-explorer.md` (the tab) and `docs/adr/0009-track-status-changed-at.md` (the status age it relies on).
+
+The **Database** tab is a read-only explorer for the current environment's SQLite database, for working out why a track is stuck or failed, checking that the data still agrees with itself, and browsing what's there. It never edits data, and it only ever shows the environment the dashboard is currently running against.
+
+It has two sub-views, **Tables** and **Audit**. Data only refreshes when you click **Refresh** or reload — it does not poll.
+
+### Tables
+
+- Lists every table in the database (including the scheduler's own `task_runs`/`task_state`), each with its row count and a viewable schema.
+- Each table pages (default 25 rows; 10/25/50/100 available), sorts by any column, and filters per column.
+- Foreign-key columns are links: a `playlist_tracks` row links to its track and its playlist.
+- Clicking a track opens its **track detail** page (`/database/track?track_id=…`): the full row, its playlists and folders, any matching blacklist entry, how long it has been in its current status, and — computed when you open the page — whether its file exists (with size and last-modified time) and whether each playlist's `.m3u8` holds its file path or still the placeholder comment. The page URL is shareable and works with the back button.
+
+### Audit
+
+Audit checks report a count and the offending rows; every track row links to its detail page.
+
+| Group | Runs | What it checks |
+|-------|------|----------------|
+| **Referential integrity** | On load | `playlist_tracks` rows pointing at a missing track or playlist; tracks in no playlist (orphans); folder memberships for unknown playlists; playlists with no folder membership |
+| **Status / field consistency** | On load | `completed` with no file path; `blacklisted` that still has a file path; `searching` with no search UUID; `queued`/`downloading` with no download UUID or no Soulseek username; `failed` with no reason |
+| **Stuck tracks** | On load | Tracks in an in-flight status longer than that status normally lasts (see below) |
+| **Disk checks** | Only when you click **Run** | Completed tracks whose file is missing; playlists whose `.m3u8` is missing (or has no path recorded); audio files in `imported/` that no track points at |
+| **Database health** | Only when you click **Run** | File size, page/freelist counts, journal mode, any leftover `-journal` file, and SQLite's `PRAGMA quick_check` |
+
+Only `blacklisted` tracks are checked for a stray file path: a quality upgrade legitimately keeps a track's old file while it is `searching`/`downloading` again, so a path on those statuses is normal.
+
+Disk checks and the health check read every file or the whole database file, so they run only on demand and can be slow on a large library.
+
+#### Stuck tracks
+
+A track is **stuck** when it has been in one in-flight status longer than that status normally lasts. The clock is `status_changed_at`, which moves only when the status *value* changes — a retry that sets `searching` again on a track already searching does not reset it. The thresholds are constants in `scripts/constants.py` (`STUCK_THRESHOLD_HOURS`):
+
+| Status | Stuck after |
+|--------|-------------|
+| `pending` | 3 h |
+| `searching` | 3 h |
+| `downloading` | 6 h |
+| `queued` | 48 h |
+| `redownload_pending` | 48 h |
+
+Tracks in a final status (`completed`, `failed`, `not_found`, `no_suitable_file`, `blacklisted`) are never stuck. The track detail page shows a track's status age and flags it when it is over its threshold.
+
+> **After the first deploy:** the migration that adds `status_changed_at` backfills every existing track with the migration time, so the stuck-track check reports nothing until statuses have had time to age past their thresholds.
+
+---
+
 ## Accessing slskd Web UI
 
 The slskd daemon has its own web interface for direct Soulseek management:

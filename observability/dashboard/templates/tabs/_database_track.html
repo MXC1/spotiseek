@@ -1,0 +1,117 @@
+{% from "tabs/_database_macros.html" import cell %}
+
+<p>
+  <a href="{{ detail.back_url if detail else '/database?table=tracks' }}"
+     hx-get="{{ detail.back_url if detail else '/database?table=tracks' }}" hx-target="#tab-content">&larr; Back to the tracks table</a>
+</p>
+
+{% if not detail %}
+<p class="stats-empty">There is no track with ID <code>{{ track_id }}</code>.</p>
+{% else %}
+{% set track = detail.track %}
+<h2 class="db-h2">{{ track.artist }} &ndash; {{ track.track_name }}</h2>
+<p class="stats-caption"><code>{{ track_id }}</code> &middot; source: {{ track.source }}</p>
+
+<div class="db-detail-grid">
+  <div class="db-detail-col">
+    <div class="stats-panel">
+      <h2>Status</h2>
+      <p>
+        <span class="db-badge">{{ detail.status }}</span>
+        {% if detail.stuck %}
+        <span class="db-badge db-badge-bad">STUCK &mdash; over {{ detail.stuck_threshold_hours }}h in this status</span>
+        {% elif detail.stuck_threshold_hours %}
+        <span class="db-badge db-badge-ok">in-flight, within {{ detail.stuck_threshold_hours }}h</span>
+        {% else %}
+        <span class="db-badge">final status</span>
+        {% endif %}
+      </p>
+      <p class="stats-caption">
+        In this status for <strong>{{ detail.status_age_seconds|duration }}</strong>{% if track.status_changed_at %}
+        (since {{ track.status_changed_at }} UTC){% endif %}.
+      </p>
+      {% if track.failed_reason %}
+      <p class="stats-caption">Failure reason: <code>{{ track.failed_reason }}</code></p>
+      {% endif %}
+    </div>
+
+    <div class="stats-panel">
+      <h2>File on disk</h2>
+      {% if not detail.file %}
+      <p class="stats-empty">No file path is recorded for this track.</p>
+      {% else %}
+      <p class="db-wrap"><code>{{ detail.file.path }}</code></p>
+      {% if detail.file.exists %}
+      <p><span class="db-badge db-badge-ok">exists</span>
+        <span class="stats-caption">{{ detail.file.size_bytes|filesize }} &middot; modified {{ detail.file.modified }} UTC</span></p>
+      {% else %}
+      <p><span class="db-badge db-badge-bad">missing</span>
+        <span class="stats-caption">Nothing is on disk at this path.</span></p>
+      {% endif %}
+      {% endif %}
+    </div>
+
+    <div class="stats-panel">
+      <h2>Playlists</h2>
+      {% if not detail.playlists %}
+      <p class="stats-empty">This track is in no playlist (an orphaned track).</p>
+      {% else %}
+      <div class="db-table-scroll">
+        <table class="stats-table">
+          <thead><tr><th>Playlist</th><th>Folders</th><th>m3u8</th></tr></thead>
+          <tbody>
+            {% for p in detail.playlists %}
+            <tr>
+              <td>
+                {% if p.in_playlists_table %}
+                <a href="{{ p.href }}" hx-get="{{ p.href }}" hx-target="#tab-content">{{ p.playlist_name or p.playlist_url }}</a>
+                {% else %}
+                <span class="db-badge db-badge-bad">no such playlist</span>
+                <span class="db-wrap">{{ p.playlist_url }}</span>
+                {% endif %}
+              </td>
+              <td>{{ p.folder_labels|join(", ") if p.folder_labels else "-" }}</td>
+              <td>
+                <span class="db-badge {% if p.m3u8_warn %}db-badge-bad{% else %}db-badge-ok{% endif %}">{{ p.m3u8_label }}</span>
+                {% if p.m3u8_path %}<div class="stats-caption db-wrap"><code>{{ p.m3u8_path }}</code></div>{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="stats-panel">
+      <h2>Blacklist</h2>
+      {% if detail.blacklist_entries %}
+      <table class="stats-table">
+        <thead><tr><th>User</th><th>File</th><th>Reason</th><th>Added</th></tr></thead>
+        <tbody>
+          {% for e in detail.blacklist_entries %}
+          <tr><td>{{ e.username }}</td><td class="db-wrap">{{ e.slskd_file_name }}</td><td>{{ e.reason or "" }}</td><td>{{ e.added_at }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="stats-empty">No blacklist entry matches this track's user and file.</p>
+      <p class="stats-caption">Entries are matched on username and normalised file name. Blacklisting a track clears both from its row, so a blacklisted track no longer matches its own entry.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="db-detail-col">
+    <div class="stats-panel">
+      <h2>Full row</h2>
+      <table class="stats-table db-kv">
+        <tbody>
+          {% for name, c in detail.fields %}
+          <tr><th scope="row">{{ name }}</th><td class="db-wrap">{{ cell(c) }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}

@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from observability.dashboard.config import ENV
 from observability.dashboard.routes.auto_import import router as auto_import_router
 from observability.dashboard.routes.blacklist import router as blacklist_router
+from observability.dashboard.routes.database import router as database_router
 from observability.dashboard.routes.docs import router as docs_router
 from observability.dashboard.routes.execution_inspection import router as execution_inspection_router
 from observability.dashboard.routes.manual_import import router as manual_import_router
@@ -54,6 +55,7 @@ app.include_router(execution_inspection_router)
 app.include_router(manual_import_router)
 app.include_router(auto_import_router)
 app.include_router(blacklist_router)
+app.include_router(database_router)
 app.include_router(docs_router)
 
 

@@ -1,0 +1,34 @@
+{% if db_error %}
+<p class="stats-error">{{ db_error }}</p>
+{% else %}
+<p>
+  {% if ok %}
+  <span class="db-badge db-badge-ok">quick_check: ok</span>
+  {% else %}
+  <span class="db-badge db-badge-bad">quick_check found problems</span>
+  {% endif %}
+</p>
+{% if not ok %}
+<pre class="db-quick-check">{% for line in quick_check %}{{ line }}
+{% endfor %}</pre>
+{% endif %}
+
+<table class="stats-table db-kv">
+  <tbody>
+    <tr><th scope="row">Database file</th><td class="db-wrap"><code>{{ health.path }}</code></td></tr>
+    <tr><th scope="row">File size</th><td>{{ health.file_size_bytes|filesize }}</td></tr>
+    <tr><th scope="row">Pages</th><td>{{ "{:,}".format(health.page_count) }} &times; {{ health.page_size }} bytes</td></tr>
+    <tr><th scope="row">Free pages</th><td>{{ "{:,}".format(health.freelist_count) }}</td></tr>
+    <tr><th scope="row">Journal mode</th><td>{{ health.journal_mode }}</td></tr>
+    <tr><th scope="row">Synchronous</th><td>{{ health.synchronous }}</td></tr>
+    <tr>
+      <th scope="row">Journal file present</th>
+      <td>{{ "yes" if health.journal_file_present else "no" }}</td>
+    </tr>
+  </tbody>
+</table>
+<p class="stats-caption">
+  A <code>-journal</code> file exists only while a write is in flight, so seeing one once is normal.
+  One that is still there on repeated checks suggests a write crashed mid-transaction.
+</p>
+{% endif %}

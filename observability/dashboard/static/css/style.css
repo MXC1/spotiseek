@@ -687,3 +687,255 @@ output {
 .blacklist-selector {
   margin-top: 0.75rem;
 }
+
+/* Database tab (docs/adr/0008-dashboard-database-explorer.md) */
+
+.db-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.db-subnav {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.db-sublink {
+  padding: 0.3rem 0.8rem;
+  border-radius: 6px;
+  color: var(--fg);
+  text-decoration: none;
+  font-size: 0.85rem;
+  border: 1px solid var(--border);
+}
+
+.db-sublink:hover {
+  background: var(--code-bg);
+}
+
+.db-sublink.active {
+  background: var(--code-bg);
+  font-weight: 600;
+  border-color: var(--muted);
+}
+
+.db-h2 {
+  font-size: 1.1rem;
+  margin: 0.25rem 0;
+}
+
+.db-table-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.db-table-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--fg);
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+.db-table-chip:hover {
+  background: var(--code-bg);
+}
+
+.db-table-chip.active {
+  border-color: var(--accent);
+  background: var(--code-bg);
+}
+
+.db-table-count {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.db-browser-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.db-schema {
+  margin: 0.5rem 0 1rem;
+  font-size: 0.85rem;
+}
+
+.db-schema summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.db-table-scroll {
+  overflow-x: auto;
+}
+
+.db-table td,
+.db-table th {
+  white-space: nowrap;
+}
+
+.db-table td {
+  max-width: 24rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.db-table td a {
+  color: var(--accent);
+}
+
+.db-sort {
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.db-sort:hover,
+.db-sort.active {
+  text-decoration: underline;
+}
+
+.db-tag {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 0.25rem;
+  margin-left: 0.2rem;
+}
+
+.db-filter-row th {
+  padding-top: 0;
+}
+
+.db-filter-row input {
+  width: 100%;
+  min-width: 5rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 0.75rem;
+}
+
+.db-null {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.db-wrap {
+  white-space: normal;
+  word-break: break-all;
+}
+
+.db-pager {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.db-pager .btn {
+  text-decoration: none;
+}
+
+.db-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.05rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  vertical-align: middle;
+}
+
+.db-badge-ok {
+  background: var(--success-bg);
+}
+
+.db-badge-bad {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.db-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (min-width: 1000px) {
+  .db-detail-grid {
+    grid-template-columns: 3fr 2fr;
+  }
+}
+
+.db-detail-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-width: 0;
+}
+
+.db-kv th {
+  width: 11rem;
+  color: var(--muted);
+  font-weight: 500;
+  vertical-align: top;
+}
+
+.db-audit-group {
+  margin-bottom: 1.5rem;
+}
+
+.db-check {
+  border-top: 1px solid var(--border);
+  padding: 0.75rem 0;
+}
+
+.db-check:first-of-type {
+  border-top: none;
+}
+
+.db-check-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.db-check-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.db-check-head + div:not(:empty) {
+  margin-top: 0.5rem;
+}
+
+.db-quick-check {
+  background: var(--code-bg);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.8rem;
+  overflow-x: auto;
+}

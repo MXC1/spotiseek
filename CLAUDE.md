@@ -56,12 +56,13 @@ Ruff config lives in `pyproject.toml`, targeting Python 3.10+. Enabled rule grou
 | `m3u8_manager.py` | Writes/updates `.m3u8` playlist files, replacing placeholder comments with resolved local file paths |
 | `xml_exporter.py` | Generates the iTunes-compatible `Library.xml` consumed by Rekordbox/iTunes |
 | `logs_utils.py` | JSON-structured logging (`write_log` static class) plus log-parsing helpers reused by the dashboard |
-| `constants.py` | Shared audio format sets (`LOSSLESS_FORMATS`, `LOSSY_FORMATS`) and `MIN_BITRATE_KBPS` |
+| `constants.py` | Shared audio format sets (`LOSSLESS_FORMATS`, `LOSSY_FORMATS`), `MIN_BITRATE_KBPS`, and the per-status stuck-track thresholds (`STUCK_THRESHOLD_HOURS`) |
+| `audit_checks.py` | The Database tab's DB audit checks as data (read-only SELECTs); `TrackDB` executes them |
 
 `observability/dashboard/` holds the dashboard (FastAPI + HTMX, see
 `docs/adr/0003-dashboard-rewrite-fastapi-htmx.md`): `app.py` is the entry point, with one
 route module per tab under `observability/dashboard/routes/` (`auto_import`,
-`blacklist`, `docs`, `execution_inspection`, `manual_import`, `stats`, `tasks`). This
+`blacklist`, `database`, `docs`, `execution_inspection`, `manual_import`, `stats`, `tasks`). This
 replaced an earlier Streamlit dashboard, ported over tab-by-tab behind a temporary
 parallel `dashboard-next` service and then cut over for real — see
 `docs/adr/0004-dashboard-migration-parallel-service-cutover.md` and
@@ -135,6 +136,8 @@ Always go through the `TrackDB` singleton (`scripts/database_management.py`) —
 - `source` is `'spotify'` or `'soundcloud'`.
 - Track lookups always go through `track_id`, regardless of source platform.
 - The db file lives on a Docker Desktop/WSL2 bind mount (a Windows host directory mounted into Linux containers), which SQLite treats like a network filesystem — this has caused real corruption before. **Never open an extra/ad hoc `sqlite3` connection against a live environment's db file from a separate process** (e.g. `docker-compose exec <svc> python -c '...'`, or a one-off host-side script) while its containers are running, even just to read. One-off maintenance/backfill work should either go through a real task in `task_scheduler.py`/`workflow.py` (same process, same `TrackDB` connection as the running daemon), or `docker-compose stop` every service touching that environment's db first. This is also why the db uses the classic rollback journal (`journal_mode=DELETE`), not WAL — WAL's shared-memory coordination file isn't reliable over this mount type.
+- `TrackDB`'s connection is shared across the dashboard's request threads, and any open read blocks the workflow's commits (a leaked cursor stalls its writes until it closes). So every read method there is one bounded `fetchall()` with no cursor left open, and none of them commits, rolls back, or changes a pragma/`row_factory` on the shared connection — the Database tab's explorer methods are the strictest example (`docs/adr/0008-dashboard-database-explorer.md`, which also records a cross-container lock test showing rollback-journal locks *are* honoured on this mount).
+- `tracks.status_changed_at` is the time `download_status` last changed **value** (not last written): only `update_track_status`, `restore_track_download_metadata` and `add_track` write status, and each keeps that rule. Any new code that writes `download_status` must too (`docs/adr/0009-track-status-changed-at.md`). Its migration runs in every process that opens the db, so it must stay idempotent.
 
 ### Module Import Pattern
 
