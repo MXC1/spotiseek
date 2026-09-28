@@ -386,6 +386,14 @@ def get_tracks_from_playlist(  # noqa: PLR0915
             cleaned_artist = clean_name(artist_name)
             cleaned_title = clean_name(track_title)
 
+            if not cleaned_artist and not cleaned_title:
+                write_log.warn(
+                    "SOUNDCLOUD_TRACK_METADATA_MISSING",
+                    "Track has no artist or title metadata. Skipping.",
+                    {"index": idx, "track_id": track_id},
+                )
+                continue
+
             cleaned_tracks.append((track_id, cleaned_artist, cleaned_title, genre))
 
         except Exception as e:

@@ -911,6 +911,14 @@ def initiate_track_search(artist: str, track: str, track_id: str) -> tuple[str, 
 
     search_text = f"{artist} {track}"
 
+    if not search_text.strip():
+        write_log.warn("SLSKD_SEARCH_TEXT_EMPTY",
+                       "Track has no artist/title metadata; cannot search. Skipping.",
+                       {"track_id": track_id})
+        track_db.update_track_status(track_id, "failed",
+                                      failed_reason="Track has no artist/title metadata; cannot search.")
+        return None
+
     try:
         # Create search without waiting for results
         search_id = create_search(search_text)

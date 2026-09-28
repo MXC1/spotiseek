@@ -176,6 +176,12 @@ def _process_track_item(
     artists = ", ".join([clean_name(artist["name"]) for artist in track.get("artists", [])])
     track_name = clean_name(track.get("name", ""))
 
+    if not artists and not track_name:
+        write_log.warn("SPOTIFY_TRACK_METADATA_MISSING",
+                      "Track has no artist or title metadata. Skipping.",
+                      {"index": idx, "track_id": track_id})
+        return None
+
     # Get genre from the first artist that has genres
     genre = _get_genre_for_track(track, artist_genres)
 
