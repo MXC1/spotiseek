@@ -273,6 +273,50 @@ main#tab-content {
   margin-top: 0.4rem;
 }
 
+.playlist-tree {
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+.playlist-tree-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.playlist-tree-url {
+  color: var(--muted);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playlist-tree-folder {
+  border-bottom: 1px solid var(--border);
+}
+
+.playlist-tree-folder summary {
+  cursor: pointer;
+  padding: 0.3rem 0.5rem;
+  font-weight: 600;
+}
+
+.playlist-tree-children {
+  padding-left: 1.5rem;
+}
+
+.playlist-tree-children .playlist-tree-row:last-child {
+  border-bottom: none;
+}
+
+.playlist-tree-master {
+  font-style: italic;
+  color: var(--muted);
+}
+
 .bar-chart {
   display: flex;
   flex-direction: column;

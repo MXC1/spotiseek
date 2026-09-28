@@ -102,7 +102,7 @@ def _build_context() -> dict:
 
     return {
         "db_error": None,
-        "playlists": track_db.get_playlists(),
+        "playlist_tree": track_db.get_playlist_tree(),
         "status_rows": status_rows,
         "total_status_count": total_status_count,
         "chart_rows": chart_rows,

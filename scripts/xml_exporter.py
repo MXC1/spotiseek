@@ -41,12 +41,9 @@ from mutagen import File as MutagenFile
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 
+from scripts.constants import MASTER_PLAYLIST_PREFIX
 from scripts.database_management import TrackDB
 from scripts.logs_utils import write_log
-
-# Every folder gets a generated playlist of this prefix + folder name, holding the
-# union of its members' tracks (see docs/adr/0007-folder-master-playlists.md).
-MASTER_PLAYLIST_PREFIX = "ALL "
 
 
 def convert_to_windows_path(container_path: str) -> str:

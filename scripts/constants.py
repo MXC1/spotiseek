@@ -39,3 +39,9 @@ STUCK_THRESHOLD_HOURS: dict[str, int] = {
     "redownload_pending": 48,
 }
 IN_FLIGHT_STATUSES: frozenset[str] = frozenset(STUCK_THRESHOLD_HOURS)
+
+# Every folder gets a generated playlist of this prefix + folder name, holding the
+# union of its members' tracks (see docs/adr/0007-folder-master-playlists.md). Shared
+# between xml_exporter (which emits it) and database_management (which previews the
+# same tree shape for the dashboard) so the two never drift apart.
+MASTER_PLAYLIST_PREFIX = "ALL "

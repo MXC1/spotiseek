@@ -6,15 +6,32 @@
     <div class="stats-col">
       <div class="stats-panel">
         <h2>Playlists</h2>
-        {% if playlists %}
-        <table class="stats-table">
-          <thead><tr><th>Playlist Name</th><th>Playlist URL</th><th>Folder(s)</th></tr></thead>
-          <tbody>
-            {% for name, url, folders in playlists %}
-            <tr><td>{{ name }}</td><td class="url-cell">{{ url }}</td><td>{{ folders or "Root" }}</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
+        <p class="stats-caption">The tree as it's exported to the iTunes/Rekordbox library. Expand a folder to see its contents.</p>
+        {% if playlist_tree.root or playlist_tree.folders %}
+        <div class="playlist-tree">
+          {% for name, url in playlist_tree.root %}
+          <div class="playlist-tree-row">
+            <span>{{ name }}</span>
+            <span class="playlist-tree-url">{{ url }}</span>
+          </div>
+          {% endfor %}
+          {% for folder in playlist_tree.folders %}
+          <details class="playlist-tree-folder">
+            <summary>{{ folder.name }}</summary>
+            <div class="playlist-tree-children">
+              <div class="playlist-tree-row playlist-tree-master">
+                <span>{{ folder.master_name }}</span>
+              </div>
+              {% for name, url in folder.playlists %}
+              <div class="playlist-tree-row">
+                <span>{{ name }}</span>
+                <span class="playlist-tree-url">{{ url }}</span>
+              </div>
+              {% endfor %}
+            </div>
+          </details>
+          {% endfor %}
+        </div>
         {% else %}
         <p class="stats-empty">No playlists found in the database.</p>
         {% endif %}

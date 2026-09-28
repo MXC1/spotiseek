@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
 from scripts.audit_checks import AUDIT_CHECKS_BY_ID
+from scripts.constants import MASTER_PLAYLIST_PREFIX
 from scripts.logs_utils import write_log
 
 # Get environment configuration (used by TrackDB class)
@@ -1212,24 +1213,64 @@ class TrackDB:
     # Routed through the singleton connection instead of an ad-hoc sqlite3.connect,
     # per docs/adr/0003-dashboard-rewrite-fastapi-htmx.md.
 
-    def get_playlists(self) -> list[tuple[str, str, str]]:
-        """Return (playlist_name, playlist_url, folders) for every playlist, in
-        CSV/display order. folders is a comma-joined display string of the playlist's
-        folder memberships ('Root' for a root-level membership, i.e. folder_name = '')."""
+    def get_playlist_tree(self) -> dict:
+        """Return the playlist tree exactly as it appears in the exported iTunes/Rekordbox
+        library: root playlists first, then each folder -- containing its "ALL <folder>"
+        master playlist first, followed by its member playlists, in CSV order.
+
+        Mirrors xml_exporter._add_foldered_playlists_to_xml's shape (root_urls / folder_members
+        / folder_first_seq) without touching track data, so the dashboard's Stats tab can
+        preview the same tree the USB export produces. Falls back to a flat "root" list with
+        no folders when no folder memberships are recorded yet (e.g. DB upgraded but not
+        re-scraped), same as the exporter does.
+
+        Returns:
+            {"root": [(playlist_name, playlist_url), ...],
+             "folders": [{"name": str, "master_name": str,
+                          "playlists": [(playlist_name, playlist_url), ...]}, ...]}
+
+        """
         cursor = self.conn.cursor()
         cursor.execute(
-            """
-            SELECT p.playlist_name, p.playlist_url,
-                   GROUP_CONCAT(
-                       CASE WHEN pfm.folder_name = '' THEN 'Root' ELSE pfm.folder_name END, ', '
-                   ) AS folders
-            FROM playlists p
-            LEFT JOIN playlist_folder_memberships pfm ON pfm.playlist_url = p.playlist_url
-            GROUP BY p.playlist_url, p.playlist_name, p.display_order
-            ORDER BY p.display_order IS NULL, p.display_order
-            """,
+            "SELECT playlist_url, playlist_name FROM playlists "
+            "ORDER BY display_order IS NULL, display_order",
         )
-        return cursor.fetchall()
+        playlist_rows = cursor.fetchall()
+        playlist_name_by_url = {url: (name or url) for url, name in playlist_rows}
+
+        memberships = self.get_playlist_folder_memberships()
+        known = set(playlist_name_by_url)
+
+        if not memberships:
+            return {
+                "root": [(name, url) for url, name in playlist_rows],
+                "folders": [],
+            }
+
+        root = [
+            (playlist_name_by_url[url], url)
+            for url, folder, _ in memberships
+            if folder == "" and url in known
+        ]
+
+        folder_members: dict[str, list[str]] = {}
+        folder_first_seq: dict[str, int] = {}
+        for url, folder, seq in memberships:
+            if folder == "" or url not in known:
+                continue
+            folder_members.setdefault(folder, []).append(url)
+            folder_first_seq.setdefault(folder, seq)
+
+        folders = [
+            {
+                "name": folder,
+                "master_name": f"{MASTER_PLAYLIST_PREFIX}{folder}",
+                "playlists": [(playlist_name_by_url[url], url) for url in urls],
+            }
+            for folder, urls in sorted(folder_members.items(), key=lambda kv: folder_first_seq[kv[0]])
+        ]
+
+        return {"root": root, "folders": folders}
 
     def get_track_status_breakdown(self) -> list[tuple[str, int]]:
         """Return (download_status, count) for every status value in the tracks table."""
