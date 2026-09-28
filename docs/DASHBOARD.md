@@ -10,7 +10,7 @@ The **Overall Stats** tab provides a comprehensive overview of your library:
 
 ### Metrics Displayed
 
-- **Unique Playlists**: List of all imported playlists with track counts
+- **Playlists**: List of all imported playlists with their URL and folder membership
 - **Track Download Status**: Breakdown of tracks by status (pending, searching, downloading, completed, failed)
 - **File Extension Breakdown**: Distribution of downloaded file formats (MP3, FLAC, WAV, etc.)
 - **Bitrate Breakdown**: Quality distribution including lossless detection and effective bitrate calculation

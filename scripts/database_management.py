@@ -1212,12 +1212,22 @@ class TrackDB:
     # Routed through the singleton connection instead of an ad-hoc sqlite3.connect,
     # per docs/adr/0003-dashboard-rewrite-fastapi-htmx.md.
 
-    def get_playlists(self) -> list[tuple[str, str]]:
-        """Return (playlist_name, playlist_url) for every playlist, in CSV/display order."""
+    def get_playlists(self) -> list[tuple[str, str, str]]:
+        """Return (playlist_name, playlist_url, folders) for every playlist, in
+        CSV/display order. folders is a comma-joined display string of the playlist's
+        folder memberships ('Root' for a root-level membership, i.e. folder_name = '')."""
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT playlist_name, playlist_url FROM playlists "
-            "ORDER BY display_order IS NULL, display_order",
+            """
+            SELECT p.playlist_name, p.playlist_url,
+                   GROUP_CONCAT(
+                       CASE WHEN pfm.folder_name = '' THEN 'Root' ELSE pfm.folder_name END, ', '
+                   ) AS folders
+            FROM playlists p
+            LEFT JOIN playlist_folder_memberships pfm ON pfm.playlist_url = p.playlist_url
+            GROUP BY p.playlist_url, p.playlist_name, p.display_order
+            ORDER BY p.display_order IS NULL, p.display_order
+            """,
         )
         return cursor.fetchall()
 

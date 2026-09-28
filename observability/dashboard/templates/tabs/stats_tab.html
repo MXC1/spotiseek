@@ -5,13 +5,13 @@
   <div class="stats-grid">
     <div class="stats-col">
       <div class="stats-panel">
-        <h2>Unique Playlists</h2>
+        <h2>Playlists</h2>
         {% if playlists %}
         <table class="stats-table">
-          <thead><tr><th>Playlist Name</th><th>Playlist URL</th></tr></thead>
+          <thead><tr><th>Playlist Name</th><th>Playlist URL</th><th>Folder(s)</th></tr></thead>
           <tbody>
-            {% for name, url in playlists %}
-            <tr><td>{{ name }}</td><td class="url-cell">{{ url }}</td></tr>
+            {% for name, url, folders in playlists %}
+            <tr><td>{{ name }}</td><td class="url-cell">{{ url }}</td><td>{{ folders or "Root" }}</td></tr>
             {% endfor %}
           </tbody>
         </table>
